@@ -436,16 +436,15 @@ pub fn run_mutation_tests_with_controls(
             results: plan.candidates.iter().map(generated_result).collect(),
         });
     }
-    let timeout =
-        if controls.no_exec || controls.timeout_coefficient.is_none() || !execution.uses_cargo() {
-            timeout
-        } else {
-            adaptive_timeout(
-                timeout,
-                controls.timeout_coefficient,
-                test_clean_workspaces(&plan.workspaces, timeout, execution)?,
-            )
-        };
+    let timeout = if controls.no_exec || !execution.uses_cargo() {
+        timeout
+    } else {
+        adaptive_timeout(
+            timeout,
+            controls.timeout_coefficient,
+            test_clean_workspaces(&plan.workspaces, timeout, execution)?,
+        )
+    };
     let mut results = Vec::new();
     for candidate in plan.candidates {
         if mutation_run_was_interrupted() {
