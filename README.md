@@ -15,7 +15,8 @@ List Rust production source files before mutation testing:
 mutarust --list-files .
 ```
 
-See the [command guide](docs/cli.md) for target rules.
+See the [command guide](docs/cli.md) for target rules and the
+[configuration guide](docs/config.md) for YAML mutation policy.
 
 ## License
 

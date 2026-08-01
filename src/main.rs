@@ -1,7 +1,10 @@
 use std::env;
 use std::io::{self, Write};
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
+
+use mutarust::{CommandSettings, Configuration, Registry};
 
 fn main() -> ExitCode {
     let arguments = env::args().skip(1).collect::<Vec<_>>();
@@ -15,8 +18,8 @@ fn run(command: Command) -> io::Result<ExitCode> {
         Command::Version => print_version().map(|()| ExitCode::SUCCESS),
         Command::ListMutators => list_mutators(),
         Command::ListFiles(targets) => list_files(&targets),
-        Command::Run { targets, timeout } => run_mutation_tests(&targets, timeout),
-        Command::Invalid(argument) => Ok(invalid_argument(argument)),
+        Command::Run(command) => run_mutation_tests(command),
+        Command::Invalid(message) => source_error(&message),
     }
 }
 
@@ -29,7 +32,11 @@ fn parse_command(arguments: &[String]) -> Command {
         "--help" | "-h" if arguments.len() == 1 => Command::Help,
         "--version" | "-V" if arguments.len() == 1 => Command::Version,
         "--list-mutators" if arguments.len() == 1 => Command::ListMutators,
-        "--list-files" => Command::ListFiles(arguments[1..].to_vec()),
+        "--list-mutators" => Command::Invalid(
+            "the --list-mutators command does not accept configuration or mutation options"
+                .to_owned(),
+        ),
+        "--list-files" => parse_list_files(&arguments[1..]),
         _ => parse_run(arguments),
     }
 }
@@ -38,11 +45,11 @@ fn print_help() -> io::Result<()> {
     let mut stdout = io::stdout().lock();
     writeln!(
         stdout,
-        "Mutation testing for Rust\n\nUsage:\n  mutarust [--timeout SECONDS] [TARGET]...\n  mutarust --list-files [TARGET]...\n  mutarust --list-mutators"
+        "Mutation testing for Rust\n\nUsage:\n  mutarust [OPTIONS] [TARGET]...\n  mutarust --list-files [TARGET]...\n  mutarust --list-mutators"
     )?;
     writeln!(
         stdout,
-        "\nOptions:\n  -h, --help          Print help\n  -V, --version       Print version\n      --list-files    List selected Rust production source files\n      --list-mutators List available mutators\n      --timeout        Stop each test run after this many seconds"
+        "\nOptions:\n  -h, --help          Print help\n  -V, --version       Print version\n      --config FILE    Read mutation policy from a YAML file\n      --list-files     List selected Rust production source files\n      --list-mutators  List available mutators\n      --timeout         Stop each test run after this many seconds\n      --silent          Hide mutant status output\n      --no-silent       Print mutant status output\n      --min-msi         Set the minimum mutation score percentage\n      --min-covered-msi Set the minimum covered-code score percentage\n      --enable NAME     Select a mutator name or group pattern\n      --disable NAME    Disable a mutator name or group pattern"
     )
 }
 
@@ -52,10 +59,19 @@ fn print_version() -> io::Result<()> {
 
 fn list_mutators() -> io::Result<ExitCode> {
     let mut stdout = io::stdout().lock();
-    for name in mutarust::Registry::builtins().names() {
+    for name in Registry::builtins().names() {
         writeln!(stdout, "{name}")?;
     }
     Ok(ExitCode::SUCCESS)
+}
+
+fn parse_list_files(arguments: &[String]) -> Command {
+    if let Some(option) = arguments.iter().find(|argument| argument.starts_with('-')) {
+        return Command::Invalid(format!(
+            "the --list-files command does not accept the {option} option"
+        ));
+    }
+    Command::ListFiles(arguments.to_vec())
 }
 
 fn list_files(targets: &[String]) -> io::Result<ExitCode> {
@@ -69,55 +85,171 @@ fn list_files(targets: &[String]) -> io::Result<ExitCode> {
 }
 
 fn parse_run(arguments: &[String]) -> Command {
-    let mut targets = Vec::new();
-    let mut timeout = mutarust::DEFAULT_TEST_TIMEOUT;
+    let mut command = RunCommand::default();
     let mut index = 0;
     while let Some(argument) = arguments.get(index) {
-        if argument == "--timeout" {
-            let Some(seconds) = arguments.get(index + 1) else {
-                return Command::Invalid("--timeout requires a positive whole number".to_owned());
-            };
-            let Ok(seconds) = seconds.parse::<u64>() else {
-                return Command::Invalid("--timeout requires a positive whole number".to_owned());
-            };
-            if seconds == 0 {
-                return Command::Invalid("--timeout requires a positive whole number".to_owned());
-            }
-            timeout = Duration::from_secs(seconds);
-            index += 2;
-        } else if argument.starts_with('-') {
-            return Command::Invalid(argument.clone());
-        } else {
-            targets.push(argument.clone());
+        if !argument.starts_with('-') {
+            command.targets.push(argument.clone());
             index += 1;
+            continue;
+        }
+        match parse_run_argument(&mut command, argument, arguments.get(index + 1)) {
+            Ok(consumed) => index += consumed,
+            Err(message) => return Command::Invalid(message),
         }
     }
-    Command::Run { targets, timeout }
+    Command::Run(command)
 }
 
-fn run_mutation_tests(targets: &[String], timeout: Duration) -> io::Result<ExitCode> {
-    match mutarust::run_mutation_tests_with_timeout(
-        targets,
-        &mutarust::Registry::builtins(),
-        timeout,
-    ) {
-        Ok(run) => print_mutation_results(&run).map(|()| ExitCode::SUCCESS),
+fn parse_run_argument(
+    command: &mut RunCommand,
+    argument: &str,
+    next: Option<&String>,
+) -> Result<usize, String> {
+    if let Some(result) = parse_value_option(command, argument, next) {
+        return result.map(|()| 2);
+    }
+    parse_switch_option(command, argument).map(|()| 1)
+}
+
+fn parse_value_option(
+    command: &mut RunCommand,
+    argument: &str,
+    next: Option<&String>,
+) -> Option<Result<(), String>> {
+    let value = || required_value(next, argument);
+    Some(match argument {
+        "--timeout" => value().and_then(|value| set_timeout(command, value)),
+        "--config" => value().and_then(|value| set_config(command, value)),
+        "--min-msi" => {
+            value().and_then(|value| set_score(&mut command.settings.min_msi, value, argument))
+        }
+        "--min-covered-msi" => value()
+            .and_then(|value| set_score(&mut command.settings.min_covered_msi, value, argument)),
+        "--enable" => value().map(|value| add_enabled(command, value)),
+        "--disable" => value().map(|value| command.settings.disable_mutators.push(value)),
+        _ => return None,
+    })
+}
+
+fn parse_switch_option(command: &mut RunCommand, argument: &str) -> Result<(), String> {
+    match argument {
+        "--silent" => set_silent(command, true),
+        "--no-silent" => set_silent(command, false),
+        "--help" | "-h" | "--version" | "-V" | "--list-files" | "--list-mutators" => {
+            Err(format!("cannot use {argument} with mutation options"))
+        }
+        _ => Err(format!("unknown argument: {argument}")),
+    }
+}
+
+fn required_value(value: Option<&String>, option: &str) -> Result<String, String> {
+    value
+        .cloned()
+        .ok_or_else(|| format!("{option} requires a value"))
+}
+
+fn set_timeout(command: &mut RunCommand, value: String) -> Result<(), String> {
+    let seconds = value
+        .parse::<u64>()
+        .map_err(|_| "--timeout requires a positive whole number".to_owned())?;
+    if seconds == 0 {
+        return Err("--timeout requires a positive whole number".to_owned());
+    }
+    command.timeout = Duration::from_secs(seconds);
+    Ok(())
+}
+
+fn set_config(command: &mut RunCommand, value: String) -> Result<(), String> {
+    if command.configuration.is_some() {
+        return Err("--config can be supplied only once".to_owned());
+    }
+    command.configuration = Some(PathBuf::from(value));
+    Ok(())
+}
+
+fn set_silent(command: &mut RunCommand, value: bool) -> Result<(), String> {
+    if command.settings.silent_mode.replace(value).is_some() {
+        return Err("use only one of --silent and --no-silent".to_owned());
+    }
+    Ok(())
+}
+
+fn set_score(score: &mut Option<u8>, value: String, option: &str) -> Result<(), String> {
+    let value = value
+        .parse::<u8>()
+        .map_err(|_| format!("{option} requires a whole percentage from 0 to 100"))?;
+    if value > 100 {
+        return Err(format!(
+            "{option} requires a whole percentage from 0 to 100"
+        ));
+    }
+    *score = Some(value);
+    Ok(())
+}
+
+fn add_enabled(command: &mut RunCommand, value: String) {
+    command
+        .settings
+        .enable_mutators
+        .get_or_insert_default()
+        .push(value);
+}
+
+fn run_mutation_tests(command: RunCommand) -> io::Result<ExitCode> {
+    let configuration = match effective_configuration(&command) {
+        Ok(configuration) => configuration,
+        Err(error) => return source_error(&error.to_string()),
+    };
+    let mut registry = Registry::builtins();
+    let names = registry.names().map(str::to_owned).collect::<Vec<_>>();
+    let selected = match configuration.select_mutators(&names) {
+        Ok(selected) => selected,
+        Err(error) => {
+            return source_error(&selection_error(command.configuration.as_deref(), &error));
+        }
+    };
+    registry.retain(|name| selected.iter().any(|selected_name| selected_name == name));
+    match mutarust::run_mutation_tests_with_timeout(&command.targets, &registry, command.timeout) {
+        Ok(run) => {
+            print_mutation_results(&run, configuration.silent_mode).map(|()| ExitCode::SUCCESS)
+        }
         Err(error) => source_error(&error.to_string()),
     }
 }
 
-fn print_mutation_results(run: &mutarust::MutationRun) -> io::Result<()> {
+fn selection_error(path: Option<&std::path::Path>, error: &mutarust::ConfigurationError) -> String {
+    path.map_or_else(
+        || error.to_string(),
+        |path| format!("configuration {}: {error}", path.display()),
+    )
+}
+
+fn effective_configuration(
+    command: &RunCommand,
+) -> Result<Configuration, mutarust::ConfigurationError> {
+    let mut configuration = match &command.configuration {
+        Some(path) => Configuration::read(path)?,
+        None => Configuration::default(),
+    };
+    configuration.apply(&command.settings)?;
+    Ok(configuration)
+}
+
+fn print_mutation_results(run: &mutarust::MutationRun, silent: bool) -> io::Result<()> {
     let mut stdout = io::stdout().lock();
-    for result in run.results() {
-        writeln!(
-            stdout,
-            "{} {} {}",
-            result.state,
-            result.source.display(),
-            result.mutator
-        )?;
-        if let Some(error) = &result.error {
-            writeln!(stdout, "  {error}")?;
+    if !silent {
+        for result in run.results() {
+            writeln!(
+                stdout,
+                "{} {} {}",
+                result.state,
+                result.source.display(),
+                result.mutator
+            )?;
+            if let Some(error) = &result.error {
+                writeln!(stdout, "  {error}")?;
+            }
         }
     }
     writeln!(stdout, "Killed: {}", run.killed())?;
@@ -137,11 +269,6 @@ fn print_files(files: &[std::path::PathBuf]) -> io::Result<()> {
     Ok(())
 }
 
-fn invalid_argument(argument: String) -> ExitCode {
-    write_error(&format!("unknown argument: {argument}"));
-    ExitCode::from(3)
-}
-
 fn source_error(message: &str) -> io::Result<ExitCode> {
     write_error(message);
     Ok(ExitCode::from(3))
@@ -156,9 +283,24 @@ enum Command {
     Version,
     ListMutators,
     ListFiles(Vec<String>),
-    Run {
-        targets: Vec<String>,
-        timeout: Duration,
-    },
+    Run(RunCommand),
     Invalid(String),
+}
+
+struct RunCommand {
+    targets: Vec<String>,
+    timeout: Duration,
+    configuration: Option<PathBuf>,
+    settings: CommandSettings,
+}
+
+impl Default for RunCommand {
+    fn default() -> Self {
+        Self {
+            targets: Vec::new(),
+            timeout: mutarust::DEFAULT_TEST_TIMEOUT,
+            configuration: None,
+            settings: CommandSettings::default(),
+        }
+    }
 }

@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Mutarust configuration",
+  "description": "Mutation policy for the mutarust command.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "skip_without_test": {
+      "description": "Skip mutants without a selected test.",
+      "type": "boolean",
+      "default": false
+    },
+    "skip_with_cfg": {
+      "description": "Skip mutants in conditionally compiled Rust source.",
+      "type": "boolean",
+      "default": false
+    },
+    "json_output": {
+      "description": "Request a JSON report.",
+      "type": "boolean",
+      "default": false
+    },
+    "html_output": {
+      "description": "Request an HTML report.",
+      "type": "boolean",
+      "default": false
+    },
+    "silent_mode": {
+      "description": "Hide status output for individual mutants.",
+      "type": "boolean",
+      "default": false
+    },
+    "min_msi": {
+      "description": "Minimum mutation score percentage.",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "min_covered_msi": {
+      "description": "Minimum covered-code mutation score percentage.",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "exclude_dirs": {
+      "description": "Source directory prefixes that Mutarust excludes.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "default": []
+    },
+    "disable_mutators": {
+      "description": "Mutator names or group patterns that Mutarust disables.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9-]+(?:/[a-z0-9-]+)*(?:/\\*)?$"
+      },
+      "default": []
+    },
+    "enable_mutators": {
+      "description": "Mutator names or group patterns that Mutarust enables.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9-]+(?:/[a-z0-9-]+)*(?:/\\*)?$"
+      },
+      "default": []
+    },
+    "ignore_source_lines": {
+      "description": "Regular expressions for ignored source lines.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    }
+  }
+}

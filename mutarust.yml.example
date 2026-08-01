@@ -1,0 +1,12 @@
+# Mutarust mutation policy. Use it with: mutarust --config mutarust.yml
+skip_without_test: false
+skip_with_cfg: false
+json_output: false
+html_output: false
+silent_mode: false
+min_msi: 80
+min_covered_msi: 80
+exclude_dirs: []
+disable_mutators: []
+enable_mutators: []
+ignore_source_lines: []
