@@ -82,7 +82,15 @@ fn installed_command_lists_production_sources() {
     assert_eq!(explicit_test, excluded_test.display().to_string());
     let explicit_test_directory =
         list_files(&install, &fixture, &[fixture.join("tests").as_os_str()]);
-    assert_eq!(explicit_test_directory, excluded_test.display().to_string());
+    let explicit_test_helper = fixture.join("tests").join("example_test.rs");
+    assert_eq!(
+        explicit_test_directory,
+        format!(
+            "{}\n{}",
+            explicit_test_helper.display(),
+            excluded_test.display()
+        )
+    );
     let explicit_test_file = fixture.join("src").join("math_test.rs");
     let from_explicit_test_file = list_files(&install, &fixture, &[explicit_test_file.as_os_str()]);
     assert_eq!(
@@ -214,8 +222,11 @@ fn write_fixture(root: &Path) -> PathBuf {
         "[package]\nname = \"sample\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
     )
     .expect("fixture manifest must be written");
-    fs::write(fixture.join("src").join("lib.rs"), "mod math;\n")
-        .expect("fixture library must be written");
+    fs::write(
+        fixture.join("src").join("lib.rs"),
+        "mod math;\n#[cfg(test)] mod test_support;\n",
+    )
+    .expect("fixture library must be written");
     fs::write(fixture.join("src").join("math.rs"), "pub fn add() {}\n")
         .expect("fixture source must be written");
     fs::write(
@@ -233,6 +244,16 @@ fn write_fixture(root: &Path) -> PathBuf {
         "#[test] fn test() {}\n",
     )
     .expect("fixture unit test must be written");
+    fs::write(
+        fixture.join("src").join("test_support.rs"),
+        "pub fn test_support() {}\n",
+    )
+    .expect("fixture test support must be written");
+    fs::write(
+        fixture.join("tests").join("example_test.rs"),
+        "#[test] fn test() {}\n",
+    )
+    .expect("fixture test helper must be written");
     fs::write(
         fixture.join("tests").join("integration.rs"),
         "#[test] fn test() {}\n",
@@ -287,12 +308,12 @@ fn write_workspace_fixture(root: &Path) -> PathBuf {
         .expect("workspace library source must be written");
     fs::write(
         alpha.join("source").join("check.rs"),
-        "mod check_support;\n#[test] fn check() {}\n",
+        "include!(\"check_support.rs\");\n#[test] fn check() {}\n",
     )
     .expect("workspace test source must be written");
     fs::write(
         alpha.join("source").join("check_support.rs"),
-        "pub fn check_support() {}\n",
+        "fn check_support() {}\n",
     )
     .expect("workspace test helper must be written");
     fs::write(
