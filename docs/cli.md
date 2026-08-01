@@ -52,9 +52,45 @@ Use `--match REGEXP` to limit mutations to functions with matching names. Use
 scope. See the [configuration guide](config.md#source-selection) for these
 rules and for the file-local mutation-disable annotations.
 
-Each test run has a fixed 60 second timeout by default. Use `--exec-timeout
-SECONDS` to set a different positive whole-second timeout. `--timeout` is an
-alias. A timeout produces an errored mutant result with an error message.
+## Execution Modes and Cargo Controls
+
+Use `--dry-run` to list the selected mutant count without writing mutation
+areas or running tests. This command does not change the user workspace.
+
+Use `--no-exec` to write one mutant to each isolated mutation area without
+running tests. Mutarust keeps these areas and prints each path. The areas are
+in the system temporary directory. Remove them when you no longer need them.
+
+By default, Mutarust removes all isolated mutation areas after the run. Use
+`--do-not-remove-tmp-folder` to keep them for inspection. Mutarust prints each
+retained path. This option can use much disk space because a normal Cargo run
+can create build output in each area.
+
+Each Cargo test run has a fixed 60 second timeout by default. Use
+`--exec-timeout SECONDS` to set a different positive whole-second timeout.
+`--timeout` is an alias. A timeout produces an errored mutant result with an
+error message.
+
+Use `--timeout-coefficient FACTOR` for an adaptive Cargo timeout. Mutarust
+runs the clean tests first, finds the longest clean test duration, multiplies
+it by the positive factor, rounds up to a whole second, and uses at least one
+second. This option cannot be used with `--timeout`, `--exec`, or `--no-exec`.
+
+Use `--test-flags FLAGS` to add shell-quoted Cargo test arguments to every
+Cargo compile and test command. For example,
+`--test-flags "--package my-package --features slow"` limits testing to one
+package and enables a feature. This option cannot be used with `--exec` or
+`--no-exec`.
+
+Use `--test-recursive` to pass `--workspace` to Cargo and test every package
+in the selected Cargo workspace. With `--exec`, Mutarust instead sets
+`TEST_RECURSIVE=true` for the custom command. `--test-recursive` cannot be
+used with `--no-exec`.
+
+`--dry-run` cannot be used with `--no-exec`, `--exec`, timeout controls, Cargo
+test controls, or `--do-not-remove-tmp-folder`. `--no-exec` cannot be used
+with `--exec`, timeout controls, or Cargo test controls. These rules prevent a
+command from silently ignoring a selected option.
 
 ## Custom Test Commands
 

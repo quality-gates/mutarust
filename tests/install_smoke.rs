@@ -1469,6 +1469,323 @@ fn installed_command_tests_one_mutation_per_temporary_workspace() {
 
 #[cfg(unix)]
 #[test]
+fn installed_command_dry_run_does_not_write_or_test() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_mutation_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    let source_before = fs::read(&source).expect("source must be readable");
+    let temporary_root = root.join("dry-run-temporary");
+    let fake_cargo = root.join("dry-run-cargo");
+    fs::create_dir(&temporary_root).expect("temporary root must be created");
+    fs::write(
+        &fake_cargo,
+        "#!/bin/sh\nif [ \"$1\" = \"metadata\" ]; then\n  exec \"$MUTARUST_REAL_CARGO\" \"$@\"\nfi\nprintf 'cargo test ran\\n' > \"$MUTARUST_CARGO_RECORD\"\nexit 1\n",
+    )
+    .expect("dry-run Cargo command must be written");
+    fs::set_permissions(&fake_cargo, fs::Permissions::from_mode(0o755))
+        .expect("dry-run Cargo command must be executable");
+    let record = root.join("dry-run-cargo-record");
+
+    let output = Command::new(command_path(&install))
+        .args(["--dry-run"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .env("CARGO", &fake_cargo)
+        .env("MUTARUST_REAL_CARGO", env!("CARGO"))
+        .env("MUTARUST_CARGO_RECORD", &record)
+        .env("TMPDIR", &temporary_root)
+        .output()
+        .expect("installed mutarust must start dry run");
+
+    assert!(
+        output.status.success(),
+        "dry run must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("dry-run output must be UTF-8"),
+        "Total: 2 mutation(s) would be generated. No files written, no tests run.\n"
+    );
+    assert!(!record.exists(), "dry run must not start Cargo tests");
+    assert_eq!(fs::read(&source).unwrap(), source_before);
+    assert!(
+        mutarust_temp_entries(&temporary_root).is_empty(),
+        "dry run must not create mutation workspaces"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn installed_command_no_exec_keeps_generated_mutants() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_mutation_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    let source_before = fs::read(&source).expect("source must be readable");
+    let temporary_root = root.join("no-exec-temporary");
+    let fake_cargo = root.join("no-exec-cargo");
+    fs::create_dir(&temporary_root).expect("temporary root must be created");
+    fs::write(
+        &fake_cargo,
+        "#!/bin/sh\nif [ \"$1\" = \"metadata\" ]; then\n  exec \"$MUTARUST_REAL_CARGO\" \"$@\"\nfi\nprintf 'cargo test ran\\n' > \"$MUTARUST_CARGO_RECORD\"\nexit 1\n",
+    )
+    .expect("no-exec Cargo command must be written");
+    fs::set_permissions(&fake_cargo, fs::Permissions::from_mode(0o755))
+        .expect("no-exec Cargo command must be executable");
+    let record = root.join("no-exec-cargo-record");
+
+    let output = Command::new(command_path(&install))
+        .args(["--no-exec"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .env("CARGO", &fake_cargo)
+        .env("MUTARUST_REAL_CARGO", env!("CARGO"))
+        .env("MUTARUST_CARGO_RECORD", &record)
+        .env("TMPDIR", &temporary_root)
+        .output()
+        .expect("installed mutarust must start no-exec run");
+
+    assert!(
+        output.status.success(),
+        "no-exec run must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("no-exec output must be UTF-8");
+    assert!(
+        stdout.contains("Generated: 2") && stdout.contains("mutation area:"),
+        "no-exec output must report generated areas: {stdout}"
+    );
+    assert!(!record.exists(), "no-exec must not start Cargo tests");
+    assert_eq!(fs::read(&source).unwrap(), source_before);
+    let entries = mutarust_temp_entries(&temporary_root);
+    assert_eq!(
+        entries.len(),
+        2,
+        "no-exec must keep each mutation workspace"
+    );
+    assert!(
+        entries
+            .iter()
+            .all(|path| path.join("checked/src/lib.rs").is_file()),
+        "each generated mutation area must contain the selected source"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn installed_command_keeps_requested_mutation_workspaces() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_mutation_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    let source_before = fs::read(&source).expect("source must be readable");
+    let temporary_root = root.join("keep-temporary-root");
+    fs::create_dir(&temporary_root).expect("temporary root must be created");
+
+    let output = Command::new(command_path(&install))
+        .args(["--do-not-remove-tmp-folder"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .env("TMPDIR", &temporary_root)
+        .output()
+        .expect("installed mutarust must start retained run");
+
+    assert!(
+        output.status.success(),
+        "retained run must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("mutation area:"),
+        "retained run must report mutation areas"
+    );
+    assert_eq!(fs::read(&source).unwrap(), source_before);
+    assert_eq!(
+        mutarust_temp_entries(&temporary_root).len(),
+        2,
+        "retained run must keep only mutation workspaces"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn installed_command_reports_retained_area_after_a_test_command_error() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_mutation_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    let temporary_root = root.join("retained-error-temporary");
+    let fake_cargo = root.join("retained-error-cargo");
+    fs::create_dir(&temporary_root).expect("temporary root must be created");
+    fs::write(
+        &fake_cargo,
+        "#!/bin/sh\nif [ \"$1\" = \"metadata\" ]; then\n  exec \"$MUTARUST_REAL_CARGO\" \"$@\"\nfi\ncase \" $* \" in\n  *\" --no-run \"*) chmod 000 \"$0\"; exit 0 ;;\nesac\nexit 0\n",
+    )
+    .expect("retained-error Cargo command must be written");
+    fs::set_permissions(&fake_cargo, fs::Permissions::from_mode(0o755))
+        .expect("retained-error Cargo command must be executable");
+
+    let output = Command::new(command_path(&install))
+        .args(["--do-not-remove-tmp-folder"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .env("CARGO", &fake_cargo)
+        .env("MUTARUST_REAL_CARGO", env!("CARGO"))
+        .env("TMPDIR", &temporary_root)
+        .output()
+        .expect("installed mutarust must start retained error run");
+
+    assert!(
+        output.status.success(),
+        "retained error run must complete: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("retained output must be UTF-8");
+    assert!(
+        stdout.contains("Errored: 2") && stdout.contains("mutation area:"),
+        "retained errors must report mutation areas: {stdout}"
+    );
+    assert_eq!(
+        mutarust_temp_entries(&temporary_root).len(),
+        2,
+        "retained error run must preserve mutation workspaces"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn installed_command_applies_adaptive_cargo_controls() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_mutation_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    let fake_cargo = root.join("adaptive-cargo");
+    let record = root.join("adaptive-cargo-record");
+    fs::write(
+        &fake_cargo,
+        "#!/bin/sh\nif [ \"$1\" = \"metadata\" ]; then\n  exec \"$MUTARUST_REAL_CARGO\" \"$@\"\nfi\nprintf '%s\\n' \"$*\" >> \"$MUTARUST_CARGO_RECORD\"\ncase \" $* \" in\n  *\" --no-run \"*) exit 0 ;;\nesac\nif grep -q false checked/src/lib.rs; then\n  sleep 3\nelse\n  sleep 1\nfi\n",
+    )
+    .expect("adaptive Cargo command must be written");
+    fs::set_permissions(&fake_cargo, fs::Permissions::from_mode(0o755))
+        .expect("adaptive Cargo command must be executable");
+
+    let output = Command::new(command_path(&install))
+        .args([
+            "--timeout-coefficient",
+            "1.5",
+            "--test-flags",
+            "--package mutation-checked",
+            "--test-recursive",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .env("CARGO", &fake_cargo)
+        .env("MUTARUST_REAL_CARGO", env!("CARGO"))
+        .env("MUTARUST_CARGO_RECORD", &record)
+        .output()
+        .expect("installed mutarust must start adaptive run");
+
+    assert!(
+        output.status.success(),
+        "adaptive run must complete: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("adaptive output must be UTF-8");
+    assert!(
+        stdout.contains("Errored: 2") && stdout.contains("timed out after 2 seconds"),
+        "adaptive timeout must use the clean duration: {stdout}"
+    );
+    let record = fs::read_to_string(record).expect("Cargo record must be readable");
+    assert!(
+        record.lines().all(|line| {
+            line.contains("--workspace") && line.contains("--package mutation-checked")
+        }),
+        "Cargo controls must apply to each Cargo command: {record}"
+    );
+}
+
+#[test]
+fn installed_command_tests_workspace_packages_recursively() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_mutation_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+
+    let output = Command::new(command_path(&install))
+        .args(["--test-recursive"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start recursive test run");
+
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "the failing workspace package must fail the clean test run"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("clean cargo test failed"),
+        "recursive test selection must include the full workspace"
+    );
+}
+
+#[test]
+fn installed_command_rejects_incompatible_execution_controls() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    for (arguments, error) in [
+        (
+            vec!["--dry-run", "--no-exec"],
+            "--dry-run and --no-exec cannot be used together",
+        ),
+        (
+            vec!["--no-exec", "--exec", "true"],
+            "--no-exec cannot be used with --exec",
+        ),
+        (
+            vec!["--timeout", "1", "--timeout-coefficient", "1.5"],
+            "--timeout-coefficient cannot be used with --timeout",
+        ),
+        (
+            vec!["--exec", "true", "--timeout-coefficient", "1.5"],
+            "--timeout-coefficient requires the Cargo test command",
+        ),
+        (
+            vec!["--dry-run", "--test-recursive"],
+            "--dry-run cannot be used with --test-recursive",
+        ),
+        (
+            vec!["--dry-run", "--do-not-remove-tmp-folder"],
+            "--dry-run cannot be used with --do-not-remove-tmp-folder",
+        ),
+        (
+            vec!["--no-exec", "--timeout", "1"],
+            "--no-exec cannot be used with --timeout",
+        ),
+    ] {
+        let output = Command::new(command_path(&install))
+            .args(arguments)
+            .output()
+            .expect("installed mutarust must reject invalid controls");
+        assert_eq!(output.status.code(), Some(3));
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains(error),
+            "control error must explain the invalid combination"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
 fn installed_command_stops_test_at_timeout() {
     use std::os::unix::fs::PermissionsExt;
 
