@@ -47,6 +47,37 @@ fn mutation_run_restores_the_host_interrupt_handler() {
     }
 }
 
+#[test]
+fn adaptive_timeout_requires_the_public_cargo_execution() {
+    let execution = mutarust::TestExecution::custom("true", false, false, false)
+        .expect("custom command must parse");
+    let filters = mutarust::SourceFilters::new(&[], &[], None, &[])
+        .expect("empty source filters must be valid");
+    let controls = mutarust::ExecutionControls {
+        timeout_coefficient: Some(1.5),
+        ..mutarust::ExecutionControls::default()
+    };
+
+    let result = mutarust::run_mutation_tests_with_controls(
+        &[],
+        &mutarust::Registry::builtins(),
+        std::time::Duration::from_secs(1),
+        None,
+        &filters,
+        &execution,
+        &controls,
+    );
+    let error = match result {
+        Err(error) => error,
+        Ok(_) => panic!("adaptive timeout must reject a custom command"),
+    };
+
+    assert_eq!(
+        error.to_string(),
+        "adaptive timeout requires the Cargo test command"
+    );
+}
+
 #[cfg(windows)]
 #[test]
 fn mutation_run_restores_the_host_interrupt_handler() {

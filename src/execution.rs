@@ -245,6 +245,10 @@ impl TestExecution {
             cargo_flags: Vec::new(),
         })
     }
+
+    fn uses_cargo(&self) -> bool {
+        matches!(self.command, TestCommand::Cargo)
+    }
 }
 
 /// Execution controls that apply to a complete mutation run.
@@ -256,7 +260,7 @@ pub struct ExecutionControls {
     pub no_exec: bool,
     /// Keeps mutation workspaces for inspection.
     pub keep_temporary: bool,
-    /// Multiplies the longest clean-test duration to select a timeout.
+    /// Multiplies the longest clean Cargo test duration to select a timeout.
     pub timeout_coefficient: Option<f64>,
 }
 
@@ -424,6 +428,7 @@ pub fn run_mutation_tests_with_controls(
         .lock()
         .map_err(|_| run_error("could not start mutation run after a previous panic"))?;
     let _interrupt_guard = prepare_interrupt_handling()?;
+    validate_adaptive_timeout(execution, controls)?;
     let plan = selected_mutation_plan(mutation_plan(targets, registry, filters)?, stable_id)?;
     stop_if_interrupted()?;
     if controls.dry_run {
@@ -431,15 +436,16 @@ pub fn run_mutation_tests_with_controls(
             results: plan.candidates.iter().map(generated_result).collect(),
         });
     }
-    let timeout = if controls.no_exec {
-        timeout
-    } else {
-        adaptive_timeout(
-            timeout,
-            controls.timeout_coefficient,
-            test_clean_workspaces(&plan.workspaces, timeout, execution)?,
-        )
-    };
+    let timeout =
+        if controls.no_exec || controls.timeout_coefficient.is_none() || !execution.uses_cargo() {
+            timeout
+        } else {
+            adaptive_timeout(
+                timeout,
+                controls.timeout_coefficient,
+                test_clean_workspaces(&plan.workspaces, timeout, execution)?,
+            )
+        };
     let mut results = Vec::new();
     for candidate in plan.candidates {
         if mutation_run_was_interrupted() {
@@ -451,6 +457,18 @@ pub fn run_mutation_tests_with_controls(
         }
     }
     Ok(MutationRun { results })
+}
+
+fn validate_adaptive_timeout(
+    execution: &TestExecution,
+    controls: &ExecutionControls,
+) -> Result<(), RunError> {
+    if controls.timeout_coefficient.is_some() && !execution.uses_cargo() {
+        return Err(run_error(
+            "adaptive timeout requires the Cargo test command",
+        ));
+    }
+    Ok(())
 }
 
 fn generated_result(candidate: &MutationCandidate) -> MutationResult {

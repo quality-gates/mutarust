@@ -1756,6 +1756,10 @@ fn installed_command_rejects_incompatible_execution_controls() {
             "--timeout-coefficient cannot be used with --timeout",
         ),
         (
+            vec!["--exec", "true", "--timeout-coefficient", "1.5"],
+            "--timeout-coefficient requires the Cargo test command",
+        ),
+        (
             vec!["--dry-run", "--test-recursive"],
             "--dry-run cannot be used with --test-recursive",
         ),
