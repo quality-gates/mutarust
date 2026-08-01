@@ -118,19 +118,17 @@ fn collect_directory(
     recursive: bool,
     files: &mut BTreeSet<PathBuf>,
 ) -> Result<(), SourceError> {
-    let excluded_sources = directory
-        .file_name()
-        .is_some_and(is_test_directory)
+    let include_excluded_sources = is_excluded_directory_target(directory);
+    let excluded_sources = include_excluded_sources
         .then(BTreeSet::new)
         .unwrap_or_else(|| non_production_source_paths(directory));
-    let accept_all_rust = is_test_directory_target(directory);
     collect_directory_from_root(
         directory,
         directory,
         recursive,
         files,
         &excluded_sources,
-        accept_all_rust,
+        include_excluded_sources,
     )?;
 
     if let Some(package) = package_at_directory(directory) {
@@ -140,11 +138,19 @@ fn collect_directory(
     Ok(())
 }
 
-fn is_test_directory_target(directory: &Path) -> bool {
+fn is_excluded_directory_target(directory: &Path) -> bool {
     directory
         .ancestors()
         .filter_map(Path::file_name)
-        .any(is_test_directory)
+        .any(is_excluded_source_directory)
+}
+
+fn is_excluded_source_directory(name: &std::ffi::OsStr) -> bool {
+    is_test_directory(name)
+        || matches!(
+            name.to_string_lossy().as_ref(),
+            "vendor" | "generated" | "gen"
+        )
 }
 
 fn package_at_directory(directory: &Path) -> Option<Package> {
@@ -261,7 +267,7 @@ fn collect_source_tree(source: &Path, directory: &Path, sources: &mut BTreeSet<P
 
     let source_directory = source.parent().unwrap_or(directory);
     for item in &syntax.items {
-        collect_item_source_tree(item, directory, source_directory, sources);
+        collect_item_source_tree(item, directory, source_directory, source_directory, sources);
     }
 }
 
@@ -269,6 +275,7 @@ fn collect_item_source_tree(
     item: &Item,
     module_root: &Path,
     source_directory: &Path,
+    path_directory: &Path,
     sources: &mut BTreeSet<PathBuf>,
 ) {
     if let Item::Macro(item) = item {
@@ -282,12 +289,18 @@ fn collect_item_source_tree(
     if let Some((_, items)) = &module.content {
         let nested_directory = module_root.join(module.ident.to_string());
         for item in items {
-            collect_item_source_tree(item, &nested_directory, source_directory, sources);
+            collect_item_source_tree(
+                item,
+                &nested_directory,
+                source_directory,
+                &nested_directory,
+                sources,
+            );
         }
         return;
     }
 
-    let Some(source) = external_module_source(module, module_root) else {
+    let Some(source) = external_module_source(module, module_root, path_directory) else {
         return;
     };
     let module_directory = module_directory(&source);
@@ -305,6 +318,101 @@ fn collect_include_source(
     };
 
     collect_source_tree(&source, module_root, sources);
+}
+
+fn production_source_tree(source: &Path) -> BTreeSet<PathBuf> {
+    let mut sources = BTreeSet::new();
+    let Ok(source) = canonical_path(source) else {
+        return sources;
+    };
+    let Some(directory) = source.parent() else {
+        return sources;
+    };
+
+    collect_production_source_tree(&source, directory, &mut sources);
+    sources
+}
+
+fn collect_production_source_tree(
+    source: &Path,
+    directory: &Path,
+    sources: &mut BTreeSet<PathBuf>,
+) {
+    if !sources.insert(source.to_path_buf()) {
+        return;
+    }
+    let Ok(text) = fs::read_to_string(source) else {
+        return;
+    };
+    let Ok(syntax) = syn::parse_file(&text) else {
+        return;
+    };
+
+    let source_directory = source.parent().unwrap_or(directory);
+    for item in &syntax.items {
+        collect_production_item_source_tree(
+            item,
+            directory,
+            source_directory,
+            source_directory,
+            sources,
+        );
+    }
+}
+
+fn collect_production_item_source_tree(
+    item: &Item,
+    module_root: &Path,
+    source_directory: &Path,
+    path_directory: &Path,
+    sources: &mut BTreeSet<PathBuf>,
+) {
+    if let Item::Macro(item) = item {
+        collect_production_include_source(item, module_root, source_directory, sources);
+        return;
+    }
+    let Item::Mod(module) = item else {
+        return;
+    };
+    if has_test_configuration(&module.attrs) {
+        return;
+    }
+
+    if let Some((_, items)) = &module.content {
+        let nested_directory = module_root.join(module.ident.to_string());
+        for item in items {
+            collect_production_item_source_tree(
+                item,
+                &nested_directory,
+                source_directory,
+                &nested_directory,
+                sources,
+            );
+        }
+        return;
+    }
+
+    let Some(source) = external_module_source(module, module_root, path_directory) else {
+        return;
+    };
+    let module_directory = module_directory(&source);
+    collect_production_source_tree(&source, &module_directory, sources);
+}
+
+fn collect_production_include_source(
+    item: &ItemMacro,
+    module_root: &Path,
+    source_directory: &Path,
+    sources: &mut BTreeSet<PathBuf>,
+) {
+    if has_test_configuration(&item.attrs) {
+        return;
+    }
+    let Some(source) = include_source(item, source_directory) else {
+        return;
+    };
+
+    collect_production_source_tree(&source, module_root, sources);
 }
 
 fn include_source(item: &ItemMacro, directory: &Path) -> Option<PathBuf> {
@@ -340,7 +448,13 @@ fn collect_test_only_source_tree(source: &Path, directory: &Path, sources: &mut 
 
     let source_directory = source.parent().unwrap_or(directory);
     for item in &syntax.items {
-        collect_test_only_item_source_tree(item, directory, source_directory, sources);
+        collect_test_only_item_source_tree(
+            item,
+            directory,
+            source_directory,
+            source_directory,
+            sources,
+        );
     }
 }
 
@@ -348,6 +462,7 @@ fn collect_test_only_item_source_tree(
     item: &Item,
     module_root: &Path,
     source_directory: &Path,
+    path_directory: &Path,
     sources: &mut BTreeSet<PathBuf>,
 ) {
     if let Item::Macro(item) = item {
@@ -362,7 +477,13 @@ fn collect_test_only_item_source_tree(
         let nested_directory = module_root.join(module.ident.to_string());
         if has_test_configuration(&module.attrs) {
             for item in items {
-                collect_item_source_tree(item, &nested_directory, source_directory, sources);
+                collect_item_source_tree(
+                    item,
+                    &nested_directory,
+                    source_directory,
+                    &nested_directory,
+                    sources,
+                );
             }
         } else {
             for item in items {
@@ -370,6 +491,7 @@ fn collect_test_only_item_source_tree(
                     item,
                     &nested_directory,
                     source_directory,
+                    &nested_directory,
                     sources,
                 );
             }
@@ -377,7 +499,7 @@ fn collect_test_only_item_source_tree(
         return;
     }
 
-    let Some(source) = external_module_source(module, module_root) else {
+    let Some(source) = external_module_source(module, module_root, path_directory) else {
         return;
     };
     let module_directory = module_directory(&source);
@@ -438,10 +560,14 @@ fn configuration_requires_test(configuration: Meta) -> bool {
     }
 }
 
-fn external_module_source(module: &ItemMod, directory: &Path) -> Option<PathBuf> {
+fn external_module_source(
+    module: &ItemMod,
+    module_directory: &Path,
+    path_directory: &Path,
+) -> Option<PathBuf> {
     module_path_attribute(module)
-        .map(|path| directory.join(path))
-        .or_else(|| module_source_by_name(module, directory))
+        .map(|path| path_directory.join(path))
+        .or_else(|| module_source_by_name(module, module_directory))
         .and_then(|path| canonical_path(&path).ok())
 }
 
@@ -491,7 +617,7 @@ fn add_source_file_from_root(
     accept_all_rust: bool,
 ) {
     if (accept_all_rust && is_rust_file(path) || is_source_file(path))
-        && !has_test_parent_below(path, source_root)
+        && (accept_all_rust || !has_test_parent_below(path, source_root))
         && !excluded_sources.contains(path)
     {
         files.insert(path.to_path_buf());
@@ -616,12 +742,10 @@ fn non_production_package_sources(package: &Package) -> BTreeSet<PathBuf> {
         .iter()
         .filter(|target| !is_production_target(&target.kind))
         .flat_map(|target| source_tree(target.src_path.as_std_path()))
+        .chain(test_only_sources)
         .collect::<BTreeSet<_>>();
 
-    non_production_sources.retain(|source| {
-        test_only_sources.contains(source) || !production_sources.contains(source)
-    });
-    non_production_sources.extend(test_only_sources);
+    non_production_sources.retain(|source| !production_sources.contains(source));
     non_production_sources
 }
 
@@ -630,7 +754,7 @@ fn production_package_sources(package: &Package) -> BTreeSet<PathBuf> {
         .targets
         .iter()
         .filter(|target| is_production_target(&target.kind))
-        .flat_map(|target| source_tree(target.src_path.as_std_path()))
+        .flat_map(|target| production_source_tree(target.src_path.as_std_path()))
         .collect()
 }
 

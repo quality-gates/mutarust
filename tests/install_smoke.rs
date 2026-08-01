@@ -76,6 +76,20 @@ fn installed_command_lists_production_sources() {
     let vendor_source = fixture.join("vendor").join("dependency.rs");
     let from_vendor = list_files(&install, &fixture, &[fixture.join("vendor").as_os_str()]);
     assert_eq!(from_vendor, vendor_source.display().to_string());
+    let vendor_test = fixture
+        .join("vendor")
+        .join("crate")
+        .join("tests")
+        .join("case.rs");
+    let recursive_vendor = list_files(
+        &install,
+        &fixture,
+        &[fixture.join("vendor").join("...").as_os_str()],
+    );
+    assert_eq!(
+        recursive_vendor,
+        format!("{}\n{}", vendor_test.display(), vendor_source.display())
+    );
 
     let excluded_test = fixture.join("tests").join("integration.rs");
     let explicit_test = list_files(&install, &fixture, &[excluded_test.as_os_str()]);
@@ -218,6 +232,8 @@ fn write_fixture(root: &Path) -> PathBuf {
     fs::create_dir_all(fixture.join("src")).expect("fixture source directory must be created");
     fs::create_dir_all(fixture.join("src").join("nested"))
         .expect("fixture nested source directory must be created");
+    fs::create_dir_all(fixture.join("src").join("shared_tests"))
+        .expect("fixture inline test module directory must be created");
     fs::create_dir_all(fixture.join("tests")).expect("fixture test directory must be created");
     fs::create_dir_all(fixture.join("tests").join("support"))
         .expect("fixture nested test directory must be created");
@@ -225,6 +241,8 @@ fn write_fixture(root: &Path) -> PathBuf {
         .expect("fixture example directory must be created");
     fs::create_dir_all(fixture.join("fixtures")).expect("fixture data directory must be created");
     fs::create_dir_all(fixture.join("vendor")).expect("fixture vendor directory must be created");
+    fs::create_dir_all(fixture.join("vendor").join("crate").join("tests"))
+        .expect("fixture nested vendor test directory must be created");
     fs::create_dir_all(fixture.join("generated"))
         .expect("fixture generated directory must be created");
     fs::write(
@@ -234,7 +252,7 @@ fn write_fixture(root: &Path) -> PathBuf {
     .expect("fixture manifest must be written");
     fs::write(
         fixture.join("src").join("lib.rs"),
-        "mod math;\n#[cfg(test)] mod tests { include!(\"test_support.rs\"); }\n",
+        "mod math;\n#[cfg(test)] mod tests { include!(\"test_support.rs\"); }\n#[cfg(test)] mod shared_tests { #[path = \"../math.rs\"] mod shared_math; }\n#[cfg(test)] mod external_tests;\n",
     )
     .expect("fixture library must be written");
     fs::write(fixture.join("src").join("math.rs"), "pub fn add() {}\n")
@@ -260,6 +278,16 @@ fn write_fixture(root: &Path) -> PathBuf {
     )
     .expect("fixture test support must be written");
     fs::write(
+        fixture.join("src").join("external_tests.rs"),
+        "#[path = \"external_test_support.rs\"] mod support;\n",
+    )
+    .expect("fixture external test module must be written");
+    fs::write(
+        fixture.join("src").join("external_test_support.rs"),
+        "pub fn external_test_support() {}\n",
+    )
+    .expect("fixture external test support must be written");
+    fs::write(
         fixture.join("tests").join("example_test.rs"),
         "#[test] fn test() {}\n",
     )
@@ -283,6 +311,15 @@ fn write_fixture(root: &Path) -> PathBuf {
         "fn dep() {}\n",
     )
     .expect("fixture dependency must be written");
+    fs::write(
+        fixture
+            .join("vendor")
+            .join("crate")
+            .join("tests")
+            .join("case.rs"),
+        "#[test] fn test() {}\n",
+    )
+    .expect("fixture vendor test must be written");
     fs::write(
         fixture.join("generated").join("output.rs"),
         "fn output() {}\n",
