@@ -36,7 +36,7 @@ fn print_help() -> io::Result<()> {
     let mut stdout = io::stdout().lock();
     writeln!(
         stdout,
-        "Mutation testing for Rust\n\nUsage: mutarust [OPTIONS] <TARGET>..."
+        "Mutation testing for Rust\n\nUsage: mutarust [OPTIONS]"
     )?;
     writeln!(
         stdout,

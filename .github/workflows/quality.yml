@@ -64,7 +64,9 @@ jobs:
           package_root="$RUNNER_TEMP/mutarust-package"
           install_root="$RUNNER_TEMP/mutarust-install"
           mkdir -p "$package_root"
-          tar -xzf target/package/mutarust-0.1.0.crate -C "$package_root"
-          cargo install --path "$package_root/mutarust-0.1.0" --root "$install_root" --locked
+          package_artifact="$(find target/package -maxdepth 1 -name 'mutarust-*.crate' -print -quit)"
+          test -n "$package_artifact"
+          tar -xzf "$package_artifact" -C "$package_root" --strip-components=1
+          cargo install --path "$package_root" --root "$install_root" --locked
           "$install_root/bin/mutarust" --help
           "$install_root/bin/mutarust" --version

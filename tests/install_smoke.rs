@@ -45,7 +45,7 @@ fn installed_command_prints_help() {
         String::from_utf8(version.stdout)
             .expect("version output must be UTF-8")
             .trim(),
-        "mutarust 0.1.0",
+        format!("mutarust {}", env!("CARGO_PKG_VERSION")),
         "version output must identify the package"
     );
 
@@ -67,7 +67,9 @@ fn package_crate(package_target: &Path) -> PathBuf {
 
     assert!(package_status.success(), "cargo package must succeed");
 
-    package_target.join("package").join("mutarust-0.1.0")
+    package_target
+        .join("package")
+        .join(format!("mutarust-{}", env!("CARGO_PKG_VERSION")))
 }
 
 fn smoke_root() -> PathBuf {
