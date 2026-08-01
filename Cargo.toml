@@ -18,6 +18,9 @@ serde_json = "1.0.151"
 syn = { version = "2.0.119", features = ["full"] }
 toml = "0.8.23"
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_System_Console", "Win32_System_Threading"] }
+
 [[bin]]
 name = "mutarust"
 path = "src/main.rs"

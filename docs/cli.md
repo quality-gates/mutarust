@@ -16,10 +16,14 @@ Run mutation testing for selected production source:
 mutarust [TARGET]...
 ```
 
-Mutarust runs each mutant in a new temporary copy of the Cargo workspace that
-contains the selected source. A test failure kills the mutant. A successful
-test run lets the mutant escape. Mutarust then removes the temporary workspace
-and prints one result line for each mutant, followed by result counts.
+Mutarust first runs the applicable tests without a mutation. It stops before
+mutation if this clean test suite fails. Mutarust runs each mutant in a new
+temporary copy of the Cargo workspace that contains the selected source. A
+test failure kills the mutant. A successful test run lets the mutant escape.
+Mutarust skips a mutant that does not compile. A test-command or timeout
+failure produces an errored mutant. Mutarust then removes the temporary
+workspace and prints one result line for each mutant, followed by result
+counts.
 
 Each test run has a fixed 60 second timeout by default. Use `--timeout
 SECONDS` to set a different positive whole-second timeout. A timeout produces
