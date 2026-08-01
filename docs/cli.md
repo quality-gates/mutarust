@@ -1,5 +1,18 @@
 # Command Guide
 
+## Mutator Listing
+
+List the available mutation operators:
+
+```text
+mutarust --list-mutators
+```
+
+The first built-in mutator, `conditional/bool-literal`, changes each Rust
+Boolean literal token between `true` and `false`, including macro input.
+Mutation execution is not
+available yet.
+
 ## Source Listing
 
 List the Rust production source files that Mutarust selects:
