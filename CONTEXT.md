@@ -20,9 +20,11 @@ small way. It then runs tests to find if the tests detect the change.
 - Baseline: A set of accepted escaped mutant IDs.
 - Blacklist: A set of accepted mutation checksums.
 - Stable mutant ID: An ID from a source name, mutator name, and mutation diff.
+- Source candidate: A Rust production source file selected as a possible input.
 
 ## Invariants
 
 - Mutarust must not change the user source tree.
 - A command result must use the terms in this document.
+- Source candidates must be unique and sorted by absolute path.
 - Production code must have no strict messrust codesize or design finding.

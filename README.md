@@ -9,6 +9,14 @@ cargo install --path .
 mutarust --help
 ```
 
+List Rust production source files before mutation testing:
+
+```text
+mutarust --list-files .
+```
+
+See the [command guide](docs/cli.md) for target rules.
+
 ## License
 
 MIT.
