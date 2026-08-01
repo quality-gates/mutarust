@@ -110,6 +110,11 @@ impl Registry {
     pub fn names(&self) -> impl Iterator<Item = &str> {
         self.mutators.keys().map(String::as_str)
     }
+
+    /// Removes each mutator for which `keep` returns false.
+    pub fn retain(&mut self, mut keep: impl FnMut(&str) -> bool) {
+        self.mutators.retain(|name, _| keep(name));
+    }
 }
 
 /// Describes an invalid mutator registration.

@@ -1,9 +1,11 @@
 //! Public support for the `mutarust` command.
 
+mod configuration;
 mod discovery;
 mod execution;
 mod mutator;
 
+pub use configuration::{CommandSettings, Configuration, ConfigurationError};
 pub use discovery::{SourceError, find_rust_sources};
 pub use execution::{
     DEFAULT_TEST_TIMEOUT, MutationResult, MutationRun, MutationState, RunError, run_mutation_tests,

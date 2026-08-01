@@ -16,6 +16,15 @@ Run mutation testing for selected production source:
 mutarust [TARGET]...
 ```
 
+Use a strict YAML mutation policy file for one run:
+
+```text
+mutarust --config mutarust.yml [TARGET]...
+```
+
+See the [configuration guide](config.md) for the policy fields, schema, and
+command priority rules.
+
 Mutarust first runs the applicable tests without a mutation. It stops before
 mutation if this clean test suite fails. Mutarust runs each mutant in a new
 temporary copy of the Cargo workspace that contains the selected source. A

@@ -89,6 +89,171 @@ fn installed_command_lists_builtin_mutators() {
 }
 
 #[test]
+fn installed_command_reads_yaml_configuration_and_command_options_take_priority() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_mutation_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    let configuration = fixture.join("mutarust.yml");
+    fs::write(
+        &configuration,
+        "skip_without_test: false\nskip_with_cfg: false\njson_output: false\nhtml_output: false\nsilent_mode: true\nmin_msi: 0\nmin_covered_msi: 0\nexclude_dirs: []\ndisable_mutators: []\nenable_mutators:\n  - conditional/bool-literal\nignore_source_lines:\n  - '^// generated'\n",
+    )
+    .expect("Mutarust configuration must be written");
+
+    let silent = Command::new(command_path(&install))
+        .args(["--config"])
+        .arg(&configuration)
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start with configuration");
+
+    assert!(
+        silent.status.success(),
+        "a valid configuration must succeed: {}",
+        String::from_utf8_lossy(&silent.stderr)
+    );
+    assert!(
+        !String::from_utf8_lossy(&silent.stdout).contains("escaped "),
+        "silent configuration must hide mutant status output"
+    );
+
+    let command_setting = Command::new(command_path(&install))
+        .args(["--config"])
+        .arg(&configuration)
+        .args(["--no-silent"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start with a command setting");
+
+    assert!(
+        command_setting.status.success(),
+        "the command setting must succeed: {}",
+        String::from_utf8_lossy(&command_setting.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&command_setting.stdout).contains("escaped "),
+        "a command setting must take priority over the configuration value"
+    );
+
+    let disabled = Command::new(command_path(&install))
+        .args(["--config"])
+        .arg(&configuration)
+        .args(["--disable", "conditional/bool-literal"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start with a mutator command setting");
+
+    assert!(
+        disabled.status.success(),
+        "the mutator command setting must succeed: {}",
+        String::from_utf8_lossy(&disabled.stderr)
+    );
+    let disabled_output =
+        String::from_utf8(disabled.stdout).expect("disabled mutator output must be UTF-8");
+    assert!(
+        disabled_output.contains("Killed: 0") && disabled_output.contains("Escaped: 0"),
+        "a command mutator denylist must change the configuration selection: {disabled_output}"
+    );
+}
+
+#[test]
+fn installed_command_rejects_invalid_configuration() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_mutation_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    let missing = fixture.join("missing.yml");
+    assert!(
+        !missing.exists(),
+        "the missing configuration fixture must not exist"
+    );
+    let missing_error = configuration_error(&install, &fixture, &source, &missing);
+    assert!(
+        missing_error.contains("could not read configuration")
+            && missing_error.contains("missing.yml"),
+        "a missing configuration file must identify its path: {missing_error}"
+    );
+
+    let cases = [
+        ("unknown.yml", "unknown_setting: true\n", "unknown field"),
+        (
+            "score.yml",
+            "min_msi: 101\n",
+            "min_msi must be a whole percentage",
+        ),
+        (
+            "wrong-type.yml",
+            "silent_mode: enabled\n",
+            "could not parse configuration",
+        ),
+        (
+            "empty-directory.yml",
+            "exclude_dirs:\n  - ''\n",
+            "exclude_dirs[0] must not be empty",
+        ),
+        (
+            "regular-expression.yml",
+            "ignore_source_lines:\n  - '('\n",
+            "invalid regular expression",
+        ),
+        (
+            "mutator.yml",
+            "enable_mutators:\n  - conditional/*/wrong\n",
+            "must be a mutator name or a group pattern",
+        ),
+        (
+            "unknown-mutator.yml",
+            "disable_mutators:\n  - value/does-not-exist\n",
+            "does not match an available mutator",
+        ),
+    ];
+    for (name, contents, expected) in cases {
+        let configuration = fixture.join(name);
+        fs::write(&configuration, contents).expect("invalid configuration must be written");
+        let error = configuration_error(&install, &fixture, &source, &configuration);
+        assert!(
+            error.contains(expected) && error.contains(name),
+            "invalid configuration must have a clear diagnostic: {error}"
+        );
+    }
+
+    let output = Command::new(command_path(&install))
+        .args(["--list-mutators", "--config", "mutarust.yml"])
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start with incompatible options");
+    assert!(
+        !output.status.success(),
+        "an unsupported option combination must fail"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("does not accept configuration"),
+        "an unsupported option combination must have a clear diagnostic"
+    );
+}
+
+#[test]
+fn package_contains_the_configuration_contract() {
+    let root = smoke_root();
+    let package = package_crate(&root.join("package-target"));
+
+    for file in [
+        "docs/config.md",
+        "schema/mutarust.schema.json",
+        "mutarust.yml.example",
+    ] {
+        assert!(
+            package.join(file).is_file(),
+            "the package must contain {file}"
+        );
+    }
+}
+
+#[test]
 fn installed_command_classifies_killed_and_escaped_mutants() {
     let root = smoke_root();
     let install = install_command(&root);
@@ -2723,6 +2888,33 @@ fn list_files(install: &Path, fixture: &Path, targets: &[&std::ffi::OsStr]) -> S
     );
     String::from_utf8(output.stdout)
         .expect("file list must be UTF-8")
+        .trim()
+        .to_owned()
+}
+
+fn configuration_error(
+    install: &Path,
+    fixture: &Path,
+    source: &Path,
+    configuration: &Path,
+) -> String {
+    let output = Command::new(command_path(install))
+        .args(["--config"])
+        .arg(configuration)
+        .arg(source)
+        .current_dir(fixture)
+        .output()
+        .expect("installed mutarust must start with invalid configuration");
+
+    assert!(
+        !output.status.success(),
+        "invalid configuration {} must fail: stdout: {}; stderr: {}",
+        configuration.display(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stderr)
+        .expect("configuration error output must be UTF-8")
         .trim()
         .to_owned()
 }
