@@ -118,7 +118,8 @@ fn collect_directory(
         return Ok(());
     }
 
-    collect_directory_from_root(directory, directory, recursive, files, &BTreeSet::new())
+    let excluded_sources = non_production_source_paths(directory);
+    collect_directory_from_root(directory, directory, recursive, files, &excluded_sources)
 }
 
 fn collect_directory_from_root(
@@ -163,6 +164,24 @@ fn cargo_root(path: &Path) -> Option<PathBuf> {
         .skip(1)
         .find(|candidate| candidate.join("Cargo.toml").is_file())
         .map(Path::to_path_buf)
+}
+
+fn non_production_source_paths(path: &Path) -> BTreeSet<PathBuf> {
+    let Some(cargo_root) = cargo_root(path) else {
+        return BTreeSet::new();
+    };
+    let Ok(metadata) = MetadataCommand::new().current_dir(cargo_root).exec() else {
+        return BTreeSet::new();
+    };
+
+    metadata
+        .packages
+        .iter()
+        .filter(|package| metadata.workspace_members.contains(&package.id))
+        .flat_map(|package| &package.targets)
+        .filter(|target| !is_production_target(&target.kind))
+        .filter_map(|target| canonical_path(target.src_path.as_std_path()).ok())
+        .collect()
 }
 
 fn add_source_file_from_root(
@@ -269,12 +288,7 @@ fn collect_package_sources(
     recursive: bool,
     files: &mut BTreeSet<PathBuf>,
 ) -> Result<(), SourceError> {
-    let excluded_sources = package
-        .targets
-        .iter()
-        .filter(|target| !is_production_target(&target.kind))
-        .filter_map(|target| canonical_path(target.src_path.as_std_path()).ok())
-        .collect();
+    let excluded_sources = non_production_package_sources(package);
 
     for target in &package.targets {
         if is_production_target(&target.kind) {
@@ -288,6 +302,15 @@ fn collect_package_sources(
     }
 
     Ok(())
+}
+
+fn non_production_package_sources(package: &Package) -> BTreeSet<PathBuf> {
+    package
+        .targets
+        .iter()
+        .filter(|target| !is_production_target(&target.kind))
+        .filter_map(|target| canonical_path(target.src_path.as_std_path()).ok())
+        .collect()
 }
 
 fn is_production_target(kinds: &[TargetKind]) -> bool {

@@ -118,6 +118,21 @@ fn installed_command_lists_production_sources() {
         list_files(&install, &workspace, &[workspace.join("...").as_os_str()]);
     assert_eq!(from_recursive_workspace, workspace_recursive);
 
+    let from_alpha_source = list_files(
+        &install,
+        &workspace,
+        &[alpha.join("source").join("...").as_os_str()],
+    );
+    assert_eq!(
+        from_alpha_source,
+        workspace_recursive
+            .lines()
+            .skip(1)
+            .take(3)
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+
     let from_custom_package = list_files(&install, &workspace, &["alpha...".as_ref()]);
     assert_eq!(
         from_custom_package,
