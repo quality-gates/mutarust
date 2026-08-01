@@ -29,39 +29,35 @@ pub fn find_rust_sources(targets: &[String]) -> Result<Vec<PathBuf>, SourceError
     let mut files = BTreeSet::new();
 
     for target in requested {
-        collect_target(&target, &mut files)?;
+        collect_target(target, &mut files)?;
     }
 
     Ok(files.into_iter().collect())
 }
 
-fn default_targets(targets: &[String]) -> Vec<String> {
+fn default_targets(targets: &[String]) -> Vec<Target> {
     if targets.is_empty() {
-        vec![String::from(".")]
+        vec![Target::recursive(".".into())]
     } else {
-        targets.to_vec()
+        targets.iter().map(|target| Target::parse(target)).collect()
     }
 }
 
-fn collect_target(target: &str, files: &mut BTreeSet<PathBuf>) -> Result<(), SourceError> {
-    let path = recursive_path(target);
+fn collect_target(target: Target, files: &mut BTreeSet<PathBuf>) -> Result<(), SourceError> {
+    let path = PathBuf::from(&target.value);
 
     if path.exists() {
-        return collect_path(&path, files);
+        return collect_path(&path, target.recursive, files);
     }
 
-    collect_package(target, files)
+    collect_package(&target, files)
 }
 
-fn recursive_path(target: &str) -> PathBuf {
-    match target.strip_suffix("...") {
-        Some("") => PathBuf::from("."),
-        Some(prefix) => PathBuf::from(prefix),
-        None => PathBuf::from(target),
-    }
-}
-
-fn collect_path(path: &Path, files: &mut BTreeSet<PathBuf>) -> Result<(), SourceError> {
+fn collect_path(
+    path: &Path,
+    recursive: bool,
+    files: &mut BTreeSet<PathBuf>,
+) -> Result<(), SourceError> {
     let path = canonical_path(path)?;
 
     if path.is_file() {
@@ -70,7 +66,7 @@ fn collect_path(path: &Path, files: &mut BTreeSet<PathBuf>) -> Result<(), Source
     }
 
     if path.is_dir() {
-        return collect_directory(&path, files);
+        return collect_directory(&path, recursive, files);
     }
 
     Err(SourceError::new(format!(
@@ -88,7 +84,11 @@ fn canonical_path(path: &Path) -> Result<PathBuf, SourceError> {
     })
 }
 
-fn collect_directory(directory: &Path, files: &mut BTreeSet<PathBuf>) -> Result<(), SourceError> {
+fn collect_directory(
+    directory: &Path,
+    recursive: bool,
+    files: &mut BTreeSet<PathBuf>,
+) -> Result<(), SourceError> {
     for entry in fs::read_dir(directory).map_err(|error| read_error(directory, error))? {
         let entry = entry.map_err(|error| read_error(directory, error))?;
         let path = entry.path();
@@ -98,8 +98,8 @@ fn collect_directory(directory: &Path, files: &mut BTreeSet<PathBuf>) -> Result<
 
         if file_type.is_file() {
             add_source_file(&path, files);
-        } else if file_type.is_dir() && !skip_directory(entry.file_name().as_ref()) {
-            collect_directory(&path, files)?;
+        } else if recursive && file_type.is_dir() && !skip_directory(entry.file_name().as_ref()) {
+            collect_directory(&path, true, files)?;
         }
     }
 
@@ -127,14 +127,14 @@ fn is_source_file(path: &Path) -> bool {
     path.extension().is_some_and(|extension| extension == "rs")
         && name != "build.rs"
         && !name.ends_with("_test.rs")
-        && !has_ignored_parent(path)
+        && !has_test_parent(path)
 }
 
-fn has_ignored_parent(path: &Path) -> bool {
+fn has_test_parent(path: &Path) -> bool {
     path.ancestors()
         .skip(1)
         .filter_map(Path::file_name)
-        .any(skip_directory)
+        .any(is_test_directory)
 }
 
 fn skip_directory(name: &std::ffi::OsStr) -> bool {
@@ -142,11 +142,26 @@ fn skip_directory(name: &std::ffi::OsStr) -> bool {
     name.starts_with('.')
         || matches!(
             name.as_ref(),
-            "target" | "tests" | "benches" | "examples" | "fixtures" | "testdata"
+            "target"
+                | "tests"
+                | "benches"
+                | "examples"
+                | "fixtures"
+                | "testdata"
+                | "vendor"
+                | "generated"
+                | "gen"
         )
 }
 
-fn collect_package(target: &str, files: &mut BTreeSet<PathBuf>) -> Result<(), SourceError> {
+fn is_test_directory(name: &std::ffi::OsStr) -> bool {
+    matches!(
+        name.to_string_lossy().as_ref(),
+        "tests" | "benches" | "examples" | "fixtures" | "testdata"
+    )
+}
+
+fn collect_package(target: &Target, files: &mut BTreeSet<PathBuf>) -> Result<(), SourceError> {
     let metadata = MetadataCommand::new()
         .exec()
         .map_err(|error| SourceError::new(format!("cannot read Cargo metadata: {error}")))?;
@@ -154,19 +169,48 @@ fn collect_package(target: &str, files: &mut BTreeSet<PathBuf>) -> Result<(), So
         .packages
         .iter()
         .find(|package| {
-            package.name.as_ref() == target && metadata.workspace_members.contains(&package.id)
+            package.name.as_ref() == target.value
+                && metadata.workspace_members.contains(&package.id)
         })
-        .ok_or_else(|| SourceError::new(format!("cannot find Cargo package: {target}")))?;
-    let manifest_directory = package
-        .manifest_path
-        .parent()
-        .ok_or_else(|| SourceError::new(format!("cannot read package manifest: {target}")))?;
+        .ok_or_else(|| SourceError::new(format!("cannot find Cargo package: {}", target.value)))?;
+    let manifest_directory = package.manifest_path.parent().ok_or_else(|| {
+        SourceError::new(format!("cannot read package manifest: {}", target.value))
+    })?;
+    let source_directory = manifest_directory.join("src");
 
-    collect_directory(manifest_directory.as_std_path(), files)
+    collect_directory(source_directory.as_std_path(), target.recursive, files)
 }
 
 impl SourceError {
     fn new(message: String) -> Self {
         Self { message }
+    }
+}
+
+struct Target {
+    value: String,
+    recursive: bool,
+}
+
+impl Target {
+    fn parse(value: &str) -> Self {
+        match value.strip_suffix("...") {
+            Some(prefix) => Self::recursive(prefix.trim_end_matches(['/', '\\']).into()),
+            None => Self::direct(value.to_owned()),
+        }
+    }
+
+    fn direct(value: String) -> Self {
+        Self {
+            value,
+            recursive: false,
+        }
+    }
+
+    fn recursive(value: String) -> Self {
+        Self {
+            value: if value.is_empty() { ".".into() } else { value },
+            recursive: true,
+        }
     }
 }
