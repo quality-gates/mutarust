@@ -219,7 +219,7 @@ fn write_workspace_fixture(root: &Path) -> PathBuf {
     .expect("workspace manifest must be written");
     fs::write(
         alpha.join("Cargo.toml"),
-        "[package]\nname = \"alpha\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[lib]\npath = \"source/entry.rs\"\n\n[[bin]]\nname = \"alpha-tool\"\npath = \"bin/tool.rs\"\n\n[[bin]]\nname = \"alpha-selected\"\npath = \"tests/selected.rs\"\n",
+        "[package]\nname = \"alpha\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[lib]\npath = \"source/entry.rs\"\n\n[[bin]]\nname = \"alpha-tool\"\npath = \"bin/tool.rs\"\n\n[[bin]]\nname = \"alpha-selected\"\npath = \"tests/selected.rs\"\n\n[[test]]\nname = \"alpha-check\"\npath = \"source/check.rs\"\n",
     )
     .expect("alpha manifest must be written");
     fs::write(
@@ -233,6 +233,11 @@ fn write_workspace_fixture(root: &Path) -> PathBuf {
         .expect("workspace selected source must be written");
     fs::write(alpha.join("source").join("entry.rs"), "mod helper;\n")
         .expect("workspace library source must be written");
+    fs::write(
+        alpha.join("source").join("check.rs"),
+        "#[test] fn check() {}\n",
+    )
+    .expect("workspace test source must be written");
     fs::write(
         alpha.join("source").join("helper.rs"),
         "pub fn helper() {}\n",

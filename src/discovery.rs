@@ -114,7 +114,7 @@ fn collect_directory(
     recursive: bool,
     files: &mut BTreeSet<PathBuf>,
 ) -> Result<(), SourceError> {
-    collect_directory_from_root(directory, directory, recursive, files)
+    collect_directory_from_root(directory, directory, recursive, files, &BTreeSet::new())
 }
 
 fn collect_directory_from_root(
@@ -122,6 +122,7 @@ fn collect_directory_from_root(
     source_root: &Path,
     recursive: bool,
     files: &mut BTreeSet<PathBuf>,
+    excluded_sources: &BTreeSet<PathBuf>,
 ) -> Result<(), SourceError> {
     for entry in fs::read_dir(directory).map_err(|error| read_error(directory, error))? {
         let entry = entry.map_err(|error| read_error(directory, error))?;
@@ -131,9 +132,9 @@ fn collect_directory_from_root(
             .map_err(|error| read_error(&path, error))?;
 
         if file_type.is_file() {
-            add_source_file_from_root(&path, source_root, files);
+            add_source_file_from_root(&path, source_root, files, excluded_sources);
         } else if recursive && file_type.is_dir() && !skip_directory(entry.file_name().as_ref()) {
-            collect_directory_from_root(&path, source_root, true, files)?;
+            collect_directory_from_root(&path, source_root, true, files, excluded_sources)?;
         }
     }
 
@@ -150,7 +151,7 @@ fn read_error(path: &Path, error: std::io::Error) -> SourceError {
 fn add_direct_source_file(path: &Path, files: &mut BTreeSet<PathBuf>) {
     let source_root =
         cargo_root(path).unwrap_or_else(|| path.parent().unwrap_or(path).to_path_buf());
-    add_source_file_from_root(path, &source_root, files);
+    add_source_file_from_root(path, &source_root, files, &BTreeSet::new());
 }
 
 fn cargo_root(path: &Path) -> Option<PathBuf> {
@@ -160,8 +161,16 @@ fn cargo_root(path: &Path) -> Option<PathBuf> {
         .map(Path::to_path_buf)
 }
 
-fn add_source_file_from_root(path: &Path, source_root: &Path, files: &mut BTreeSet<PathBuf>) {
-    if is_source_file(path) && !has_test_parent_below(path, source_root) {
+fn add_source_file_from_root(
+    path: &Path,
+    source_root: &Path,
+    files: &mut BTreeSet<PathBuf>,
+    excluded_sources: &BTreeSet<PathBuf>,
+) {
+    if is_source_file(path)
+        && !has_test_parent_below(path, source_root)
+        && !excluded_sources.contains(path)
+    {
         files.insert(path.to_path_buf());
     }
 }
@@ -253,9 +262,21 @@ fn collect_package_sources(
     recursive: bool,
     files: &mut BTreeSet<PathBuf>,
 ) -> Result<(), SourceError> {
+    let excluded_sources = package
+        .targets
+        .iter()
+        .filter(|target| !is_production_target(&target.kind))
+        .filter_map(|target| canonical_path(target.src_path.as_std_path()).ok())
+        .collect();
+
     for target in &package.targets {
         if is_production_target(&target.kind) {
-            collect_declared_target(target.src_path.as_std_path(), recursive, files)?;
+            collect_declared_target(
+                target.src_path.as_std_path(),
+                recursive,
+                files,
+                &excluded_sources,
+            )?;
         }
     }
 
@@ -281,6 +302,7 @@ fn collect_declared_target(
     source: &Path,
     recursive: bool,
     files: &mut BTreeSet<PathBuf>,
+    excluded_sources: &BTreeSet<PathBuf>,
 ) -> Result<(), SourceError> {
     let source = canonical_path(source)?;
     add_declared_source_file(&source, files);
@@ -289,7 +311,7 @@ fn collect_declared_target(
         return Ok(());
     };
 
-    collect_directory(directory, recursive, files)
+    collect_directory_from_root(directory, directory, recursive, files, excluded_sources)
 }
 
 fn add_declared_source_file(path: &Path, files: &mut BTreeSet<PathBuf>) {
