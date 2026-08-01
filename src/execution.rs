@@ -15,6 +15,7 @@ use cargo_metadata::{Metadata, MetadataCommand};
 use std::sync::atomic::AtomicBool;
 
 use crate::evidence::{MutationEvidence, StableMutantId, mutation_evidence};
+use crate::filter::{SourceFilter, SourceFilters};
 use crate::{Mutation, Mutator, Registry, SourceError, find_rust_sources};
 
 static NEXT_TEMPORARY_WORKSPACE: AtomicU64 = AtomicU64::new(0);
@@ -216,11 +217,26 @@ pub fn run_mutation_tests_with_timeout_for_mutant(
     timeout: Duration,
     stable_id: Option<&str>,
 ) -> Result<MutationRun, RunError> {
+    let names = registry.names().map(str::to_owned).collect::<Vec<_>>();
+    let filters = SourceFilters::new(&[], &[], None, &names).map_err(run_error)?;
+    run_mutation_tests_with_timeout_for_mutant_and_filters(
+        targets, registry, timeout, stable_id, &filters,
+    )
+}
+
+/// Runs mutants in the selected source scope with a fixed test timeout.
+pub fn run_mutation_tests_with_timeout_for_mutant_and_filters(
+    targets: &[String],
+    registry: &Registry,
+    timeout: Duration,
+    stable_id: Option<&str>,
+    filters: &SourceFilters,
+) -> Result<MutationRun, RunError> {
     let _run_lock = MUTATION_RUN_LOCK
         .lock()
         .map_err(|_| run_error("could not start mutation run after a previous panic"))?;
     let _interrupt_guard = prepare_interrupt_handling()?;
-    let plan = selected_mutation_plan(mutation_plan(targets, registry)?, stable_id)?;
+    let plan = selected_mutation_plan(mutation_plan(targets, registry, filters)?, stable_id)?;
     stop_if_interrupted()?;
     test_clean_workspaces(&plan.workspaces, timeout)?;
     let mut results = Vec::new();
@@ -452,7 +468,11 @@ fn stop_if_interrupted() -> Result<(), RunError> {
     }
 }
 
-fn mutation_plan(targets: &[String], registry: &Registry) -> Result<MutationPlan, RunError> {
+fn mutation_plan(
+    targets: &[String],
+    registry: &Registry,
+    filters: &SourceFilters,
+) -> Result<MutationPlan, RunError> {
     let sources = find_rust_sources(targets).map_err(source_error)?;
     if sources.is_empty() {
         return Err(run_error(
@@ -465,11 +485,25 @@ fn mutation_plan(targets: &[String], registry: &Registry) -> Result<MutationPlan
         let source = fs::canonicalize(&source).map_err(|error| {
             run_error(format!("could not resolve {}: {error}", source.display()))
         })?;
+        if !filters.allows_source_before_workspace(&source) {
+            continue;
+        }
         let workspace = workspace_for(&source)?;
+        if !filters.allows_source(&source, &workspace.source_root) {
+            continue;
+        }
         let text = fs::read_to_string(&source)
             .map_err(|error| run_error(format!("could not read {}: {error}", source.display())))?;
+        let source_filter = filters.for_source(&source, &text).map_err(run_error)?;
         workspaces.push(workspace.clone());
-        add_source_candidates(&mut candidates, registry, &workspace, &source, &text)?;
+        add_source_candidates(
+            &mut candidates,
+            registry,
+            &workspace,
+            &source,
+            &text,
+            &source_filter,
+        )?;
     }
     deduplicate_candidates(&mut candidates);
     Ok(MutationPlan {
@@ -1139,12 +1173,13 @@ fn add_source_candidates(
     workspace: &Workspace,
     source: &Path,
     text: &str,
+    filter: &SourceFilter,
 ) -> Result<(), RunError> {
     for name in registry.names() {
         let mutator = registry
             .get(name)
             .expect("registered mutator name must resolve to a mutator");
-        add_mutator_candidates(candidates, workspace, source, name, mutator, text)?;
+        add_mutator_candidates(candidates, workspace, source, name, mutator, text, filter)?;
     }
     Ok(())
 }
@@ -1156,8 +1191,13 @@ fn add_mutator_candidates(
     name: &str,
     mutator: &dyn Mutator,
     text: &str,
+    filter: &SourceFilter,
 ) -> Result<(), RunError> {
     for mutation in mutator.mutations(text) {
+        let (range, _) = mutation.identity();
+        if !filter.allows_mutation(name, &range) {
+            continue;
+        }
         let evidence = mutation_evidence(&workspace.source_root, source, name, &mutation, text)
             .map_err(run_error)?;
         candidates.push(MutationCandidate {

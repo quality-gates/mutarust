@@ -222,6 +222,9 @@ fn validate_mutator_patterns(field: &str, patterns: &[String]) -> Result<(), Con
 }
 
 fn valid_mutator_pattern(pattern: &str) -> bool {
+    if pattern == "*" {
+        return true;
+    }
     let Some(prefix) = pattern.strip_suffix('*') else {
         return valid_mutator_name(pattern);
     };
@@ -232,12 +235,13 @@ fn valid_mutator_pattern(pattern: &str) -> bool {
 }
 
 fn valid_mutator_name(name: &str) -> bool {
-    name.split('/').all(|part| {
-        !part.is_empty()
-            && part.chars().all(|character| {
-                character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-'
-            })
-    })
+    !name.is_empty()
+        && name.split('/').all(|part| {
+            !part.is_empty()
+                && part.chars().all(|character| {
+                    character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-'
+                })
+        })
 }
 
 fn validate_regular_expressions(patterns: &[String]) -> Result<(), ConfigurationError> {
