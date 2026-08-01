@@ -398,7 +398,7 @@ fn collect_production_item_source_tree(
         return;
     }
 
-    let Some(source) = external_module_source(module, module_root, path_directory) else {
+    let Some(source) = production_module_source(module, module_root, path_directory) else {
         return;
     };
     let module_directory = module_directory(&source);
@@ -638,6 +638,21 @@ fn test_module_source(
         .or_else(|| external_module_source(module, module_directory, path_directory))
 }
 
+fn production_module_source(
+    module: &ItemMod,
+    module_directory: &Path,
+    path_directory: &Path,
+) -> Option<PathBuf> {
+    production_path_module_source(module, path_directory)
+        .or_else(|| external_module_source(module, module_directory, path_directory))
+}
+
+fn production_path_module_source(module: &ItemMod, directory: &Path) -> Option<PathBuf> {
+    production_path_attribute(module)
+        .map(|path| directory.join(path))
+        .and_then(|path| canonical_path(&path).ok())
+}
+
 fn test_path_module_source(module: &ItemMod, directory: &Path) -> Option<PathBuf> {
     test_path_attribute(module)
         .map(|path| directory.join(path))
@@ -660,6 +675,27 @@ fn test_path_attribute(module: &ItemMod) -> Option<PathBuf> {
         let mut options = options.into_iter();
         let configuration = options.next()?;
         configuration_requires_test(configuration)
+            .then(|| options.find_map(path_from_meta))
+            .flatten()
+    })
+}
+
+fn production_path_attribute(module: &ItemMod) -> Option<PathBuf> {
+    module.attrs.iter().find_map(|attribute| {
+        let Meta::List(list) = &attribute.meta else {
+            return None;
+        };
+        if !attribute.path().is_ident("cfg_attr") {
+            return None;
+        }
+        let Ok(options) = list
+            .parse_args_with(syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated)
+        else {
+            return None;
+        };
+        let mut options = options.into_iter();
+        let configuration = options.next()?;
+        configuration_can_be_true_without_test(configuration)
             .then(|| options.find_map(path_from_meta))
             .flatten()
     })
@@ -750,7 +786,7 @@ fn is_source_file(path: &Path) -> bool {
 }
 
 fn has_test_parent_at_or_below(path: &Path, source_root: &Path) -> bool {
-    is_test_path(source_root)
+    source_root.file_name().is_some_and(is_test_directory)
         || path
             .strip_prefix(source_root)
             .ok()
@@ -759,12 +795,6 @@ fn has_test_parent_at_or_below(path: &Path, source_root: &Path) -> bool {
             .flat_map(Path::ancestors)
             .filter_map(Path::file_name)
             .any(is_test_directory)
-}
-
-fn is_test_path(path: &Path) -> bool {
-    path.ancestors()
-        .filter_map(Path::file_name)
-        .any(is_test_directory)
 }
 
 fn skip_directory(name: &std::ffi::OsStr) -> bool {
@@ -844,6 +874,9 @@ fn collect_package_sources(
 
     for target in &package.targets {
         if is_production_target(&target.kind) && is_active_target(target, active_features) {
+            for source in production_source_tree(target.src_path.as_std_path()) {
+                add_declared_source_file(&source, files);
+            }
             collect_declared_target(
                 target.src_path.as_std_path(),
                 recursive,
