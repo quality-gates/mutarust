@@ -49,7 +49,7 @@ fn print_help() -> io::Result<()> {
     )?;
     writeln!(
         stdout,
-        "\nOptions:\n  -h, --help          Print help\n  -V, --version       Print version\n      --config FILE    Read mutation policy from a YAML file\n      --list-files     List selected Rust production source files\n      --list-mutators  List available mutators\n      --timeout         Stop each test run after this many seconds\n      --silent          Hide mutant status output\n      --no-silent       Print mutant status output\n      --min-msi         Set the minimum mutation score percentage\n      --min-covered-msi Set the minimum covered-code score percentage\n      --enable NAME     Select a mutator name or group pattern\n      --disable NAME    Disable a mutator name or group pattern"
+        "\nOptions:\n  -h, --help           Print help\n  -V, --version        Print version\n      --config FILE     Read mutation policy from a YAML file\n      --list-files      List selected Rust production source files\n      --list-mutators   List available mutators\n      --timeout         Stop each test run after this many seconds\n      --silent          Hide mutant status output\n      --no-silent       Print mutant status output\n      --no-diffs        Hide escaped-mutant source diffs\n      --run-mutant-id ID  Run one mutant without score gates\n      --min-msi         Set the minimum mutation score percentage\n      --min-covered-msi Set the minimum covered-code score percentage\n      --enable NAME     Select a mutator name or group pattern\n      --disable NAME    Disable a mutator name or group pattern"
     )
 }
 
@@ -126,6 +126,7 @@ fn parse_value_option(
         }
         "--min-covered-msi" => value()
             .and_then(|value| set_score(&mut command.settings.min_covered_msi, value, argument)),
+        "--run-mutant-id" => value().and_then(|value| set_run_mutant_id(command, value)),
         "--enable" => value().map(|value| add_enabled(command, value)),
         "--disable" => value().map(|value| command.settings.disable_mutators.push(value)),
         _ => return None,
@@ -136,10 +137,22 @@ fn parse_switch_option(command: &mut RunCommand, argument: &str) -> Result<(), S
     match argument {
         "--silent" => set_silent(command, true),
         "--no-silent" => set_silent(command, false),
+        "--no-diffs" => {
+            command.no_diffs = true;
+            Ok(())
+        }
         "--help" | "-h" | "--version" | "-V" | "--list-files" | "--list-mutators" => {
             Err(format!("cannot use {argument} with mutation options"))
         }
         _ => Err(format!("unknown argument: {argument}")),
+    }
+}
+
+fn set_run_mutant_id(command: &mut RunCommand, value: String) -> Result<(), String> {
+    if command.run_mutant_id.replace(value).is_some() {
+        Err("--run-mutant-id can be supplied only once".to_owned())
+    } else {
+        Ok(())
     }
 }
 
@@ -210,9 +223,25 @@ fn run_mutation_tests(command: RunCommand) -> io::Result<ExitCode> {
         }
     };
     registry.retain(|name| selected.iter().any(|selected_name| selected_name == name));
-    match mutarust::run_mutation_tests_with_timeout(&command.targets, &registry, command.timeout) {
+    match mutarust::run_mutation_tests_with_timeout_for_mutant(
+        &command.targets,
+        &registry,
+        command.timeout,
+        command.run_mutant_id.as_deref(),
+    ) {
         Ok(run) => {
-            print_mutation_results(&run, configuration.silent_mode).map(|()| ExitCode::SUCCESS)
+            let one_mutant = command.run_mutant_id.is_some();
+            print_mutation_results(
+                &run,
+                configuration.silent_mode,
+                command.no_diffs,
+                one_mutant,
+            )?;
+            if command.run_mutant_id.is_some() {
+                Ok(ExitCode::SUCCESS)
+            } else {
+                Ok(total_score_gate(&run, configuration.min_msi))
+            }
         }
         Err(error) => source_error(&error.to_string()),
     }
@@ -236,7 +265,12 @@ fn effective_configuration(
     Ok(configuration)
 }
 
-fn print_mutation_results(run: &mutarust::MutationRun, silent: bool) -> io::Result<()> {
+fn print_mutation_results(
+    run: &mutarust::MutationRun,
+    silent: bool,
+    no_diffs: bool,
+    one_mutant: bool,
+) -> io::Result<()> {
     let mut stdout = io::stdout().lock();
     if !silent {
         for result in run.results() {
@@ -247,16 +281,55 @@ fn print_mutation_results(run: &mutarust::MutationRun, silent: bool) -> io::Resu
                 result.source.display(),
                 result.mutator
             )?;
+            writeln!(stdout, "  ID: {}", result.stable_id)?;
             if let Some(error) = &result.error {
                 writeln!(stdout, "  {error}")?;
             }
+            if result.state == mutarust::MutationState::Escaped && !no_diffs {
+                write!(stdout, "{}", result.diff)?;
+            }
         }
+    }
+    if one_mutant {
+        return Ok(());
     }
     writeln!(stdout, "Killed: {}", run.killed())?;
     writeln!(stdout, "Escaped: {}", run.escaped())?;
     writeln!(stdout, "Errored: {}", run.errored())?;
     writeln!(stdout, "Not covered: {}", run.not_covered())?;
-    writeln!(stdout, "Skipped: {}", run.skipped())
+    writeln!(stdout, "Skipped: {}", run.skipped())?;
+    writeln!(stdout, "Total: {}", run.total())?;
+    writeln!(
+        stdout,
+        "Mutation score: {:.2}%",
+        run.mutation_score() * 100.0
+    )?;
+    writeln!(stdout, "Per-mutator results:")?;
+    writeln!(stdout, "Mutator | Killed | Escaped | Skipped | Total")?;
+    for summary in run.mutator_summaries() {
+        writeln!(
+            stdout,
+            "{} | {} | {} | {} | {}",
+            summary.mutator, summary.killed, summary.escaped, summary.skipped, summary.total
+        )?;
+    }
+    Ok(())
+}
+
+fn total_score_gate(run: &mutarust::MutationRun, minimum: Option<u8>) -> ExitCode {
+    let Some(minimum) = minimum else {
+        return ExitCode::SUCCESS;
+    };
+    let score = run.mutation_score() * 100.0;
+    if score < f64::from(minimum) {
+        write_error(&format!(
+            "mutation score {score:.2}% is below the required {}%",
+            minimum
+        ));
+        ExitCode::from(4)
+    } else {
+        ExitCode::SUCCESS
+    }
 }
 
 fn print_files(files: &[std::path::PathBuf]) -> io::Result<()> {
@@ -291,6 +364,8 @@ struct RunCommand {
     targets: Vec<String>,
     timeout: Duration,
     configuration: Option<PathBuf>,
+    no_diffs: bool,
+    run_mutant_id: Option<String>,
     settings: CommandSettings,
 }
 
@@ -300,6 +375,8 @@ impl Default for RunCommand {
             targets: Vec::new(),
             timeout: mutarust::DEFAULT_TEST_TIMEOUT,
             configuration: None,
+            no_diffs: false,
+            run_mutant_id: None,
             settings: CommandSettings::default(),
         }
     }

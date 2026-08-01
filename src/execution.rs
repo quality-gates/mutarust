@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fmt;
 use std::fs;
@@ -14,6 +14,7 @@ use cargo_metadata::{Metadata, MetadataCommand};
 #[cfg(any(unix, windows))]
 use std::sync::atomic::AtomicBool;
 
+use crate::evidence::{MutationEvidence, StableMutantId, mutation_evidence};
 use crate::{Mutation, Mutator, Registry, SourceError, find_rust_sources};
 
 static NEXT_TEMPORARY_WORKSPACE: AtomicU64 = AtomicU64::new(0);
@@ -60,6 +61,36 @@ impl MutationRun {
         self.count(MutationState::Skipped)
     }
 
+    /// Returns the number of generated mutants.
+    pub fn total(&self) -> usize {
+        self.results.len()
+    }
+
+    /// Returns the total mutation score as a ratio from zero to one.
+    pub fn mutation_score(&self) -> f64 {
+        let scored = self.killed() + self.errored() + self.skipped();
+        if self.total() == 0 {
+            0.0
+        } else {
+            scored as f64 / self.total() as f64
+        }
+    }
+
+    /// Returns sorted result counts for each mutator.
+    pub fn mutator_summaries(&self) -> Vec<MutatorSummary> {
+        let mut summaries = BTreeMap::new();
+        for result in &self.results {
+            if result.state == MutationState::NotCovered {
+                continue;
+            }
+            let summary = summaries
+                .entry(result.mutator.clone())
+                .or_insert_with(|| MutatorSummary::new(&result.mutator));
+            summary.record(result.state);
+        }
+        summaries.into_values().collect()
+    }
+
     fn count(&self, expected: MutationState) -> usize {
         self.results
             .iter()
@@ -70,14 +101,54 @@ impl MutationRun {
 
 /// The result of testing one mutant.
 pub struct MutationResult {
-    /// The mutated production source file.
+    /// The source file name relative to the isolated workspace layout.
     pub source: PathBuf,
+    /// The stable ID for this source change.
+    pub stable_id: String,
     /// The stable name of the mutator that produced this mutant.
     pub mutator: String,
+    /// The unified source diff for this mutant.
+    pub diff: String,
     /// The mutation test result state.
     pub state: MutationState,
     /// The error detail when Mutarust could not complete the test run.
     pub error: Option<String>,
+}
+
+/// Sorted result counts for one mutator.
+pub struct MutatorSummary {
+    /// The stable name of the mutator.
+    pub mutator: String,
+    /// The count of killed and errored mutants.
+    pub killed: usize,
+    /// The count of escaped mutants.
+    pub escaped: usize,
+    /// The count of skipped mutants.
+    pub skipped: usize,
+    /// The count of all mutants except not-covered mutants.
+    pub total: usize,
+}
+
+impl MutatorSummary {
+    fn new(mutator: &str) -> Self {
+        Self {
+            mutator: mutator.to_owned(),
+            killed: 0,
+            escaped: 0,
+            skipped: 0,
+            total: 0,
+        }
+    }
+
+    fn record(&mut self, state: MutationState) {
+        self.total += 1;
+        match state {
+            MutationState::Killed | MutationState::Errored => self.killed += 1,
+            MutationState::Escaped => self.escaped += 1,
+            MutationState::Skipped => self.skipped += 1,
+            MutationState::NotCovered => {}
+        }
+    }
 }
 
 /// The classification of one mutation test result.
@@ -135,11 +206,21 @@ pub fn run_mutation_tests_with_timeout(
     registry: &Registry,
     timeout: Duration,
 ) -> Result<MutationRun, RunError> {
+    run_mutation_tests_with_timeout_for_mutant(targets, registry, timeout, None)
+}
+
+/// Runs all mutants, or one stable mutant ID, with a fixed test timeout.
+pub fn run_mutation_tests_with_timeout_for_mutant(
+    targets: &[String],
+    registry: &Registry,
+    timeout: Duration,
+    stable_id: Option<&str>,
+) -> Result<MutationRun, RunError> {
     let _run_lock = MUTATION_RUN_LOCK
         .lock()
         .map_err(|_| run_error("could not start mutation run after a previous panic"))?;
     let _interrupt_guard = prepare_interrupt_handling()?;
-    let plan = mutation_plan(targets, registry)?;
+    let plan = selected_mutation_plan(mutation_plan(targets, registry)?, stable_id)?;
     stop_if_interrupted()?;
     test_clean_workspaces(&plan.workspaces, timeout)?;
     let mut results = Vec::new();
@@ -153,6 +234,82 @@ pub fn run_mutation_tests_with_timeout(
         }
     }
     Ok(MutationRun { results })
+}
+
+fn selected_mutation_plan(
+    plan: MutationPlan,
+    stable_id: Option<&str>,
+) -> Result<MutationPlan, RunError> {
+    let Some(stable_id) = stable_id else {
+        return Ok(plan);
+    };
+    let stable_id = StableMutantId::parse(stable_id).ok_or_else(|| {
+        run_error("mutant ID must be a 32-character lower-case hexadecimal value")
+    })?;
+    let candidates = plan
+        .candidates
+        .into_iter()
+        .filter(|candidate| candidate.evidence.stable_id == stable_id)
+        .collect::<Vec<_>>();
+    match candidates.len() {
+        0 => Err(run_error(format!(
+            "could not find mutant ID {}",
+            stable_id.as_str()
+        ))),
+        1 => Ok(MutationPlan {
+            workspaces: candidates
+                .iter()
+                .map(|candidate| candidate.workspace.clone())
+                .collect(),
+            candidates,
+        }),
+        _ => Err(run_error(format!(
+            "mutant ID {} identifies more than one mutant",
+            stable_id.as_str()
+        ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::{MutationResult, MutationRun, MutationState};
+
+    #[test]
+    fn mutation_score_uses_the_parity_states() {
+        let run = MutationRun {
+            results: [
+                MutationState::Killed,
+                MutationState::Escaped,
+                MutationState::Errored,
+                MutationState::NotCovered,
+                MutationState::Skipped,
+            ]
+            .into_iter()
+            .map(test_result)
+            .collect(),
+        };
+
+        assert_eq!(run.mutation_score(), 3.0 / 5.0);
+        let summaries = run.mutator_summaries();
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].killed, 2);
+        assert_eq!(summaries[0].escaped, 1);
+        assert_eq!(summaries[0].skipped, 1);
+        assert_eq!(summaries[0].total, 4);
+    }
+
+    fn test_result(state: MutationState) -> MutationResult {
+        MutationResult {
+            source: PathBuf::from("src/lib.rs"),
+            stable_id: "a".repeat(32),
+            mutator: "conditional/bool-literal".to_owned(),
+            diff: String::new(),
+            state,
+            error: None,
+        }
+    }
 }
 
 fn test_clean_workspaces(workspaces: &[Workspace], timeout: Duration) -> Result<(), RunError> {
@@ -312,7 +469,7 @@ fn mutation_plan(targets: &[String], registry: &Registry) -> Result<MutationPlan
         let text = fs::read_to_string(&source)
             .map_err(|error| run_error(format!("could not read {}: {error}", source.display())))?;
         workspaces.push(workspace.clone());
-        add_source_candidates(&mut candidates, registry, &workspace, &source, &text);
+        add_source_candidates(&mut candidates, registry, &workspace, &source, &text)?;
     }
     deduplicate_candidates(&mut candidates);
     Ok(MutationPlan {
@@ -327,6 +484,7 @@ fn deduplicate_candidates(candidates: &mut Vec<MutationCandidate>) {
         let (range, replacement) = candidate.mutation.identity();
         seen.insert((
             candidate.source.clone(),
+            candidate.mutator.clone(),
             range.start,
             range.end,
             replacement.to_owned(),
@@ -353,6 +511,7 @@ fn workspace_for(source: &Path) -> Result<Workspace, RunError> {
         ))
     })?;
     let manifest = package_manifest_for(&metadata, source)?;
+    let source_root = common_ancestor(&[root.clone(), source.to_path_buf()])?;
     let (configurations, cargo_home) = cargo_configurations(&root)?;
     let CopyPaths {
         mut roots,
@@ -367,6 +526,7 @@ fn workspace_for(source: &Path) -> Result<Workspace, RunError> {
     let layout_root = common_ancestor(&layout_paths)?;
     Ok(Workspace {
         root,
+        source_root,
         manifest,
         layout_root,
         copy_paths,
@@ -979,13 +1139,14 @@ fn add_source_candidates(
     workspace: &Workspace,
     source: &Path,
     text: &str,
-) {
+) -> Result<(), RunError> {
     for name in registry.names() {
         let mutator = registry
             .get(name)
             .expect("registered mutator name must resolve to a mutator");
-        add_mutator_candidates(candidates, workspace, source, name, mutator, text);
+        add_mutator_candidates(candidates, workspace, source, name, mutator, text)?;
     }
+    Ok(())
 }
 
 fn add_mutator_candidates(
@@ -995,23 +1156,29 @@ fn add_mutator_candidates(
     name: &str,
     mutator: &dyn Mutator,
     text: &str,
-) {
+) -> Result<(), RunError> {
     for mutation in mutator.mutations(text) {
+        let evidence = mutation_evidence(&workspace.source_root, source, name, &mutation, text)
+            .map_err(run_error)?;
         candidates.push(MutationCandidate {
             workspace: workspace.clone(),
             source: source.to_path_buf(),
             mutator: name.to_owned(),
             mutation,
+            evidence,
         });
     }
+    Ok(())
 }
 
 fn test_candidate(candidate: MutationCandidate, timeout: Duration) -> MutationResult {
     let (state, error) = test_candidate_state(&candidate, timeout)
         .unwrap_or_else(|error| (MutationState::Errored, Some(error.to_string())));
     MutationResult {
-        source: candidate.source,
+        source: candidate.evidence.source,
+        stable_id: candidate.evidence.stable_id.into_string(),
         mutator: candidate.mutator,
+        diff: candidate.evidence.diff,
         state,
         error,
     }
@@ -1669,11 +1836,13 @@ struct MutationCandidate {
     source: PathBuf,
     mutator: String,
     mutation: Mutation,
+    evidence: MutationEvidence,
 }
 
 #[derive(Clone)]
 struct Workspace {
     root: PathBuf,
+    source_root: PathBuf,
     manifest: PathBuf,
     layout_root: PathBuf,
     copy_paths: Vec<PathBuf>,
