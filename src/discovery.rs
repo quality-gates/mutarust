@@ -729,7 +729,7 @@ fn configuration_is_active(
     test_enabled: bool,
     active_features: &BTreeSet<String>,
 ) -> bool {
-    attributes
+    let direct_configuration_is_active = attributes
         .iter()
         .filter(|attribute| attribute.path().is_ident("cfg"))
         .filter_map(|attribute| match &attribute.meta {
@@ -738,7 +738,44 @@ fn configuration_is_active(
         })
         .all(|configuration| {
             configuration_is_active_for(configuration, test_enabled, active_features)
+        });
+    let applied_configuration_is_active = attributes
+        .iter()
+        .filter(|attribute| attribute.path().is_ident("cfg_attr"))
+        .flat_map(|attribute| {
+            applied_cfg_conditions(attribute, test_enabled, active_features).into_iter()
         })
+        .flatten()
+        .all(|configuration| {
+            configuration_is_active_for(configuration, test_enabled, active_features)
+        });
+
+    direct_configuration_is_active && applied_configuration_is_active
+}
+
+fn applied_cfg_conditions(
+    attribute: &syn::Attribute,
+    test_enabled: bool,
+    active_features: &BTreeSet<String>,
+) -> Option<Vec<Meta>> {
+    let Meta::List(list) = &attribute.meta else {
+        return None;
+    };
+    let options = list
+        .parse_args_with(syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated)
+        .ok()?;
+    let mut options = options.into_iter();
+    let condition = options.next()?;
+    let cfg_attr_is_active = configuration_is_active_for(condition, test_enabled, active_features);
+
+    cfg_attr_is_active.then(|| {
+        options
+            .filter_map(|option| match option {
+                Meta::List(list) if list.path.is_ident("cfg") => syn::parse2(list.tokens).ok(),
+                _ => None,
+            })
+            .collect()
+    })
 }
 
 fn configuration_is_active_for(
@@ -753,9 +790,10 @@ fn configuration_is_active_for(
         if value.path.is_ident("feature") {
             return feature_name(value).is_some_and(|feature| active_features.contains(&feature));
         }
+        return target_configuration_is_active(value);
     }
     let Meta::List(list) = configuration else {
-        return true;
+        return target_flag_is_active(&list_or_path_name(&configuration));
     };
     let Ok(options) =
         list.parse_args_with(syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated)
@@ -777,8 +815,44 @@ fn configuration_is_active_for(
             .next()
             .is_none_or(|option| configuration_is_active_for(option, test_enabled, active_features))
     } else {
-        true
+        false
     }
+}
+
+fn list_or_path_name(configuration: &Meta) -> String {
+    configuration
+        .path()
+        .get_ident()
+        .map_or_else(String::new, ToString::to_string)
+}
+
+fn target_flag_is_active(name: &str) -> bool {
+    match name {
+        "unix" => cfg!(unix),
+        "windows" => cfg!(windows),
+        "debug_assertions" => cfg!(debug_assertions),
+        _ => false,
+    }
+}
+
+fn target_configuration_is_active(value: &syn::MetaNameValue) -> bool {
+    let Some(name) = feature_name(value) else {
+        return false;
+    };
+    if value.path.is_ident("target_os") {
+        return name == std::env::consts::OS;
+    }
+    if value.path.is_ident("target_arch") {
+        return name == std::env::consts::ARCH;
+    }
+    if value.path.is_ident("target_family") {
+        return name == std::env::consts::FAMILY;
+    }
+    if value.path.is_ident("target_pointer_width") {
+        return name == usize::BITS.to_string();
+    }
+
+    false
 }
 
 fn feature_name(value: &syn::MetaNameValue) -> Option<String> {

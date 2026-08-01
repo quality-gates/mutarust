@@ -385,7 +385,7 @@ fn write_workspace_fixture(root: &Path) -> PathBuf {
     .expect("workspace manifest must be written");
     fs::write(
         alpha.join("Cargo.toml"),
-        "[package]\nname = \"alpha\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[lib]\npath = \"source/entry.rs\"\n\n[[bin]]\nname = \"alpha-tool\"\npath = \"bin/cli_test.rs\"\n\n[[bin]]\nname = \"alpha-selected\"\npath = \"tests/nested/selected.rs\"\n\n[[bin]]\nname = \"alpha-disabled\"\npath = \"bin/disabled.rs\"\nrequired-features = [\"experimental\"]\n\n[[test]]\nname = \"alpha-check\"\npath = \"source/check.rs\"\n",
+        "[package]\nname = \"alpha\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[features]\ndefault = [\"enabled\"]\nenabled = []\n\n[lib]\npath = \"source/entry.rs\"\n\n[[bin]]\nname = \"alpha-tool\"\npath = \"bin/cli_test.rs\"\n\n[[bin]]\nname = \"alpha-selected\"\npath = \"tests/nested/selected.rs\"\n\n[[bin]]\nname = \"alpha-disabled\"\npath = \"bin/disabled.rs\"\nrequired-features = [\"experimental\"]\n\n[[test]]\nname = \"alpha-check\"\npath = \"source/check.rs\"\n",
     )
     .expect("alpha manifest must be written");
     fs::write(
@@ -418,7 +418,7 @@ fn write_workspace_fixture(root: &Path) -> PathBuf {
         .expect("workspace disabled source must be written");
     fs::write(
         alpha.join("source").join("entry.rs"),
-        "mod helper;\n#[cfg(feature = \"extra\")] mod extra;\n#[cfg_attr(feature = \"extra\", path = \"feature_extra.rs\")] mod switch;\n#[cfg_attr(not(test), path = \"nested/production_feature.rs\")]\n#[cfg_attr(test, path = \"nested/test_feature.rs\")]\nmod configured;\n",
+        "mod helper;\n#[cfg(feature = \"extra\")] mod extra;\n#[cfg_attr(feature = \"extra\", path = \"feature_extra.rs\")] mod switch;\n#[cfg_attr(feature = \"enabled\", cfg(test))] mod cfg_attr_test;\n#[cfg(windows)] mod windows_only;\n#[cfg_attr(not(test), path = \"nested/production_feature.rs\")]\n#[cfg_attr(test, path = \"nested/test_feature.rs\")]\nmod configured;\n",
     )
     .expect("workspace library source must be written");
     fs::write(
@@ -461,6 +461,16 @@ fn write_workspace_fixture(root: &Path) -> PathBuf {
         "pub fn feature_extra() {}\n",
     )
     .expect("workspace inactive cfg_attr source must be written");
+    fs::write(
+        alpha.join("source").join("cfg_attr_test.rs"),
+        "pub fn cfg_attr_test() {}\n",
+    )
+    .expect("workspace cfg_attr test source must be written");
+    fs::write(
+        alpha.join("source").join("windows_only.rs"),
+        "pub fn windows_only() {}\n",
+    )
+    .expect("workspace target-only source must be written");
     fs::write(
         alpha
             .join("source")
