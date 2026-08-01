@@ -901,6 +901,7 @@ fn installed_command_review_excludes_local_dependency_build_data() {
         .arg(&source)
         .current_dir(&project)
         .env("CARGO", &fake_cargo)
+        .env_remove("CARGO_TARGET_DIR")
         .output()
         .expect("installed mutarust must start");
 
@@ -1133,18 +1134,24 @@ fn installed_command_stops_test_at_timeout() {
         .expect("timed out child identifier must be written")
         .trim()
         .to_owned();
-    let child_status = Command::new("kill")
-        .args(["-0", &child])
-        .status()
-        .expect("process check must start");
     assert!(
-        !child_status.success(),
+        process_has_stopped(&child),
         "the timeout must stop the test child process"
     );
     assert!(
         mutarust_temp_entries(&temporary_root).is_empty(),
         "the timeout must remove each mutation workspace"
     );
+}
+
+#[cfg(unix)]
+fn process_has_stopped(identifier: &str) -> bool {
+    let output = Command::new("ps")
+        .args(["-o", "stat=", "-p", identifier])
+        .output()
+        .expect("process state check must start");
+    let state = String::from_utf8_lossy(&output.stdout);
+    state.trim().is_empty() || state.trim_start().starts_with('Z')
 }
 
 #[cfg(unix)]
