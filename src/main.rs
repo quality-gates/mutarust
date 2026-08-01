@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use mutarust::{CommandSettings, Configuration, Registry};
+use mutarust::{CommandSettings, Configuration, Registry, TestExecution};
 
 fn main() -> ExitCode {
     let arguments = env::args().skip(1).collect::<Vec<_>>();
@@ -49,7 +49,7 @@ fn print_help() -> io::Result<()> {
     )?;
     writeln!(
         stdout,
-        "\nOptions:\n  -h, --help           Print help\n  -V, --version        Print version\n      --config FILE     Read mutation policy from a YAML file\n      --list-files      List selected Rust production source files\n      --list-mutators   List available mutators\n      --timeout         Stop each test run after this many seconds\n      --match REGEXP    Mutate only functions with matching names\n      --silent          Hide mutant status output\n      --no-silent       Print mutant status output\n      --no-diffs        Hide escaped-mutant source diffs\n      --run-mutant-id ID  Run one mutant without score gates\n      --min-msi         Set the minimum mutation score percentage\n      --min-covered-msi Set the minimum covered-code score percentage\n      --enable NAME     Select a mutator name or group pattern\n      --disable NAME    Disable a mutator name or group pattern"
+        "\nOptions:\n  -h, --help           Print help\n  -V, --version        Print version\n      --config FILE     Read mutation policy from a YAML file\n      --list-files      List selected Rust production source files\n      --list-mutators   List available mutators\n      --exec COMMAND    Run a custom command for each mutant\n      --exec-timeout    Stop each test command after this many seconds\n      --timeout         Alias for --exec-timeout\n      --test-recursive  Tell a custom command to select recursive tests\n      --match REGEXP    Mutate only functions with matching names\n      --verbose         Tell a custom command to produce verbose output\n      --debug           Tell a custom command to produce debug output\n      --silent          Hide mutant status output\n      --no-silent       Print mutant status output\n      --no-diffs        Hide escaped-mutant source diffs\n      --run-mutant-id ID  Run one mutant without score gates\n      --min-msi         Set the minimum mutation score percentage\n      --min-covered-msi Set the minimum covered-code score percentage\n      --enable NAME     Select a mutator name or group pattern\n      --disable NAME    Disable a mutator name or group pattern"
     )
 }
 
@@ -119,7 +119,21 @@ fn parse_value_option(
 ) -> Option<Result<(), String>> {
     let value = || required_value(next, argument);
     Some(match argument {
-        "--timeout" => value().and_then(|value| set_timeout(command, value)),
+        "--timeout" | "--exec-timeout" => {
+            value().and_then(|value| set_timeout(command, value, argument))
+        }
+        "--exec" => value().and_then(|value| set_custom_command(command, value)),
+        _ => return parse_policy_value_option(command, argument, next),
+    })
+}
+
+fn parse_policy_value_option(
+    command: &mut RunCommand,
+    argument: &str,
+    next: Option<&String>,
+) -> Option<Result<(), String>> {
+    let value = || required_value(next, argument);
+    Some(match argument {
         "--match" => value().and_then(|value| set_function_match(command, value)),
         "--config" => value().and_then(|value| set_config(command, value)),
         "--min-msi" => {
@@ -140,6 +154,18 @@ fn parse_switch_option(command: &mut RunCommand, argument: &str) -> Result<(), S
         "--no-silent" => set_silent(command, false),
         "--no-diffs" => {
             command.no_diffs = true;
+            Ok(())
+        }
+        "--test-recursive" => {
+            command.recursive_tests = true;
+            Ok(())
+        }
+        "--verbose" => {
+            command.verbose = true;
+            Ok(())
+        }
+        "--debug" => {
+            command.debug = true;
             Ok(())
         }
         "--help" | "-h" | "--version" | "-V" | "--list-files" | "--list-mutators" => {
@@ -171,15 +197,23 @@ fn required_value(value: Option<&String>, option: &str) -> Result<String, String
         .ok_or_else(|| format!("{option} requires a value"))
 }
 
-fn set_timeout(command: &mut RunCommand, value: String) -> Result<(), String> {
+fn set_timeout(command: &mut RunCommand, value: String, option: &str) -> Result<(), String> {
     let seconds = value
         .parse::<u64>()
-        .map_err(|_| "--timeout requires a positive whole number".to_owned())?;
+        .map_err(|_| format!("{option} requires a positive whole number"))?;
     if seconds == 0 {
-        return Err("--timeout requires a positive whole number".to_owned());
+        return Err(format!("{option} requires a positive whole number"));
     }
     command.timeout = Duration::from_secs(seconds);
     Ok(())
+}
+
+fn set_custom_command(command: &mut RunCommand, value: String) -> Result<(), String> {
+    if command.custom_command.replace(value).is_some() {
+        Err("--exec can be supplied only once".to_owned())
+    } else {
+        Ok(())
+    }
 }
 
 fn set_config(command: &mut RunCommand, value: String) -> Result<(), String> {
@@ -227,17 +261,35 @@ fn run_mutation_tests(command: RunCommand) -> io::Result<ExitCode> {
         Ok(values) => values,
         Err(error) => return source_error(&error),
     };
-    let run = match mutarust::run_mutation_tests_with_timeout_for_mutant_and_filters(
+    let execution = match test_execution(&command) {
+        Ok(execution) => execution,
+        Err(error) => return source_error(&error),
+    };
+    let run = match mutarust::run_mutation_tests_with_test_execution(
         &command.targets,
         &registry,
         command.timeout,
         command.run_mutant_id.as_deref(),
         &filters,
+        &execution,
     ) {
         Ok(run) => run,
         Err(error) => return source_error(&error.to_string()),
     };
     finish_mutation_run(&command, &configuration, &run)
+}
+
+fn test_execution(command: &RunCommand) -> Result<TestExecution, String> {
+    match &command.custom_command {
+        Some(custom) => TestExecution::custom(
+            custom,
+            command.recursive_tests,
+            command.verbose,
+            command.debug,
+        )
+        .map_err(|error| error.to_string()),
+        None => Ok(TestExecution::cargo()),
+    }
 }
 
 fn configured_registry(
@@ -389,6 +441,10 @@ enum Command {
 struct RunCommand {
     targets: Vec<String>,
     timeout: Duration,
+    custom_command: Option<String>,
+    recursive_tests: bool,
+    verbose: bool,
+    debug: bool,
     function_match: Option<String>,
     configuration: Option<PathBuf>,
     no_diffs: bool,
@@ -401,6 +457,10 @@ impl Default for RunCommand {
         Self {
             targets: Vec::new(),
             timeout: mutarust::DEFAULT_TEST_TIMEOUT,
+            custom_command: None,
+            recursive_tests: false,
+            verbose: false,
+            debug: false,
             function_match: None,
             configuration: None,
             no_diffs: false,
