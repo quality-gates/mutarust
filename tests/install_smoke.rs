@@ -86,6 +86,45 @@ fn installed_command_lists_production_sources() {
     let from_recursive_package = list_files(&install, &fixture, &["sample...".as_ref()]);
     assert_eq!(from_recursive_package, expected_recursive);
 
+    let workspace = write_workspace_fixture(&root);
+    let alpha = workspace.join("alpha");
+    let beta = workspace.join("beta");
+    let workspace_direct = format!(
+        "{}\n{}\n{}\n{}",
+        alpha.join("bin").join("tool.rs").display(),
+        alpha.join("source").join("entry.rs").display(),
+        alpha.join("source").join("helper.rs").display(),
+        beta.join("src").join("lib.rs").display(),
+    );
+    let from_workspace = list_files(&install, &workspace, &[workspace.as_os_str()]);
+    assert_eq!(from_workspace, workspace_direct);
+
+    let workspace_recursive = format!(
+        "{}\n{}\n{}\n{}\n{}",
+        alpha.join("bin").join("tool.rs").display(),
+        alpha.join("source").join("entry.rs").display(),
+        alpha.join("source").join("helper.rs").display(),
+        alpha
+            .join("source")
+            .join("nested")
+            .join("inside.rs")
+            .display(),
+        beta.join("src").join("lib.rs").display(),
+    );
+    let from_recursive_workspace =
+        list_files(&install, &workspace, &[workspace.join("...").as_os_str()]);
+    assert_eq!(from_recursive_workspace, workspace_recursive);
+
+    let from_custom_package = list_files(&install, &workspace, &["alpha...".as_ref()]);
+    assert_eq!(
+        from_custom_package,
+        workspace_recursive
+            .lines()
+            .take(4)
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+
     fs::remove_dir_all(root).expect("smoke test files must be removed");
 }
 
@@ -160,6 +199,48 @@ fn write_fixture(root: &Path) -> PathBuf {
     )
     .expect("fixture generated source must be written");
     fs::canonicalize(fixture).expect("fixture path must resolve")
+}
+
+fn write_workspace_fixture(root: &Path) -> PathBuf {
+    let workspace = root.join("workspace");
+    let alpha = workspace.join("alpha");
+    let beta = workspace.join("beta");
+    fs::create_dir_all(alpha.join("bin")).expect("workspace binary directory must be created");
+    fs::create_dir_all(alpha.join("source").join("nested"))
+        .expect("workspace library directory must be created");
+    fs::create_dir_all(beta.join("src")).expect("workspace member directory must be created");
+    fs::write(
+        workspace.join("Cargo.toml"),
+        "[workspace]\nmembers = [\"alpha\", \"beta\"]\nresolver = \"3\"\n",
+    )
+    .expect("workspace manifest must be written");
+    fs::write(
+        alpha.join("Cargo.toml"),
+        "[package]\nname = \"alpha\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[lib]\npath = \"source/entry.rs\"\n\n[[bin]]\nname = \"alpha-tool\"\npath = \"bin/tool.rs\"\n",
+    )
+    .expect("alpha manifest must be written");
+    fs::write(
+        beta.join("Cargo.toml"),
+        "[package]\nname = \"beta\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .expect("beta manifest must be written");
+    fs::write(alpha.join("bin").join("tool.rs"), "fn main() {}\n")
+        .expect("workspace binary source must be written");
+    fs::write(alpha.join("source").join("entry.rs"), "mod helper;\n")
+        .expect("workspace library source must be written");
+    fs::write(
+        alpha.join("source").join("helper.rs"),
+        "pub fn helper() {}\n",
+    )
+    .expect("workspace library helper must be written");
+    fs::write(
+        alpha.join("source").join("nested").join("inside.rs"),
+        "pub fn inside() {}\n",
+    )
+    .expect("workspace nested source must be written");
+    fs::write(beta.join("src").join("lib.rs"), "pub fn beta() {}\n")
+        .expect("workspace member source must be written");
+    fs::canonicalize(workspace).expect("workspace path must resolve")
 }
 
 fn list_files(install: &Path, fixture: &Path, targets: &[&std::ffi::OsStr]) -> String {

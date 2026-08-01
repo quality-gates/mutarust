@@ -1,4 +1,4 @@
-use cargo_metadata::MetadataCommand;
+use cargo_metadata::{Metadata, MetadataCommand, Package, TargetKind};
 use std::collections::BTreeSet;
 use std::error::Error;
 use std::fmt;
@@ -66,6 +66,10 @@ fn collect_path(
     }
 
     if path.is_dir() {
+        if let Some(metadata) = workspace_metadata(&path) {
+            return collect_workspace(&metadata, recursive, files);
+        }
+
         return collect_directory(&path, recursive, files);
     }
 
@@ -173,12 +177,76 @@ fn collect_package(target: &Target, files: &mut BTreeSet<PathBuf>) -> Result<(),
                 && metadata.workspace_members.contains(&package.id)
         })
         .ok_or_else(|| SourceError::new(format!("cannot find Cargo package: {}", target.value)))?;
-    let manifest_directory = package.manifest_path.parent().ok_or_else(|| {
-        SourceError::new(format!("cannot read package manifest: {}", target.value))
-    })?;
-    let source_directory = manifest_directory.join("src");
+    collect_package_sources(package, target.recursive, files)
+}
 
-    collect_directory(source_directory.as_std_path(), target.recursive, files)
+fn workspace_metadata(path: &Path) -> Option<Metadata> {
+    if !path.join("Cargo.toml").is_file() {
+        return None;
+    }
+
+    let metadata = MetadataCommand::new().current_dir(path).exec().ok()?;
+    let workspace_root = canonical_path(metadata.workspace_root.as_std_path()).ok()?;
+
+    (workspace_root == path).then_some(metadata)
+}
+
+fn collect_workspace(
+    metadata: &Metadata,
+    recursive: bool,
+    files: &mut BTreeSet<PathBuf>,
+) -> Result<(), SourceError> {
+    for package in &metadata.packages {
+        if metadata.workspace_members.contains(&package.id) {
+            collect_package_sources(package, recursive, files)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn collect_package_sources(
+    package: &Package,
+    recursive: bool,
+    files: &mut BTreeSet<PathBuf>,
+) -> Result<(), SourceError> {
+    for target in &package.targets {
+        if is_production_target(&target.kind) {
+            collect_declared_target(target.src_path.as_std_path(), recursive, files)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn is_production_target(kinds: &[TargetKind]) -> bool {
+    kinds.iter().any(|kind| {
+        matches!(
+            kind,
+            TargetKind::Bin
+                | TargetKind::CDyLib
+                | TargetKind::DyLib
+                | TargetKind::Lib
+                | TargetKind::ProcMacro
+                | TargetKind::RLib
+                | TargetKind::StaticLib
+        )
+    })
+}
+
+fn collect_declared_target(
+    source: &Path,
+    recursive: bool,
+    files: &mut BTreeSet<PathBuf>,
+) -> Result<(), SourceError> {
+    let source = canonical_path(source)?;
+    add_source_file(&source, files);
+
+    let Some(directory) = source.parent() else {
+        return Ok(());
+    };
+
+    collect_directory(directory, recursive, files)
 }
 
 impl SourceError {
