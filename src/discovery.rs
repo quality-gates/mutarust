@@ -4,6 +4,8 @@ use std::error::Error;
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::OnceLock;
 use syn::{Expr, Item, ItemMacro, ItemMod, Lit, Meta};
 
 /// An error that prevents Rust source discovery.
@@ -827,32 +829,52 @@ fn list_or_path_name(configuration: &Meta) -> String {
 }
 
 fn target_flag_is_active(name: &str) -> bool {
-    match name {
-        "unix" => cfg!(unix),
-        "windows" => cfg!(windows),
-        "debug_assertions" => cfg!(debug_assertions),
-        _ => false,
-    }
+    rustc_configurations().contains(name)
 }
 
 fn target_configuration_is_active(value: &syn::MetaNameValue) -> bool {
-    let Some(name) = feature_name(value) else {
+    let Some(configuration_value) = feature_name(value) else {
         return false;
     };
-    if value.path.is_ident("target_os") {
-        return name == std::env::consts::OS;
-    }
-    if value.path.is_ident("target_arch") {
-        return name == std::env::consts::ARCH;
-    }
-    if value.path.is_ident("target_family") {
-        return name == std::env::consts::FAMILY;
-    }
-    if value.path.is_ident("target_pointer_width") {
-        return name == usize::BITS.to_string();
-    }
+    let Some(configuration_name) = value.path.get_ident() else {
+        return false;
+    };
 
-    false
+    rustc_configurations().contains(&format!("{configuration_name}=\"{configuration_value}\""))
+}
+
+fn rustc_configurations() -> &'static BTreeSet<String> {
+    static CONFIGURATIONS: OnceLock<BTreeSet<String>> = OnceLock::new();
+
+    CONFIGURATIONS.get_or_init(read_rustc_configurations)
+}
+
+fn read_rustc_configurations() -> BTreeSet<String> {
+    let Ok(output) = Command::new("rustc").args(["--print", "cfg"]).output() else {
+        return default_rustc_configurations();
+    };
+    if !output.status.success() {
+        return default_rustc_configurations();
+    }
+    let Ok(configurations) = String::from_utf8(output.stdout) else {
+        return default_rustc_configurations();
+    };
+
+    configurations.lines().map(str::to_owned).collect()
+}
+
+fn default_rustc_configurations() -> BTreeSet<String> {
+    [
+        ("target_os", std::env::consts::OS.to_owned()),
+        ("target_arch", std::env::consts::ARCH.to_owned()),
+        ("target_family", std::env::consts::FAMILY.to_owned()),
+        ("target_pointer_width", usize::BITS.to_string()),
+    ]
+    .into_iter()
+    .map(|(name, value)| format!("{name}=\"{value}\""))
+    .chain(cfg!(unix).then_some("unix".to_owned()))
+    .chain(cfg!(windows).then_some("windows".to_owned()))
+    .collect()
 }
 
 fn feature_name(value: &syn::MetaNameValue) -> Option<String> {
