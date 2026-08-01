@@ -144,6 +144,7 @@ impl MutatorSummary {
     fn record(&mut self, state: MutationState) {
         self.total += 1;
         match state {
+            MutationState::Generated => {}
             MutationState::Killed | MutationState::Errored => self.killed += 1,
             MutationState::Escaped => self.escaped += 1,
             MutationState::Skipped => self.skipped += 1,
@@ -155,6 +156,8 @@ impl MutatorSummary {
 /// The classification of one mutation test result.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MutationState {
+    /// Mutarust wrote the mutant without running a test command.
+    Generated,
     /// Tests detected the mutant.
     Killed,
     /// Tests did not detect the mutant.
@@ -170,6 +173,7 @@ pub enum MutationState {
 impl fmt::Display for MutationState {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Generated => formatter.write_str("generated"),
             Self::Killed => formatter.write_str("killed"),
             Self::Escaped => formatter.write_str("escaped"),
             Self::Errored => formatter.write_str("errored"),
@@ -200,6 +204,7 @@ pub struct TestExecution {
     recursive: bool,
     verbose: bool,
     debug: bool,
+    cargo_flags: Vec<String>,
 }
 
 impl TestExecution {
@@ -210,6 +215,18 @@ impl TestExecution {
             recursive: false,
             verbose: false,
             debug: false,
+            cargo_flags: Vec::new(),
+        }
+    }
+
+    /// Uses the built-in Cargo test command with its selected controls.
+    pub fn cargo_with_options(recursive: bool, cargo_flags: Vec<String>) -> Self {
+        Self {
+            command: TestCommand::Cargo,
+            recursive,
+            verbose: false,
+            debug: false,
+            cargo_flags,
         }
     }
 
@@ -225,8 +242,22 @@ impl TestExecution {
             recursive,
             verbose,
             debug,
+            cargo_flags: Vec::new(),
         })
     }
+}
+
+/// Execution controls that apply to a complete mutation run.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ExecutionControls {
+    /// Lists generated mutants without writing files or running tests.
+    pub dry_run: bool,
+    /// Writes generated mutants without running tests.
+    pub no_exec: bool,
+    /// Keeps mutation workspaces for inspection.
+    pub keep_temporary: bool,
+    /// Multiplies the longest clean-test duration to select a timeout.
+    pub timeout_coefficient: Option<f64>,
 }
 
 #[derive(Clone, Debug)]
@@ -368,24 +399,87 @@ pub fn run_mutation_tests_with_test_execution(
     filters: &SourceFilters,
     execution: &TestExecution,
 ) -> Result<MutationRun, RunError> {
+    run_mutation_tests_with_controls(
+        targets,
+        registry,
+        timeout,
+        stable_id,
+        filters,
+        execution,
+        &ExecutionControls::default(),
+    )
+}
+
+/// Runs mutants with the selected test command and execution controls.
+pub fn run_mutation_tests_with_controls(
+    targets: &[String],
+    registry: &Registry,
+    timeout: Duration,
+    stable_id: Option<&str>,
+    filters: &SourceFilters,
+    execution: &TestExecution,
+    controls: &ExecutionControls,
+) -> Result<MutationRun, RunError> {
     let _run_lock = MUTATION_RUN_LOCK
         .lock()
         .map_err(|_| run_error("could not start mutation run after a previous panic"))?;
     let _interrupt_guard = prepare_interrupt_handling()?;
     let plan = selected_mutation_plan(mutation_plan(targets, registry, filters)?, stable_id)?;
     stop_if_interrupted()?;
-    test_clean_workspaces(&plan.workspaces, timeout)?;
+    if controls.dry_run {
+        return Ok(MutationRun {
+            results: plan.candidates.iter().map(generated_result).collect(),
+        });
+    }
+    let timeout = if controls.no_exec {
+        timeout
+    } else {
+        adaptive_timeout(
+            timeout,
+            controls.timeout_coefficient,
+            test_clean_workspaces(&plan.workspaces, timeout, execution)?,
+        )
+    };
     let mut results = Vec::new();
     for candidate in plan.candidates {
         if mutation_run_was_interrupted() {
             return Err(run_error("mutation run interrupted"));
         }
-        results.push(test_candidate(candidate, timeout, execution));
+        results.push(test_candidate(candidate, timeout, execution, controls));
         if mutation_run_was_interrupted() {
             return Err(run_error("mutation run interrupted"));
         }
     }
     Ok(MutationRun { results })
+}
+
+fn generated_result(candidate: &MutationCandidate) -> MutationResult {
+    MutationResult {
+        source: candidate.evidence.source.clone(),
+        stable_id: candidate.evidence.stable_id.as_str().to_owned(),
+        mutator: candidate.mutator.clone(),
+        diff: candidate.evidence.diff.clone(),
+        state: MutationState::Generated,
+        error: None,
+    }
+}
+
+fn adaptive_timeout(
+    fixed_timeout: Duration,
+    coefficient: Option<f64>,
+    clean_test_duration: Duration,
+) -> Duration {
+    let Some(coefficient) = coefficient else {
+        return fixed_timeout;
+    };
+    let seconds = (clean_test_duration.as_secs_f64() * coefficient)
+        .ceil()
+        .max(1.0);
+    if seconds >= u64::MAX as f64 {
+        Duration::from_secs(u64::MAX)
+    } else {
+        Duration::from_secs(seconds as u64)
+    }
 }
 
 fn selected_mutation_plan(
@@ -425,8 +519,9 @@ fn selected_mutation_plan(
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+    use std::time::Duration;
 
-    use super::{MutationResult, MutationRun, MutationState};
+    use super::{MutationResult, MutationRun, MutationState, adaptive_timeout};
 
     #[test]
     fn mutation_score_uses_the_parity_states() {
@@ -452,6 +547,14 @@ mod tests {
         assert_eq!(summaries[0].total, 4);
     }
 
+    #[test]
+    fn adaptive_timeout_has_a_duration_limit() {
+        assert_eq!(
+            adaptive_timeout(Duration::ZERO, Some(f64::MAX), Duration::from_secs(1),),
+            Duration::from_secs(u64::MAX)
+        );
+    }
+
     fn test_result(state: MutationState) -> MutationResult {
         MutationResult {
             source: PathBuf::from("src/lib.rs"),
@@ -464,30 +567,41 @@ mod tests {
     }
 }
 
-fn test_clean_workspaces(workspaces: &[Workspace], timeout: Duration) -> Result<(), RunError> {
+fn test_clean_workspaces(
+    workspaces: &[Workspace],
+    timeout: Duration,
+    execution: &TestExecution,
+) -> Result<Duration, RunError> {
     let mut tested_manifests = BTreeSet::new();
+    let mut longest = Duration::ZERO;
     for workspace in workspaces {
         stop_if_interrupted()?;
         if !tested_manifests.insert(workspace.manifest.clone()) {
             continue;
         }
-        test_clean_workspace(workspace, timeout)?;
+        longest = longest.max(test_clean_workspace(workspace, timeout, execution)?);
     }
-    Ok(())
+    Ok(longest)
 }
 
-fn test_clean_workspace(workspace: &Workspace, timeout: Duration) -> Result<(), RunError> {
+fn test_clean_workspace(
+    workspace: &Workspace,
+    timeout: Duration,
+    execution: &TestExecution,
+) -> Result<Duration, RunError> {
     let temporary = TemporaryWorkspace::create()?;
     let result = (|| {
         let copied_workspace = copy_workspace(workspace, temporary.path())?;
-        match run_cargo_command(
+        let outcome = run_cargo_command(
             temporary.path(),
             &copied_workspace,
             workspace,
             CargoAction::Test,
             timeout,
-        )? {
-            CargoOutcome::Passed => Ok(()),
+            execution,
+        )?;
+        match outcome.outcome {
+            CargoOutcome::Passed => Ok(outcome.duration),
             CargoOutcome::Failed(detail) => Err(run_error(format!(
                 "clean cargo test failed: {}",
                 cargo_detail(detail)
@@ -498,7 +612,7 @@ fn test_clean_workspace(workspace: &Workspace, timeout: Duration) -> Result<(), 
             ))),
         }
     })();
-    temporary.finish(result)
+    temporary.finish(result, false)
 }
 
 #[cfg(unix)]
@@ -1365,8 +1479,9 @@ fn test_candidate(
     candidate: MutationCandidate,
     timeout: Duration,
     execution: &TestExecution,
+    controls: &ExecutionControls,
 ) -> MutationResult {
-    let (state, error) = test_candidate_state(&candidate, timeout, execution)
+    let (state, error) = test_candidate_state(&candidate, timeout, execution, controls)
         .unwrap_or_else(|error| (MutationState::Errored, Some(error.to_string())));
     MutationResult {
         source: candidate.evidence.source,
@@ -1382,14 +1497,21 @@ fn test_candidate_state(
     candidate: &MutationCandidate,
     timeout: Duration,
     execution: &TestExecution,
+    controls: &ExecutionControls,
 ) -> Result<(MutationState, Option<String>), RunError> {
     stop_if_interrupted()?;
     let temporary = TemporaryWorkspace::create()?;
+    let keep_temporary = controls.keep_temporary || controls.no_exec;
+    let temporary_path = keep_temporary.then(|| temporary.path().to_path_buf());
     let result = (|| {
         let workspace = copy_workspace(&candidate.workspace, temporary.path())?;
+        if controls.no_exec {
+            write_mutant(&candidate.workspace, temporary.path(), candidate)?;
+            return Ok((MutationState::Generated, None));
+        }
         match &execution.command {
             TestCommand::Cargo => {
-                test_cargo_mutant(candidate, temporary.path(), &workspace, timeout)
+                test_cargo_mutant(candidate, temporary.path(), &workspace, timeout, execution)
             }
             TestCommand::Custom(command) => test_custom_mutant(
                 candidate,
@@ -1401,7 +1523,27 @@ fn test_candidate_state(
             ),
         }
     })();
-    temporary.finish(result)
+    let result = add_mutation_area_to_error(result, temporary_path.as_deref());
+    let (state, mut error) = temporary.finish(result, keep_temporary)?;
+    if let Some(path) = temporary_path {
+        let detail = mutation_area_detail(&path);
+        error = Some(error.map_or(detail.clone(), |error| format!("{error}; {detail}")));
+    }
+    Ok((state, error))
+}
+
+fn add_mutation_area_to_error<T>(
+    result: Result<T, RunError>,
+    temporary_path: Option<&Path>,
+) -> Result<T, RunError> {
+    result.map_err(|error| match temporary_path {
+        Some(path) => run_error(format!("{error}; {}", mutation_area_detail(path))),
+        None => error,
+    })
+}
+
+fn mutation_area_detail(path: &Path) -> String {
+    format!("mutation area: {}", path.display())
 }
 
 fn test_cargo_mutant(
@@ -1409,6 +1551,7 @@ fn test_cargo_mutant(
     temporary: &Path,
     copied_workspace: &Path,
     timeout: Duration,
+    execution: &TestExecution,
 ) -> Result<(MutationState, Option<String>), RunError> {
     write_mutant(&candidate.workspace, temporary, candidate)?;
     match run_cargo_command(
@@ -1417,15 +1560,29 @@ fn test_cargo_mutant(
         &candidate.workspace,
         CargoAction::Compile,
         timeout,
+        execution,
     )? {
-        CargoOutcome::Passed => {
-            test_compiled_mutant(temporary, copied_workspace, &candidate.workspace, timeout)
-        }
-        CargoOutcome::Failed(detail) => Ok((
+        CargoCommandOutcome {
+            outcome: CargoOutcome::Passed,
+            ..
+        } => test_compiled_mutant(
+            temporary,
+            copied_workspace,
+            &candidate.workspace,
+            timeout,
+            execution,
+        ),
+        CargoCommandOutcome {
+            outcome: CargoOutcome::Failed(detail),
+            ..
+        } => Ok((
             MutationState::Skipped,
             Some(format!("mutant did not compile: {}", cargo_detail(detail))),
         )),
-        CargoOutcome::TimedOut => Ok((
+        CargoCommandOutcome {
+            outcome: CargoOutcome::TimedOut,
+            ..
+        } => Ok((
             MutationState::Errored,
             Some(format!(
                 "mutant compilation timed out after {} seconds",
@@ -1459,6 +1616,7 @@ fn test_compiled_mutant(
     copied_workspace: &Path,
     workspace: &Workspace,
     timeout: Duration,
+    execution: &TestExecution,
 ) -> Result<(MutationState, Option<String>), RunError> {
     match run_cargo_command(
         temporary,
@@ -1466,10 +1624,20 @@ fn test_compiled_mutant(
         workspace,
         CargoAction::Test,
         timeout,
+        execution,
     )? {
-        CargoOutcome::Passed => Ok((MutationState::Escaped, None)),
-        CargoOutcome::Failed(_) => Ok((MutationState::Killed, None)),
-        CargoOutcome::TimedOut => Ok((
+        CargoCommandOutcome {
+            outcome: CargoOutcome::Passed,
+            ..
+        } => Ok((MutationState::Escaped, None)),
+        CargoCommandOutcome {
+            outcome: CargoOutcome::Failed(_),
+            ..
+        } => Ok((MutationState::Killed, None)),
+        CargoCommandOutcome {
+            outcome: CargoOutcome::TimedOut,
+            ..
+        } => Ok((
             MutationState::Errored,
             Some(format!(
                 "cargo test timed out after {} seconds",
@@ -1549,6 +1717,11 @@ enum CargoOutcome {
     TimedOut,
 }
 
+struct CargoCommandOutcome {
+    outcome: CargoOutcome,
+    duration: Duration,
+}
+
 enum ProcessOutcome {
     Exited(std::process::ExitStatus),
     TimedOut,
@@ -1621,7 +1794,8 @@ fn run_cargo_command(
     workspace: &Workspace,
     action: CargoAction,
     timeout: Duration,
-) -> Result<CargoOutcome, RunError> {
+    execution: &TestExecution,
+) -> Result<CargoCommandOutcome, RunError> {
     let manifest = copied_path(workspace, temporary, &workspace.manifest)?;
     let diagnostic_path = temporary.join("cargo-stderr");
     let diagnostics = fs::File::create(&diagnostic_path).map_err(|error| {
@@ -1653,6 +1827,10 @@ fn run_cargo_command(
     if matches!(action, CargoAction::Compile) {
         command.arg("--no-run");
     }
+    if execution.recursive {
+        command.arg("--workspace");
+    }
+    command.args(&execution.cargo_flags);
     stop_if_interrupted()?;
     configure_process_group(&mut command);
     let mut child = ProcessChild::new(
@@ -1660,6 +1838,7 @@ fn run_cargo_command(
             .spawn()
             .map_err(|error| run_error(format!("could not run cargo test: {error}")))?,
     );
+    let started = Instant::now();
     let outcome = match wait_for_process(&mut child, timeout)? {
         ProcessOutcome::Exited(status) if status.success() => CargoOutcome::Passed,
         ProcessOutcome::Exited(_) => {
@@ -1667,7 +1846,10 @@ fn run_cargo_command(
         }
         ProcessOutcome::TimedOut => CargoOutcome::TimedOut,
     };
-    Ok(outcome)
+    Ok(CargoCommandOutcome {
+        outcome,
+        duration: started.elapsed(),
+    })
 }
 
 fn run_custom_command(
@@ -2215,7 +2397,11 @@ impl TemporaryWorkspace {
             .expect("temporary workspace path must exist before cleanup")
     }
 
-    fn finish<T>(mut self, result: Result<T, RunError>) -> Result<T, RunError> {
+    fn finish<T>(mut self, result: Result<T, RunError>, keep: bool) -> Result<T, RunError> {
+        if keep {
+            self.path.take();
+            return result;
+        }
         let path = self.path().to_path_buf();
         match fs::remove_dir_all(&path) {
             Ok(()) => {

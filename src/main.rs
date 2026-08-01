@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use mutarust::{CommandSettings, Configuration, Registry, TestExecution};
+use mutarust::{CommandSettings, Configuration, ExecutionControls, Registry, TestExecution};
 
 fn main() -> ExitCode {
     let arguments = env::args().skip(1).collect::<Vec<_>>();
@@ -18,7 +18,7 @@ fn run(command: Command) -> io::Result<ExitCode> {
         Command::Version => print_version().map(|()| ExitCode::SUCCESS),
         Command::ListMutators => list_mutators(),
         Command::ListFiles(targets) => list_files(&targets),
-        Command::Run(command) => run_mutation_tests(command),
+        Command::Run(command) => run_mutation_tests(*command),
         Command::Invalid(message) => source_error(&message),
     }
 }
@@ -49,7 +49,7 @@ fn print_help() -> io::Result<()> {
     )?;
     writeln!(
         stdout,
-        "\nOptions:\n  -h, --help           Print help\n  -V, --version        Print version\n      --config FILE     Read mutation policy from a YAML file\n      --list-files      List selected Rust production source files\n      --list-mutators   List available mutators\n      --exec COMMAND    Run a custom command for each mutant\n      --exec-timeout    Stop each test command after this many seconds\n      --timeout         Alias for --exec-timeout\n      --test-recursive  Tell a custom command to select recursive tests\n      --match REGEXP    Mutate only functions with matching names\n      --verbose         Tell a custom command to produce verbose output\n      --debug           Tell a custom command to produce debug output\n      --silent          Hide mutant status output\n      --no-silent       Print mutant status output\n      --no-diffs        Hide escaped-mutant source diffs\n      --run-mutant-id ID  Run one mutant without score gates\n      --min-msi         Set the minimum mutation score percentage\n      --min-covered-msi Set the minimum covered-code score percentage\n      --enable NAME     Select a mutator name or group pattern\n      --disable NAME    Disable a mutator name or group pattern"
+        "\nOptions:\n  -h, --help           Print help\n  -V, --version        Print version\n      --config FILE     Read mutation policy from a YAML file\n      --list-files      List selected Rust production source files\n      --list-mutators   List available mutators\n      --exec COMMAND    Run a custom command for each mutant\n      --exec-timeout    Stop each test command after this many seconds\n      --timeout         Alias for --exec-timeout\n      --timeout-coefficient FACTOR  Set an adaptive Cargo timeout\n      --test-flags FLAGS  Add shell-quoted Cargo test flags\n      --test-recursive  Select all Cargo workspace packages\n      --dry-run         List mutants without writing files or running tests\n      --no-exec         Write mutants without running tests\n      --do-not-remove-tmp-folder  Keep mutation workspaces\n      --match REGEXP    Mutate only functions with matching names\n      --verbose         Tell a custom command to produce verbose output\n      --debug           Tell a custom command to produce debug output\n      --silent          Hide mutant status output\n      --no-silent       Print mutant status output\n      --no-diffs        Hide escaped-mutant source diffs\n      --run-mutant-id ID  Run one mutant without score gates\n      --min-msi         Set the minimum mutation score percentage\n      --min-covered-msi Set the minimum covered-code score percentage\n      --enable NAME     Select a mutator name or group pattern\n      --disable NAME    Disable a mutator name or group pattern"
     )
 }
 
@@ -98,7 +98,8 @@ fn parse_run(arguments: &[String]) -> Command {
             Err(message) => return Command::Invalid(message),
         }
     }
-    Command::Run(command)
+    validate_execution_options(&command)
+        .map_or_else(Command::Invalid, |_| Command::Run(Box::new(command)))
 }
 
 fn parse_run_argument(
@@ -122,6 +123,10 @@ fn parse_value_option(
         "--timeout" | "--exec-timeout" => {
             value().and_then(|value| set_timeout(command, value, argument))
         }
+        "--timeout-coefficient" => {
+            value().and_then(|value| set_timeout_coefficient(command, value))
+        }
+        "--test-flags" => value().and_then(|value| set_test_flags(command, value)),
         "--exec" => value().and_then(|value| set_custom_command(command, value)),
         _ => return parse_policy_value_option(command, argument, next),
     })
@@ -149,6 +154,9 @@ fn parse_policy_value_option(
 }
 
 fn parse_switch_option(command: &mut RunCommand, argument: &str) -> Result<(), String> {
+    if let Some(result) = parse_execution_switch(command, argument) {
+        return result;
+    }
     match argument {
         "--silent" => set_silent(command, true),
         "--no-silent" => set_silent(command, false),
@@ -173,6 +181,30 @@ fn parse_switch_option(command: &mut RunCommand, argument: &str) -> Result<(), S
         }
         _ => Err(format!("unknown argument: {argument}")),
     }
+}
+
+fn parse_execution_switch(command: &mut RunCommand, argument: &str) -> Option<Result<(), String>> {
+    Some(match argument {
+        "--dry-run" => set_dry_run(command),
+        "--no-exec" => set_no_exec(command),
+        "--do-not-remove-tmp-folder" => set_keep_temporary(command),
+        _ => return None,
+    })
+}
+
+fn set_dry_run(command: &mut RunCommand) -> Result<(), String> {
+    command.execution.dry_run = true;
+    Ok(())
+}
+
+fn set_no_exec(command: &mut RunCommand) -> Result<(), String> {
+    command.execution.no_exec = true;
+    Ok(())
+}
+
+fn set_keep_temporary(command: &mut RunCommand) -> Result<(), String> {
+    command.execution.keep_temporary = true;
+    Ok(())
 }
 
 fn set_run_mutant_id(command: &mut RunCommand, value: String) -> Result<(), String> {
@@ -205,6 +237,34 @@ fn set_timeout(command: &mut RunCommand, value: String, option: &str) -> Result<
         return Err(format!("{option} requires a positive whole number"));
     }
     command.timeout = Duration::from_secs(seconds);
+    command.execution.fixed_timeout = true;
+    Ok(())
+}
+
+fn set_timeout_coefficient(command: &mut RunCommand, value: String) -> Result<(), String> {
+    if command.execution.timeout_coefficient.is_some() {
+        return Err("--timeout-coefficient can be supplied only once".to_owned());
+    }
+    let coefficient = value
+        .parse::<f64>()
+        .map_err(|_| "--timeout-coefficient requires a positive number".to_owned())?;
+    if !coefficient.is_finite() || coefficient <= 0.0 {
+        return Err("--timeout-coefficient requires a positive number".to_owned());
+    }
+    command.execution.timeout_coefficient = Some(coefficient);
+    Ok(())
+}
+
+fn set_test_flags(command: &mut RunCommand, value: String) -> Result<(), String> {
+    if command.execution.cargo_flags.is_some() {
+        return Err("--test-flags can be supplied only once".to_owned());
+    }
+    let flags = shell_words::split(&value)
+        .map_err(|error| format!("could not parse --test-flags: {error}"))?;
+    if flags.is_empty() {
+        return Err("--test-flags requires at least one Cargo argument".to_owned());
+    }
+    command.execution.cargo_flags = Some(flags);
     Ok(())
 }
 
@@ -265,13 +325,14 @@ fn run_mutation_tests(command: RunCommand) -> io::Result<ExitCode> {
         Ok(execution) => execution,
         Err(error) => return source_error(&error),
     };
-    let run = match mutarust::run_mutation_tests_with_test_execution(
+    let run = match mutarust::run_mutation_tests_with_controls(
         &command.targets,
         &registry,
         command.timeout,
         command.run_mutant_id.as_deref(),
         &filters,
         &execution,
+        &execution_controls(&command),
     ) {
         Ok(run) => run,
         Err(error) => return source_error(&error.to_string()),
@@ -288,7 +349,19 @@ fn test_execution(command: &RunCommand) -> Result<TestExecution, String> {
             command.debug,
         )
         .map_err(|error| error.to_string()),
-        None => Ok(TestExecution::cargo()),
+        None => Ok(TestExecution::cargo_with_options(
+            command.recursive_tests,
+            command.execution.cargo_flags.clone().unwrap_or_default(),
+        )),
+    }
+}
+
+fn execution_controls(command: &RunCommand) -> ExecutionControls {
+    ExecutionControls {
+        dry_run: command.execution.dry_run,
+        no_exec: command.execution.no_exec,
+        keep_temporary: command.execution.keep_temporary,
+        timeout_coefficient: command.execution.timeout_coefficient,
     }
 }
 
@@ -316,6 +389,12 @@ fn finish_mutation_run(
     configuration: &Configuration,
     run: &mutarust::MutationRun,
 ) -> io::Result<ExitCode> {
+    if command.execution.dry_run {
+        return print_dry_run(run);
+    }
+    if command.execution.no_exec {
+        return print_generated_mutants(run);
+    }
     let one_mutant = command.run_mutant_id.is_some();
     print_mutation_results(run, configuration.silent_mode, command.no_diffs, one_mutant)?;
     Ok(if one_mutant {
@@ -323,6 +402,28 @@ fn finish_mutation_run(
     } else {
         total_score_gate(run, configuration.min_msi)
     })
+}
+
+fn print_dry_run(run: &mutarust::MutationRun) -> io::Result<ExitCode> {
+    writeln!(
+        io::stdout().lock(),
+        "Total: {} mutation(s) would be generated. No files written, no tests run.",
+        run.total()
+    )?;
+    Ok(ExitCode::SUCCESS)
+}
+
+fn print_generated_mutants(run: &mutarust::MutationRun) -> io::Result<ExitCode> {
+    let mut stdout = io::stdout().lock();
+    for result in run.results() {
+        print_result_details(&mut stdout, result)?;
+    }
+    writeln!(stdout, "Generated: {}", run.total())?;
+    writeln!(
+        stdout,
+        "No tests run. Generated mutations are in the mutation areas above."
+    )?;
+    Ok(ExitCode::SUCCESS)
 }
 
 fn selection_error(path: Option<&std::path::Path>, error: &mutarust::ConfigurationError) -> String {
@@ -352,17 +453,7 @@ fn print_mutation_results(
     let mut stdout = io::stdout().lock();
     if !silent {
         for result in run.results() {
-            writeln!(
-                stdout,
-                "{} {} {}",
-                result.state,
-                result.source.display(),
-                result.mutator
-            )?;
-            writeln!(stdout, "  ID: {}", result.stable_id)?;
-            if let Some(error) = &result.error {
-                writeln!(stdout, "  {error}")?;
-            }
+            print_result_details(&mut stdout, result)?;
             if result.state == mutarust::MutationState::Escaped && !no_diffs {
                 write!(stdout, "{}", result.diff)?;
             }
@@ -390,6 +481,24 @@ fn print_mutation_results(
             "{} | {} | {} | {} | {}",
             summary.mutator, summary.killed, summary.escaped, summary.skipped, summary.total
         )?;
+    }
+    Ok(())
+}
+
+fn print_result_details(
+    output: &mut impl Write,
+    result: &mutarust::MutationResult,
+) -> io::Result<()> {
+    writeln!(
+        output,
+        "{} {} {}",
+        result.state,
+        result.source.display(),
+        result.mutator
+    )?;
+    writeln!(output, "  ID: {}", result.stable_id)?;
+    if let Some(detail) = &result.error {
+        writeln!(output, "  {detail}")?;
     }
     Ok(())
 }
@@ -434,7 +543,7 @@ enum Command {
     Version,
     ListMutators,
     ListFiles(Vec<String>),
-    Run(RunCommand),
+    Run(Box<RunCommand>),
     Invalid(String),
 }
 
@@ -445,11 +554,22 @@ struct RunCommand {
     recursive_tests: bool,
     verbose: bool,
     debug: bool,
+    execution: ExecutionOptions,
     function_match: Option<String>,
     configuration: Option<PathBuf>,
     no_diffs: bool,
     run_mutant_id: Option<String>,
     settings: CommandSettings,
+}
+
+#[derive(Default)]
+struct ExecutionOptions {
+    dry_run: bool,
+    no_exec: bool,
+    keep_temporary: bool,
+    fixed_timeout: bool,
+    timeout_coefficient: Option<f64>,
+    cargo_flags: Option<Vec<String>>,
 }
 
 impl Default for RunCommand {
@@ -461,6 +581,7 @@ impl Default for RunCommand {
             recursive_tests: false,
             verbose: false,
             debug: false,
+            execution: ExecutionOptions::default(),
             function_match: None,
             configuration: None,
             no_diffs: false,
@@ -468,4 +589,98 @@ impl Default for RunCommand {
             settings: CommandSettings::default(),
         }
     }
+}
+
+fn validate_execution_options(command: &RunCommand) -> Result<(), String> {
+    validation_error(command).map_or(Ok(()), |message| Err(message.to_owned()))
+}
+
+fn validation_error(command: &RunCommand) -> Option<&'static str> {
+    run_mode_error(command)
+        .or_else(|| dry_run_control_error(command))
+        .or_else(|| cargo_control_error(command))
+}
+
+fn dry_run_control_error(command: &RunCommand) -> Option<&'static str> {
+    let execution = &command.execution;
+    [
+        (
+            execution.dry_run && execution.keep_temporary,
+            "--dry-run cannot be used with --do-not-remove-tmp-folder",
+        ),
+        (
+            execution.dry_run && execution.fixed_timeout,
+            "--dry-run cannot be used with --timeout",
+        ),
+        (
+            execution.dry_run && execution.timeout_coefficient.is_some(),
+            "--dry-run cannot be used with --timeout-coefficient",
+        ),
+        (
+            execution.dry_run && execution.cargo_flags.is_some(),
+            "--dry-run cannot be used with --test-flags",
+        ),
+        (
+            execution.dry_run && command.recursive_tests,
+            "--dry-run cannot be used with --test-recursive",
+        ),
+    ]
+    .into_iter()
+    .find_map(|(invalid, message)| invalid.then_some(message))
+}
+
+fn run_mode_error(command: &RunCommand) -> Option<&'static str> {
+    let execution = &command.execution;
+    [
+        (
+            execution.dry_run && execution.no_exec,
+            "--dry-run and --no-exec cannot be used together",
+        ),
+        (
+            execution.dry_run && command.custom_command.is_some(),
+            "--dry-run cannot be used with --exec",
+        ),
+        (
+            execution.no_exec && command.custom_command.is_some(),
+            "--no-exec cannot be used with --exec",
+        ),
+    ]
+    .into_iter()
+    .find_map(|(invalid, message)| invalid.then_some(message))
+}
+
+fn cargo_control_error(command: &RunCommand) -> Option<&'static str> {
+    let execution = &command.execution;
+    [
+        (
+            execution.timeout_coefficient.is_some() && execution.fixed_timeout,
+            "--timeout-coefficient cannot be used with --timeout",
+        ),
+        (
+            execution.timeout_coefficient.is_some() && command.custom_command.is_some(),
+            "--timeout-coefficient requires the Cargo test command",
+        ),
+        (
+            execution.timeout_coefficient.is_some() && execution.no_exec,
+            "--timeout-coefficient cannot be used with --no-exec",
+        ),
+        (
+            execution.no_exec && execution.fixed_timeout,
+            "--no-exec cannot be used with --timeout",
+        ),
+        (
+            execution.cargo_flags.is_some() && command.custom_command.is_some(),
+            "--test-flags cannot be used with --exec",
+        ),
+        (
+            execution.cargo_flags.is_some() && execution.no_exec,
+            "--test-flags cannot be used with --no-exec",
+        ),
+        (
+            command.recursive_tests && execution.no_exec,
+            "--test-recursive cannot be used with --no-exec",
+        ),
+    ]
+    .into_iter()
+    .find_map(|(invalid, message)| invalid.then_some(message))
 }
