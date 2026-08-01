@@ -137,14 +137,19 @@ fn installed_command_lists_production_sources() {
             )
         })
         .unwrap_or_default();
-    let alpha_source_count = 9 + usize::from(cfg!(windows));
-    let alpha_recursive_source_count = 6 + usize::from(cfg!(windows));
+    let alpha_source_count = 10 + usize::from(cfg!(windows));
+    let alpha_recursive_source_count = 7 + usize::from(cfg!(windows));
     let workspace_direct = format!(
-        "{}\n{}\n{}\n{}\n{}\n{}{}\n{}\n{}\n{}",
+        "{}\n{}\n{}\n{}\n{}\n{}\n{}{}\n{}\n{}\n{}",
         alpha.join("bin").join("cli_test.rs").display(),
         alpha.join("source").join("debug_only.rs").display(),
         alpha.join("source").join("entry.rs").display(),
         alpha.join("source").join("helper.rs").display(),
+        alpha
+            .join("source")
+            .join("nested")
+            .join("custom.rs")
+            .display(),
         alpha
             .join("source")
             .join("nested")
@@ -168,7 +173,7 @@ fn installed_command_lists_production_sources() {
     assert_eq!(from_workspace, workspace_direct);
 
     let workspace_recursive = format!(
-        "{}\n{}\n{}\n{}\n{}\n{}\n{}{}\n{}\n{}\n{}",
+        "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}{}\n{}\n{}\n{}",
         alpha.join("bin").join("cli_test.rs").display(),
         alpha.join("source").join("debug_only.rs").display(),
         alpha.join("source").join("entry.rs").display(),
@@ -177,6 +182,11 @@ fn installed_command_lists_production_sources() {
             .join("source")
             .join("nested")
             .join("inside.rs")
+            .display(),
+        alpha
+            .join("source")
+            .join("nested")
+            .join("custom.rs")
             .display(),
         alpha
             .join("source")
@@ -432,7 +442,7 @@ fn write_workspace_fixture(root: &Path) -> PathBuf {
         .expect("workspace disabled source must be written");
     fs::write(
         alpha.join("source").join("entry.rs"),
-        "#[cfg(debug_assertions)] mod debug_only;\nmod helper;\n#[cfg(feature = \"extra\")] mod extra;\n#[cfg_attr(feature = \"extra\", path = \"feature_extra.rs\")] mod switch;\n#[cfg_attr(feature = \"enabled\", cfg(test))] mod cfg_attr_test;\n#[cfg(windows)] mod windows_only;\n#[cfg_attr(not(test), path = \"nested/production_feature.rs\")]\n#[cfg_attr(test, path = \"nested/test_feature.rs\")]\nmod configured;\n",
+        "#[cfg(debug_assertions)] mod debug_only;\nmod helper;\n#[cfg(local_mode)]\n#[path = \"nested/custom.rs\"]\nmod custom;\n#[cfg(feature = \"extra\")] mod extra;\n#[cfg_attr(feature = \"extra\", path = \"feature_extra.rs\")] mod switch;\n#[cfg_attr(feature = \"enabled\", cfg(test))] mod cfg_attr_test;\n#[cfg(windows)] mod windows_only;\n#[cfg_attr(not(test), path = \"nested/production_feature.rs\")]\n#[cfg_attr(test, path = \"nested/test_feature.rs\")]\nmod configured;\n",
     )
     .expect("workspace library source must be written");
     fs::write(
@@ -460,6 +470,11 @@ fn write_workspace_fixture(root: &Path) -> PathBuf {
         "pub fn inside() {}\n",
     )
     .expect("workspace nested source must be written");
+    fs::write(
+        alpha.join("source").join("nested").join("custom.rs"),
+        "pub fn custom() {}\n",
+    )
+    .expect("workspace custom configuration source must be written");
     fs::write(
         alpha
             .join("source")

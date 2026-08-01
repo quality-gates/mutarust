@@ -829,7 +829,7 @@ fn list_or_path_name(configuration: &Meta) -> String {
 }
 
 fn target_flag_is_active(name: &str) -> bool {
-    rustc_configurations().contains(name)
+    rustc_configurations().contains(name) || !is_known_configuration_flag(name)
 }
 
 fn target_configuration_is_active(value: &syn::MetaNameValue) -> bool {
@@ -841,6 +841,15 @@ fn target_configuration_is_active(value: &syn::MetaNameValue) -> bool {
     };
 
     rustc_configurations().contains(&format!("{configuration_name}=\"{configuration_value}\""))
+        || !is_known_configuration_value(configuration_name)
+}
+
+fn is_known_configuration_flag(name: &str) -> bool {
+    matches!(name, "unix" | "windows" | "debug_assertions")
+}
+
+fn is_known_configuration_value(name: &syn::Ident) -> bool {
+    name == "panic" || name.to_string().starts_with("target_")
 }
 
 fn rustc_configurations() -> &'static BTreeSet<String> {
