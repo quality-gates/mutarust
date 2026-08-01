@@ -1532,6 +1532,192 @@ fn installed_command_stops_test_at_timeout() {
 }
 
 #[cfg(unix)]
+#[test]
+fn installed_command_runs_custom_commands_with_a_stable_contract() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_mutation_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    let source_before = fs::read(&source).expect("custom-command source must be readable");
+    let command = root.join("custom-command");
+    let record = root.join("custom-command-record");
+    let child_identifier = root.join("custom-command-child");
+    let temporary_root = root.join("custom-command-temporary");
+    fs::create_dir(&temporary_root).expect("custom-command temporary root must be created");
+    fs::write(
+        &command,
+        "#!/bin/sh\nif [ ! -f \"$MUTATE_ORIGINAL\" ] || [ ! -f \"$MUTATE_CHANGED\" ]; then\n  exit 9\nfi\nif cmp -s \"$MUTATE_ORIGINAL\" \"$MUTATE_CHANGED\"; then\n  exit 10\nfi\nprintf '%s\\n' \"$MUTATE_ORIGINAL\" \"$MUTATE_CHANGED\" \"$MUTATE_PACKAGE\" \"$MUTATE_TIMEOUT\" \"$TEST_RECURSIVE\" \"$MUTATE_VERBOSE\" \"$MUTATE_DEBUG\" \"$PWD\" > \"$MUTARUST_CUSTOM_RECORD\"\nif [ \"$MUTARUST_CUSTOM_WAIT\" = true ]; then\n  sleep 30 &\n  echo $! > \"$MUTARUST_CUSTOM_CHILD\"\n  wait\nfi\nexit \"${MUTARUST_CUSTOM_EXIT:-1}\"\n",
+    )
+    .expect("custom command must be written");
+    fs::set_permissions(&command, fs::Permissions::from_mode(0o755))
+        .expect("custom command must be executable");
+
+    for (exit, state) in [
+        ("0", "Killed"),
+        ("1", "Escaped"),
+        ("2", "Skipped"),
+        ("3", "Errored"),
+    ] {
+        let output = Command::new(command_path(&install))
+            .args([
+                "--exec",
+                command.to_str().expect("custom command path must be UTF-8"),
+                "--exec-timeout",
+                "1",
+                "--test-recursive",
+                "--verbose",
+                "--debug",
+            ])
+            .arg(&source)
+            .current_dir(&fixture)
+            .env("MUTARUST_CUSTOM_EXIT", exit)
+            .env("MUTARUST_CUSTOM_RECORD", &record)
+            .env("TMPDIR", &temporary_root)
+            .output()
+            .expect("installed mutarust must start custom command");
+        assert!(
+            output.status.success(),
+            "custom command status {exit} must complete: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8(output.stdout).expect("custom command output must be UTF-8");
+        assert!(
+            stdout.contains(&format!("{state}: 2")),
+            "custom command status {exit} must map to {state}: {stdout}"
+        );
+        if exit == "3" {
+            assert!(
+                stdout.contains("custom command exited with status 3"),
+                "unknown custom status must have clear detail: {stdout}"
+            );
+        }
+    }
+
+    let values = fs::read_to_string(&record)
+        .expect("custom command must record its environment")
+        .lines()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        values.len(),
+        8,
+        "custom command must receive all contract values"
+    );
+    assert_ne!(values[0], source.display().to_string());
+    assert_ne!(values[1], source.display().to_string());
+    assert_eq!(values[2], "mutation-checked");
+    assert_eq!(values[3], "1");
+    assert_eq!(values[4], "true");
+    assert_eq!(values[5], "true");
+    assert_eq!(values[6], "true");
+    let temporary_root =
+        fs::canonicalize(&temporary_root).expect("custom-command temporary root must resolve");
+    assert!(
+        values[7].starts_with(
+            temporary_root
+                .to_str()
+                .expect("temporary path must be UTF-8")
+        ),
+        "custom command must run in an isolated workspace: {}",
+        values[7]
+    );
+
+    let missing = Command::new(command_path(&install))
+        .args([
+            "--exec",
+            root.join("missing-custom-command")
+                .to_str()
+                .expect("missing command path must be UTF-8"),
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must reject a missing custom command");
+    assert_eq!(missing.status.code(), Some(3));
+    assert!(
+        String::from_utf8_lossy(&missing.stderr).contains("custom command"),
+        "missing custom command must have a clear error"
+    );
+
+    let invalid = Command::new(command_path(&install))
+        .args(["--exec", "'"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must reject an invalid custom command");
+    assert_eq!(invalid.status.code(), Some(3));
+    assert!(
+        String::from_utf8_lossy(&invalid.stderr).contains("custom command"),
+        "invalid custom command must have a clear error"
+    );
+
+    let non_executable = root.join("non-executable-custom-command");
+    fs::write(&non_executable, "#!/bin/sh\nexit 1\n")
+        .expect("non-executable custom command must be written");
+    fs::set_permissions(&non_executable, fs::Permissions::from_mode(0o600))
+        .expect("non-executable custom command permissions must be set");
+    let non_executable = Command::new(command_path(&install))
+        .args([
+            "--exec",
+            non_executable
+                .to_str()
+                .expect("non-executable command path must be UTF-8"),
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must reject a non-executable custom command");
+    assert_eq!(non_executable.status.code(), Some(3));
+    assert!(
+        String::from_utf8_lossy(&non_executable.stderr).contains("custom command"),
+        "a non-executable command must have a clear error"
+    );
+
+    let started = std::time::Instant::now();
+    let timed_out = Command::new(command_path(&install))
+        .args([
+            "--exec",
+            command.to_str().expect("custom command path must be UTF-8"),
+            "--exec-timeout",
+            "1",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .env("MUTARUST_CUSTOM_WAIT", "true")
+        .env("MUTARUST_CUSTOM_CHILD", &child_identifier)
+        .env("MUTARUST_CUSTOM_RECORD", &record)
+        .env("TMPDIR", &temporary_root)
+        .output()
+        .expect("installed mutarust must start timed custom command");
+    assert!(timed_out.status.success());
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(15),
+        "custom-command timeout must stop promptly"
+    );
+    let stdout = String::from_utf8(timed_out.stdout).expect("timeout output must be UTF-8");
+    assert!(
+        stdout.contains("Errored: 2")
+            && stdout.contains("custom command timed out after 1 seconds"),
+        "custom-command timeout must produce errored results: {stdout}"
+    );
+    let child = fs::read_to_string(&child_identifier)
+        .expect("timed custom command child must be written")
+        .trim()
+        .to_owned();
+    assert!(
+        process_has_stopped(&child),
+        "custom-command timeout must stop child processes"
+    );
+    assert!(
+        mutarust_temp_entries(&temporary_root).is_empty(),
+        "custom-command workspaces must be removed"
+    );
+    assert_eq!(fs::read(&source).unwrap(), source_before);
+}
+
+#[cfg(unix)]
 fn process_has_stopped(identifier: &str) -> bool {
     let output = Command::new("ps")
         .args(["-o", "stat=", "-p", identifier])
@@ -1539,6 +1725,93 @@ fn process_has_stopped(identifier: &str) -> bool {
         .expect("process state check must start");
     let state = String::from_utf8_lossy(&output.stdout);
     state.trim().is_empty() || state.trim_start().starts_with('Z')
+}
+
+#[cfg(unix)]
+#[test]
+fn installed_command_interrupts_custom_command_children() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_mutation_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    let source_before = fs::read(&source).expect("interrupt source must be readable");
+    let custom_command = root.join("interrupt-custom-command");
+    let command_identifier = root.join("interrupt-custom-command-identifier");
+    let child_identifier = root.join("interrupt-custom-command-child");
+    let temporary_root = root.join("interrupt-custom-command-temporary");
+    fs::create_dir(&temporary_root).expect("mutation temporary root must be created");
+    fs::write(
+        &custom_command,
+        "#!/bin/sh\necho $$ > \"$MUTARUST_INTERRUPTED_CUSTOM_COMMAND\"\nsleep 30 &\necho $! > \"$MUTARUST_INTERRUPTED_CUSTOM_CHILD\"\nwait\n",
+    )
+    .expect("custom command must be written");
+    fs::set_permissions(&custom_command, fs::Permissions::from_mode(0o755))
+        .expect("custom command must be executable");
+
+    let mut command = Command::new(command_path(&install));
+    let process = command
+        .args([
+            "--exec",
+            custom_command
+                .to_str()
+                .expect("custom command path must be UTF-8"),
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .env("MUTARUST_INTERRUPTED_CUSTOM_COMMAND", &command_identifier)
+        .env("MUTARUST_INTERRUPTED_CUSTOM_CHILD", &child_identifier)
+        .env("TMPDIR", &temporary_root)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("installed mutarust must start");
+    wait_for_file(&command_identifier, "interrupted custom command must start");
+    wait_for_file(&child_identifier, "interrupted custom child must start");
+    let signal = Command::new("kill")
+        .args(["-INT", &process.id().to_string()])
+        .status()
+        .expect("interrupt command must start");
+    assert!(signal.success(), "interrupt command must succeed");
+
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = sender.send(process.wait_with_output());
+    });
+    let output = receiver
+        .recv_timeout(std::time::Duration::from_secs(4))
+        .expect("interrupted mutarust must stop promptly")
+        .expect("installed mutarust must stop");
+    assert!(
+        !output.status.success(),
+        "an interrupted mutation run must fail"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("mutation run interrupted"),
+        "the interrupt diagnostic must be clear"
+    );
+    let custom_command = fs::read_to_string(&command_identifier)
+        .expect("interrupted custom command identifier must be written")
+        .trim()
+        .to_owned();
+    let child = fs::read_to_string(&child_identifier)
+        .expect("interrupted custom child identifier must be written")
+        .trim()
+        .to_owned();
+    assert!(
+        process_has_stopped(&custom_command),
+        "the interrupt must stop the custom command"
+    );
+    assert!(
+        process_has_stopped(&child),
+        "the interrupt must stop the custom command child"
+    );
+    assert!(
+        mutarust_temp_entries(&temporary_root).is_empty(),
+        "the interrupt must remove each mutation workspace"
+    );
+    assert_eq!(fs::read(&source).unwrap(), source_before);
 }
 
 #[cfg(unix)]

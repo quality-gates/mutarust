@@ -193,6 +193,123 @@ impl fmt::Display for RunError {
 
 impl std::error::Error for RunError {}
 
+/// Test-command settings for one mutation run.
+#[derive(Clone, Debug)]
+pub struct TestExecution {
+    command: TestCommand,
+    recursive: bool,
+    verbose: bool,
+    debug: bool,
+}
+
+impl TestExecution {
+    /// Uses the built-in Cargo test command.
+    pub fn cargo() -> Self {
+        Self {
+            command: TestCommand::Cargo,
+            recursive: false,
+            verbose: false,
+            debug: false,
+        }
+    }
+
+    /// Uses a shell-quoted custom command for each mutant.
+    pub fn custom(
+        command: &str,
+        recursive: bool,
+        verbose: bool,
+        debug: bool,
+    ) -> Result<Self, RunError> {
+        Ok(Self {
+            command: TestCommand::Custom(CustomCommand::parse(command)?),
+            recursive,
+            verbose,
+            debug,
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+enum TestCommand {
+    Cargo,
+    Custom(CustomCommand),
+}
+
+#[derive(Clone, Debug)]
+struct CustomCommand {
+    arguments: Vec<String>,
+}
+
+impl CustomCommand {
+    fn parse(command: &str) -> Result<Self, RunError> {
+        let arguments = shell_words::split(command)
+            .map_err(|error| run_error(format!("could not parse custom command: {error}")))?;
+        let Some(program) = arguments.first() else {
+            return Err(run_error("custom command must not be empty"));
+        };
+        validate_custom_program(program)?;
+        Ok(Self { arguments })
+    }
+}
+
+fn validate_custom_program(program: &str) -> Result<(), RunError> {
+    let path = Path::new(program);
+    let available = if path.components().count() > 1 {
+        custom_program_is_available(path)
+    } else {
+        env::var_os("PATH").is_some_and(|paths| {
+            env::split_paths(&paths)
+                .any(|directory| custom_program_is_available(&directory.join(program)))
+        })
+    };
+    if available {
+        Ok(())
+    } else {
+        Err(run_error(format!(
+            "could not run custom command: program not found: {program}"
+        )))
+    }
+}
+
+fn custom_program_is_available(path: &Path) -> bool {
+    if path.is_file() {
+        return custom_program_is_executable(path);
+    }
+    #[cfg(windows)]
+    {
+        return path.extension().is_none() && windows_path_program_is_available(path);
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
+#[cfg(unix)]
+fn custom_program_is_executable(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::metadata(path).is_ok_and(|metadata| metadata.permissions().mode() & 0o111 != 0)
+}
+
+#[cfg(not(unix))]
+fn custom_program_is_executable(_path: &Path) -> bool {
+    true
+}
+
+#[cfg(windows)]
+fn windows_path_program_is_available(path: &Path) -> bool {
+    let extensions =
+        env::var_os("PATHEXT").unwrap_or_else(|| std::ffi::OsString::from(".COM;.EXE;.BAT;.CMD"));
+    extensions
+        .to_string_lossy()
+        .split(';')
+        .map(str::trim)
+        .filter(|extension| !extension.is_empty())
+        .map(|extension| path.with_extension(extension.trim_start_matches('.')))
+        .any(|path| path.is_file())
+}
+
 /// Runs each generated mutant in an isolated copy of its Cargo workspace.
 pub fn run_mutation_tests(
     targets: &[String],
@@ -232,6 +349,25 @@ pub fn run_mutation_tests_with_timeout_for_mutant_and_filters(
     stable_id: Option<&str>,
     filters: &SourceFilters,
 ) -> Result<MutationRun, RunError> {
+    run_mutation_tests_with_test_execution(
+        targets,
+        registry,
+        timeout,
+        stable_id,
+        filters,
+        &TestExecution::cargo(),
+    )
+}
+
+/// Runs mutants with the selected test command and source scope.
+pub fn run_mutation_tests_with_test_execution(
+    targets: &[String],
+    registry: &Registry,
+    timeout: Duration,
+    stable_id: Option<&str>,
+    filters: &SourceFilters,
+    execution: &TestExecution,
+) -> Result<MutationRun, RunError> {
     let _run_lock = MUTATION_RUN_LOCK
         .lock()
         .map_err(|_| run_error("could not start mutation run after a previous panic"))?;
@@ -244,7 +380,7 @@ pub fn run_mutation_tests_with_timeout_for_mutant_and_filters(
         if mutation_run_was_interrupted() {
             return Err(run_error("mutation run interrupted"));
         }
-        results.push(test_candidate(candidate, timeout));
+        results.push(test_candidate(candidate, timeout, execution));
         if mutation_run_was_interrupted() {
             return Err(run_error("mutation run interrupted"));
         }
@@ -544,7 +680,7 @@ fn workspace_for(source: &Path) -> Result<Workspace, RunError> {
             source.display()
         ))
     })?;
-    let manifest = package_manifest_for(&metadata, source)?;
+    let package = package_for(&metadata, source)?;
     let source_root = common_ancestor(&[root.clone(), source.to_path_buf()])?;
     let (configurations, cargo_home) = cargo_configurations(&root)?;
     let CopyPaths {
@@ -561,7 +697,8 @@ fn workspace_for(source: &Path) -> Result<Workspace, RunError> {
     Ok(Workspace {
         root,
         source_root,
-        manifest,
+        manifest: package.manifest,
+        package_name: package.name,
         layout_root,
         copy_paths,
         configurations,
@@ -620,8 +757,8 @@ fn metadata_for_directory(directory: &Path, source: &Path) -> Result<Metadata, R
         })
 }
 
-fn package_manifest_for(metadata: &Metadata, source: &Path) -> Result<PathBuf, RunError> {
-    let manifest = metadata
+fn package_for(metadata: &Metadata, source: &Path) -> Result<CargoPackage, RunError> {
+    let package = metadata
         .packages
         .iter()
         .filter_map(|package| {
@@ -632,18 +769,31 @@ fn package_manifest_for(metadata: &Metadata, source: &Path) -> Result<PathBuf, R
                 .filter_map(|path| fs::canonicalize(path.as_std_path()).ok())
                 .filter(|path| source.starts_with(path))
                 .max_by_key(|path| path.components().count())?;
-            Some((source_root, package.manifest_path.as_std_path()))
+            Some((source_root, package))
         })
         .max_by_key(|(source_root, _)| source_root.components().count())
-        .map(|(_, manifest)| manifest)
+        .map(|(_, package)| package)
         .ok_or_else(|| {
             run_error(format!(
                 "could not find the Cargo package that owns {}",
                 source.display()
             ))
         })?;
-    fs::canonicalize(manifest)
-        .map_err(|error| run_error(format!("could not resolve {}: {error}", manifest.display())))
+    let manifest = fs::canonicalize(package.manifest_path.as_std_path()).map_err(|error| {
+        run_error(format!(
+            "could not resolve {}: {error}",
+            package.manifest_path
+        ))
+    })?;
+    Ok(CargoPackage {
+        manifest,
+        name: package.name.to_string(),
+    })
+}
+
+struct CargoPackage {
+    manifest: PathBuf,
+    name: String,
 }
 
 fn copy_paths_for(metadata: &Metadata, root: &Path, source: &Path) -> Result<CopyPaths, RunError> {
@@ -1211,8 +1361,12 @@ fn add_mutator_candidates(
     Ok(())
 }
 
-fn test_candidate(candidate: MutationCandidate, timeout: Duration) -> MutationResult {
-    let (state, error) = test_candidate_state(&candidate, timeout)
+fn test_candidate(
+    candidate: MutationCandidate,
+    timeout: Duration,
+    execution: &TestExecution,
+) -> MutationResult {
+    let (state, error) = test_candidate_state(&candidate, timeout, execution)
         .unwrap_or_else(|error| (MutationState::Errored, Some(error.to_string())));
     MutationResult {
         source: candidate.evidence.source,
@@ -1227,36 +1381,77 @@ fn test_candidate(candidate: MutationCandidate, timeout: Duration) -> MutationRe
 fn test_candidate_state(
     candidate: &MutationCandidate,
     timeout: Duration,
+    execution: &TestExecution,
 ) -> Result<(MutationState, Option<String>), RunError> {
     stop_if_interrupted()?;
     let temporary = TemporaryWorkspace::create()?;
     let result = (|| {
         let workspace = copy_workspace(&candidate.workspace, temporary.path())?;
-        write_mutant(&candidate.workspace, temporary.path(), candidate)?;
-        match run_cargo_command(
-            temporary.path(),
-            &workspace,
-            &candidate.workspace,
-            CargoAction::Compile,
-            timeout,
-        )? {
-            CargoOutcome::Passed => {
-                test_compiled_mutant(temporary.path(), &workspace, &candidate.workspace, timeout)
+        match &execution.command {
+            TestCommand::Cargo => {
+                test_cargo_mutant(candidate, temporary.path(), &workspace, timeout)
             }
-            CargoOutcome::Failed(detail) => Ok((
-                MutationState::Skipped,
-                Some(format!("mutant did not compile: {}", cargo_detail(detail))),
-            )),
-            CargoOutcome::TimedOut => Ok((
-                MutationState::Errored,
-                Some(format!(
-                    "mutant compilation timed out after {} seconds",
-                    timeout.as_secs()
-                )),
-            )),
+            TestCommand::Custom(command) => test_custom_mutant(
+                candidate,
+                temporary.path(),
+                &workspace,
+                command,
+                execution,
+                timeout,
+            ),
         }
     })();
     temporary.finish(result)
+}
+
+fn test_cargo_mutant(
+    candidate: &MutationCandidate,
+    temporary: &Path,
+    copied_workspace: &Path,
+    timeout: Duration,
+) -> Result<(MutationState, Option<String>), RunError> {
+    write_mutant(&candidate.workspace, temporary, candidate)?;
+    match run_cargo_command(
+        temporary,
+        copied_workspace,
+        &candidate.workspace,
+        CargoAction::Compile,
+        timeout,
+    )? {
+        CargoOutcome::Passed => {
+            test_compiled_mutant(temporary, copied_workspace, &candidate.workspace, timeout)
+        }
+        CargoOutcome::Failed(detail) => Ok((
+            MutationState::Skipped,
+            Some(format!("mutant did not compile: {}", cargo_detail(detail))),
+        )),
+        CargoOutcome::TimedOut => Ok((
+            MutationState::Errored,
+            Some(format!(
+                "mutant compilation timed out after {} seconds",
+                timeout.as_secs()
+            )),
+        )),
+    }
+}
+
+fn test_custom_mutant(
+    candidate: &MutationCandidate,
+    temporary: &Path,
+    copied_workspace: &Path,
+    command: &CustomCommand,
+    execution: &TestExecution,
+    timeout: Duration,
+) -> Result<(MutationState, Option<String>), RunError> {
+    let sources = write_custom_mutant(&candidate.workspace, temporary, candidate)?;
+    run_custom_command(
+        command,
+        copied_workspace,
+        &candidate.workspace,
+        &sources,
+        execution,
+        timeout,
+    )
 }
 
 fn test_compiled_mutant(
@@ -1292,14 +1487,54 @@ fn write_mutant(
     let path = copied_path(workspace, temporary, &candidate.source)?;
     let source = fs::read_to_string(&path)
         .map_err(|error| run_error(format!("could not read {}: {error}", path.display())))?;
-    let mutant = candidate.mutation.apply(&source).ok_or_else(|| {
+    let mutant = apply_candidate_mutation(candidate, &source)?;
+    fs::write(&path, mutant)
+        .map_err(|error| run_error(format!("could not write {}: {error}", path.display())))
+}
+
+struct CustomMutationSources {
+    original: PathBuf,
+    changed: PathBuf,
+}
+
+fn write_custom_mutant(
+    workspace: &Workspace,
+    temporary: &Path,
+    candidate: &MutationCandidate,
+) -> Result<CustomMutationSources, RunError> {
+    let changed = copied_path(workspace, temporary, &candidate.source)?;
+    let source = fs::read_to_string(&changed)
+        .map_err(|error| run_error(format!("could not read {}: {error}", changed.display())))?;
+    let relative = changed.strip_prefix(temporary).map_err(|_| {
+        run_error(format!(
+            "could not prepare custom command source {}",
+            changed.display()
+        ))
+    })?;
+    let original = temporary.join("original-source").join(relative);
+    let parent = original
+        .parent()
+        .expect("original source must have a parent");
+    fs::create_dir_all(parent)
+        .map_err(|error| run_error(format!("could not create {}: {error}", parent.display())))?;
+    fs::write(&original, &source)
+        .map_err(|error| run_error(format!("could not write {}: {error}", original.display())))?;
+    let mutant = apply_candidate_mutation(candidate, &source)?;
+    fs::write(&changed, mutant)
+        .map_err(|error| run_error(format!("could not write {}: {error}", changed.display())))?;
+    Ok(CustomMutationSources { original, changed })
+}
+
+fn apply_candidate_mutation(
+    candidate: &MutationCandidate,
+    source: &str,
+) -> Result<String, RunError> {
+    candidate.mutation.apply(source).ok_or_else(|| {
         run_error(format!(
             "could not apply mutation to {}",
             candidate.source.display()
         ))
-    })?;
-    fs::write(&path, mutant)
-        .map_err(|error| run_error(format!("could not write {}: {error}", path.display())))
+    })
 }
 
 #[derive(Clone, Copy)]
@@ -1314,12 +1549,17 @@ enum CargoOutcome {
     TimedOut,
 }
 
-struct CargoChild {
+enum ProcessOutcome {
+    Exited(std::process::ExitStatus),
+    TimedOut,
+}
+
+struct ProcessChild {
     process: std::process::Child,
     active: bool,
 }
 
-impl CargoChild {
+impl ProcessChild {
     fn new(process: std::process::Child) -> Self {
         Self {
             process,
@@ -1335,7 +1575,7 @@ impl CargoChild {
             }
             Ok(None) => Ok(None),
             Err(error) => {
-                let operation = run_error(format!("could not wait for cargo test: {error}"));
+                let operation = run_error(format!("could not wait for test command: {error}"));
                 match self.stop_and_reap() {
                     Ok(()) => Err(operation),
                     Err(cleanup) => Err(run_error(format!("{operation}; {cleanup}"))),
@@ -1345,14 +1585,14 @@ impl CargoChild {
     }
 
     fn stop_and_reap(&mut self) -> Result<(), RunError> {
-        let stop_error = stop_cargo_test(&mut self.process).err();
+        let stop_error = stop_process(&mut self.process).err();
         if stop_error.is_some() {
             let _ = self.process.kill();
         }
         let wait = self
             .process
             .wait()
-            .map_err(|error| run_error(format!("could not reap cargo test: {error}")));
+            .map_err(|error| run_error(format!("could not reap test command: {error}")));
         if wait.is_ok() {
             self.active = false;
         }
@@ -1365,10 +1605,10 @@ impl CargoChild {
     }
 }
 
-impl Drop for CargoChild {
+impl Drop for ProcessChild {
     fn drop(&mut self) {
         if self.active {
-            let _ = stop_cargo_test(&mut self.process);
+            let _ = stop_process(&mut self.process);
             let _ = self.process.kill();
             let _ = self.process.wait();
         }
@@ -1415,32 +1655,86 @@ fn run_cargo_command(
     }
     stop_if_interrupted()?;
     configure_process_group(&mut command);
-    let mut child = CargoChild::new(
+    let mut child = ProcessChild::new(
         command
             .spawn()
             .map_err(|error| run_error(format!("could not run cargo test: {error}")))?,
     );
-    let outcome = wait_for_cargo_test(&mut child, timeout)?;
-    if matches!(outcome, CargoOutcome::Failed(_)) {
-        let detail = fs::read_to_string(&diagnostic_path).unwrap_or_default();
-        return Ok(CargoOutcome::Failed(detail));
-    }
+    let outcome = match wait_for_process(&mut child, timeout)? {
+        ProcessOutcome::Exited(status) if status.success() => CargoOutcome::Passed,
+        ProcessOutcome::Exited(_) => {
+            CargoOutcome::Failed(fs::read_to_string(&diagnostic_path).unwrap_or_default())
+        }
+        ProcessOutcome::TimedOut => CargoOutcome::TimedOut,
+    };
     Ok(outcome)
 }
 
-fn wait_for_cargo_test(
-    child: &mut CargoChild,
+fn run_custom_command(
+    command: &CustomCommand,
+    copied_workspace: &Path,
+    workspace: &Workspace,
+    sources: &CustomMutationSources,
+    execution: &TestExecution,
     timeout: Duration,
-) -> Result<CargoOutcome, RunError> {
+) -> Result<(MutationState, Option<String>), RunError> {
+    let mut process = Command::new(&command.arguments[0]);
+    process
+        .args(&command.arguments[1..])
+        .current_dir(copied_workspace)
+        .env("MUTATE_ORIGINAL", &sources.original)
+        .env("MUTATE_CHANGED", &sources.changed)
+        .env("MUTATE_PACKAGE", &workspace.package_name)
+        .env("MUTATE_TIMEOUT", timeout.as_secs().to_string())
+        .env("TEST_RECURSIVE", execution.recursive.to_string())
+        .env("MUTATE_VERBOSE", execution.verbose.to_string())
+        .env("MUTATE_DEBUG", execution.debug.to_string())
+        .stdin(Stdio::null())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit());
+    stop_if_interrupted()?;
+    configure_process_group(&mut process);
+    let mut child = ProcessChild::new(
+        process
+            .spawn()
+            .map_err(|error| run_error(format!("could not run custom command: {error}")))?,
+    );
+    match wait_for_process(&mut child, timeout)? {
+        ProcessOutcome::TimedOut => Ok((
+            MutationState::Errored,
+            Some(format!(
+                "custom command timed out after {} seconds",
+                timeout.as_secs()
+            )),
+        )),
+        ProcessOutcome::Exited(status) => Ok(custom_command_result(status)),
+    }
+}
+
+fn custom_command_result(status: std::process::ExitStatus) -> (MutationState, Option<String>) {
+    match status.code() {
+        Some(0) => (MutationState::Killed, None),
+        Some(1) => (MutationState::Escaped, None),
+        Some(2) => (MutationState::Skipped, None),
+        Some(code) => (
+            MutationState::Errored,
+            Some(format!("custom command exited with status {code}")),
+        ),
+        None => (
+            MutationState::Errored,
+            Some("custom command stopped without an exit status".to_owned()),
+        ),
+    }
+}
+
+fn wait_for_process(
+    child: &mut ProcessChild,
+    timeout: Duration,
+) -> Result<ProcessOutcome, RunError> {
     let started = Instant::now();
     loop {
         if let Some(status) = child.try_wait()? {
-            let outcome = if status.success() {
-                CargoOutcome::Passed
-            } else {
-                CargoOutcome::Failed(String::new())
-            };
-            return Ok(outcome);
+            return Ok(ProcessOutcome::Exited(status));
         }
         if mutation_run_was_interrupted() {
             child.stop_and_reap()?;
@@ -1448,7 +1742,7 @@ fn wait_for_cargo_test(
         }
         if started.elapsed() >= timeout {
             child.stop_and_reap()?;
-            return Ok(CargoOutcome::TimedOut);
+            return Ok(ProcessOutcome::TimedOut);
         }
         thread::sleep(Duration::from_millis(10));
     }
@@ -1474,7 +1768,7 @@ fn configure_process_group(command: &mut Command) {
 fn configure_process_group(_command: &mut Command) {}
 
 #[cfg(unix)]
-fn stop_cargo_test(child: &mut std::process::Child) -> Result<(), RunError> {
+fn stop_process(child: &mut std::process::Child) -> Result<(), RunError> {
     let process_group = i32::try_from(child.id())
         .map_err(|error| run_error(format!("could not identify cargo test: {error}")))?;
     let result = unsafe { libc::kill(-process_group, libc::SIGKILL) };
@@ -1489,7 +1783,7 @@ fn stop_cargo_test(child: &mut std::process::Child) -> Result<(), RunError> {
 }
 
 #[cfg(windows)]
-fn stop_cargo_test(child: &mut std::process::Child) -> Result<(), RunError> {
+fn stop_process(child: &mut std::process::Child) -> Result<(), RunError> {
     let identifier = child.id().to_string();
     let status = Command::new("taskkill")
         .args(["/PID", &identifier, "/T", "/F"])
@@ -1503,7 +1797,7 @@ fn stop_cargo_test(child: &mut std::process::Child) -> Result<(), RunError> {
 }
 
 #[cfg(all(not(unix), not(windows)))]
-fn stop_cargo_test(child: &mut std::process::Child) -> Result<(), RunError> {
+fn stop_process(child: &mut std::process::Child) -> Result<(), RunError> {
     child
         .kill()
         .map_err(|error| run_error(format!("could not stop cargo test: {error}")))
@@ -1884,6 +2178,7 @@ struct Workspace {
     root: PathBuf,
     source_root: PathBuf,
     manifest: PathBuf,
+    package_name: String,
     layout_root: PathBuf,
     copy_paths: Vec<PathBuf>,
     configurations: Vec<PathBuf>,

@@ -25,10 +25,10 @@ mutarust --config mutarust.yml [TARGET]...
 See the [configuration guide](config.md) for the policy fields, schema, and
 command priority rules.
 
-Mutarust first runs the applicable tests without a mutation. It stops before
-mutation if this clean test suite fails. Mutarust runs each mutant in a new
-temporary copy of the Cargo workspace that contains the selected source. A
-test failure kills the mutant. A successful test run lets the mutant escape.
+Mutarust first runs the applicable Cargo tests without a mutation. It stops
+before mutation if this clean test suite fails. Mutarust runs each mutant in a
+new temporary copy of the Cargo workspace that contains the selected source.
+A test failure kills the mutant. A successful test run lets the mutant escape.
 Mutarust skips a mutant that does not compile. A test-command or timeout
 failure produces an errored mutant. Mutarust then removes the temporary
 workspace and prints one result line for each mutant. Each result has a stable
@@ -52,9 +52,33 @@ Use `--match REGEXP` to limit mutations to functions with matching names. Use
 scope. See the [configuration guide](config.md#source-selection) for these
 rules and for the file-local mutation-disable annotations.
 
-Each test run has a fixed 60 second timeout by default. Use `--timeout
-SECONDS` to set a different positive whole-second timeout. A timeout produces
-an errored mutant result with an error message.
+Each test run has a fixed 60 second timeout by default. Use `--exec-timeout
+SECONDS` to set a different positive whole-second timeout. `--timeout` is an
+alias. A timeout produces an errored mutant result with an error message.
+
+## Custom Test Commands
+
+Use `--exec COMMAND` to run a custom command for each mutant. Mutarust parses
+the command with shell quotes. The command runs in the copied workspace. It
+does not change the user workspace. A custom command selects its own compiler
+and test action.
+
+The command gets these environment values:
+
+| Name | Value |
+| :--- | :--- |
+| `MUTATE_ORIGINAL` | The original source file in the isolated temporary workspace. |
+| `MUTATE_CHANGED` | The changed source file in the copied workspace. |
+| `MUTATE_PACKAGE` | The Cargo package name that owns the source. |
+| `MUTATE_TIMEOUT` | The timeout in whole seconds. |
+| `TEST_RECURSIVE` | `true` when `--test-recursive` is set, else `false`. |
+| `MUTATE_VERBOSE` | `true` when `--verbose` is set, else `false`. |
+| `MUTATE_DEBUG` | `true` when `--debug` is set, else `false`. |
+
+Use exit value 0 to kill a mutant, 1 to let it escape, and 2 to skip it. Any
+other exit value produces an errored mutant. Mutarust stops the command and
+its child processes on timeout or interrupt. A missing, empty, or invalid
+command returns a clear error before mutation starts.
 
 ## Source Listing
 
