@@ -424,11 +424,11 @@ pub fn run_mutation_tests_with_controls(
     execution: &TestExecution,
     controls: &ExecutionControls,
 ) -> Result<MutationRun, RunError> {
+    validate_adaptive_timeout(execution, controls)?;
     let _run_lock = MUTATION_RUN_LOCK
         .lock()
         .map_err(|_| run_error("could not start mutation run after a previous panic"))?;
     let _interrupt_guard = prepare_interrupt_handling()?;
-    validate_adaptive_timeout(execution, controls)?;
     let plan = selected_mutation_plan(mutation_plan(targets, registry, filters)?, stable_id)?;
     stop_if_interrupted()?;
     if controls.dry_run {
