@@ -130,7 +130,7 @@ fn installed_command_lists_production_sources() {
     let alpha = workspace.join("alpha");
     let beta = workspace.join("beta");
     let workspace_direct = format!(
-        "{}\n{}\n{}\n{}\n{}\n{}\n{}",
+        "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
         alpha.join("bin").join("cli_test.rs").display(),
         alpha.join("source").join("entry.rs").display(),
         alpha.join("source").join("helper.rs").display(),
@@ -139,6 +139,7 @@ fn installed_command_lists_production_sources() {
             .join("nested")
             .join("production_feature.rs")
             .display(),
+        alpha.join("source").join("switch.rs").display(),
         alpha
             .join("tests")
             .join("nested")
@@ -155,7 +156,7 @@ fn installed_command_lists_production_sources() {
     assert_eq!(from_workspace, workspace_direct);
 
     let workspace_recursive = format!(
-        "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
+        "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
         alpha.join("bin").join("cli_test.rs").display(),
         alpha.join("source").join("entry.rs").display(),
         alpha.join("source").join("helper.rs").display(),
@@ -169,6 +170,7 @@ fn installed_command_lists_production_sources() {
             .join("nested")
             .join("production_feature.rs")
             .display(),
+        alpha.join("source").join("switch.rs").display(),
         alpha
             .join("tests")
             .join("nested")
@@ -195,7 +197,7 @@ fn installed_command_lists_production_sources() {
         workspace_recursive
             .lines()
             .skip(1)
-            .take(4)
+            .take(5)
             .collect::<Vec<_>>()
             .join("\n")
     );
@@ -209,7 +211,7 @@ fn installed_command_lists_production_sources() {
         from_alpha_directory,
         workspace_recursive
             .lines()
-            .take(7)
+            .take(8)
             .collect::<Vec<_>>()
             .join("\n")
     );
@@ -219,7 +221,7 @@ fn installed_command_lists_production_sources() {
         from_custom_package,
         workspace_recursive
             .lines()
-            .take(7)
+            .take(8)
             .collect::<Vec<_>>()
             .join("\n")
     );
@@ -416,7 +418,7 @@ fn write_workspace_fixture(root: &Path) -> PathBuf {
         .expect("workspace disabled source must be written");
     fs::write(
         alpha.join("source").join("entry.rs"),
-        "mod helper;\n#[cfg(feature = \"extra\")] mod extra;\n#[cfg_attr(not(test), path = \"nested/production_feature.rs\")]\n#[cfg_attr(test, path = \"nested/test_feature.rs\")]\nmod configured;\n",
+        "mod helper;\n#[cfg(feature = \"extra\")] mod extra;\n#[cfg_attr(feature = \"extra\", path = \"feature_extra.rs\")] mod switch;\n#[cfg_attr(not(test), path = \"nested/production_feature.rs\")]\n#[cfg_attr(test, path = \"nested/test_feature.rs\")]\nmod configured;\n",
     )
     .expect("workspace library source must be written");
     fs::write(
@@ -449,6 +451,16 @@ fn write_workspace_fixture(root: &Path) -> PathBuf {
     .expect("workspace production cfg_attr source must be written");
     fs::write(alpha.join("source").join("extra.rs"), "pub fn extra() {}\n")
         .expect("workspace inactive feature source must be written");
+    fs::write(
+        alpha.join("source").join("switch.rs"),
+        "pub fn switch() {}\n",
+    )
+    .expect("workspace default cfg_attr source must be written");
+    fs::write(
+        alpha.join("source").join("feature_extra.rs"),
+        "pub fn feature_extra() {}\n",
+    )
+    .expect("workspace inactive cfg_attr source must be written");
     fs::write(
         alpha
             .join("source")

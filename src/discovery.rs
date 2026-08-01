@@ -302,6 +302,7 @@ fn collect_inactive_source_tree(
             item,
             directory,
             source_directory,
+            source_directory,
             active_features,
             sources,
         );
@@ -311,21 +312,39 @@ fn collect_inactive_source_tree(
 fn collect_inactive_item_source_tree(
     item: &Item,
     module_root: &Path,
+    source_directory: &Path,
     path_directory: &Path,
     active_features: &BTreeSet<String>,
     sources: &mut BTreeSet<PathBuf>,
 ) {
+    if let Item::Macro(item) = item {
+        if !configuration_is_active(&item.attrs, false, active_features) {
+            collect_include_source(item, module_root, source_directory, sources);
+        }
+        return;
+    }
     let Item::Mod(module) = item else {
         return;
     };
 
     if !configuration_is_active(&module.attrs, false, active_features) {
-        if let Some(source) = external_module_source(module, module_root, path_directory) {
-            let module_directory = module_directory(&source);
-            collect_source_tree(&source, &module_directory, sources);
+        collect_module_source_candidates(module, module_root, path_directory, sources);
+        if let Some((_, items)) = &module.content {
+            let nested_directory = module_root.join(module.ident.to_string());
+            for item in items {
+                collect_item_source_tree(
+                    item,
+                    &nested_directory,
+                    source_directory,
+                    &nested_directory,
+                    sources,
+                );
+            }
         }
         return;
     }
+
+    collect_inactive_cfg_attr_sources(module, module_root, path_directory, sources);
 
     if let Some((_, items)) = &module.content {
         let nested_directory = module_root.join(module.ident.to_string());
@@ -333,6 +352,7 @@ fn collect_inactive_item_source_tree(
             collect_inactive_item_source_tree(
                 item,
                 &nested_directory,
+                source_directory,
                 &nested_directory,
                 active_features,
                 sources,
@@ -341,11 +361,62 @@ fn collect_inactive_item_source_tree(
         return;
     }
 
-    let Some(source) = external_module_source(module, module_root, path_directory) else {
+    let Some(source) =
+        active_production_module_source(module, module_root, path_directory, active_features)
+    else {
         return;
     };
     let module_directory = module_directory(&source);
     collect_inactive_source_tree(&source, &module_directory, active_features, sources);
+}
+
+fn collect_inactive_cfg_attr_sources(
+    module: &ItemMod,
+    module_root: &Path,
+    path_directory: &Path,
+    sources: &mut BTreeSet<PathBuf>,
+) {
+    if cfg_attr_paths(module).is_empty() {
+        return;
+    }
+    collect_module_source_candidates(module, module_root, path_directory, sources);
+}
+
+fn collect_module_source_candidates(
+    module: &ItemMod,
+    module_root: &Path,
+    path_directory: &Path,
+    sources: &mut BTreeSet<PathBuf>,
+) {
+    if let Some(source) = external_module_source(module, module_root, path_directory) {
+        let module_directory = module_directory(&source);
+        collect_source_tree(&source, &module_directory, sources);
+    }
+    for path in cfg_attr_paths(module) {
+        let source = path_directory.join(path);
+        let Ok(source) = canonical_path(&source) else {
+            continue;
+        };
+        let module_directory = module_directory(&source);
+        collect_source_tree(&source, &module_directory, sources);
+    }
+}
+
+fn cfg_attr_paths(module: &ItemMod) -> Vec<PathBuf> {
+    module
+        .attrs
+        .iter()
+        .filter(|attribute| attribute.path().is_ident("cfg_attr"))
+        .filter_map(|attribute| match &attribute.meta {
+            Meta::List(list) => list
+                .parse_args_with(
+                    syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated,
+                )
+                .ok(),
+            _ => None,
+        })
+        .filter_map(|options| options.into_iter().skip(1).find_map(path_from_meta))
+        .collect()
 }
 
 fn collect_source_tree(source: &Path, directory: &Path, sources: &mut BTreeSet<PathBuf>) {
