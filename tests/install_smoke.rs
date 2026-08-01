@@ -97,7 +97,7 @@ fn installed_command_reads_yaml_configuration_and_command_options_take_priority(
     let configuration = fixture.join("mutarust.yml");
     fs::write(
         &configuration,
-        "skip_without_test: false\nskip_with_cfg: false\njson_output: false\nhtml_output: false\nsilent_mode: true\nmin_msi: 0\nmin_covered_msi: 0\nexclude_dirs: []\ndisable_mutators: []\nenable_mutators:\n  - conditional/bool-literal\nignore_source_lines:\n  - '^// generated'\n",
+        "skip_without_test: false\nskip_with_cfg: false\njson_output: false\nhtml_output: false\nsilent_mode: true\nmin_msi: 51\nmin_covered_msi: 0\nexclude_dirs: []\ndisable_mutators: []\nenable_mutators:\n  - conditional/bool-literal\nignore_source_lines:\n  - '^// generated'\n",
     )
     .expect("Mutarust configuration must be written");
 
@@ -109,9 +109,10 @@ fn installed_command_reads_yaml_configuration_and_command_options_take_priority(
         .output()
         .expect("installed mutarust must start with configuration");
 
-    assert!(
-        silent.status.success(),
-        "a valid configuration must succeed: {}",
+    assert_eq!(
+        silent.status.code(),
+        Some(4),
+        "a configured total-score gate must return exit value 4: {}",
         String::from_utf8_lossy(&silent.stderr)
     );
     assert!(
@@ -122,7 +123,7 @@ fn installed_command_reads_yaml_configuration_and_command_options_take_priority(
     let command_setting = Command::new(command_path(&install))
         .args(["--config"])
         .arg(&configuration)
-        .args(["--no-silent"])
+        .args(["--no-silent", "--min-msi", "50"])
         .arg(&source)
         .current_dir(&fixture)
         .output()
@@ -141,7 +142,7 @@ fn installed_command_reads_yaml_configuration_and_command_options_take_priority(
     let disabled = Command::new(command_path(&install))
         .args(["--config"])
         .arg(&configuration)
-        .args(["--disable", "conditional/bool-literal"])
+        .args(["--disable", "conditional/bool-literal", "--min-msi", "0"])
         .arg(&source)
         .current_dir(&fixture)
         .output()
@@ -286,6 +287,143 @@ fn installed_command_classifies_killed_and_escaped_mutants() {
     assert!(
         !user_target.exists(),
         "the mutation run must not write Cargo output to the user target directory"
+    );
+}
+
+#[test]
+fn installed_command_reports_stable_evidence_and_enforces_total_score() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_mutation_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+
+    let output = Command::new(command_path(&install))
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start");
+
+    assert!(
+        output.status.success(),
+        "mutation run must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("mutation output must be UTF-8");
+    let ids = stable_mutant_ids(&stdout);
+    assert_eq!(
+        ids,
+        vec![
+            "a4afb3df07ad704a7e118ca1f9c8ce1e".to_owned(),
+            "7e44f5b6649ca4de087acb260e75a287".to_owned(),
+        ],
+        "each mutant must have the Mutago-compatible stable ID: {stdout}"
+    );
+    assert!(
+        stdout.contains("--- checked/src/lib.rs")
+            && stdout.contains("+++ checked/src/lib.rs")
+            && stdout.contains("@@ -")
+            && stdout.contains("-pub fn unchecked() -> bool { true }")
+            && stdout.contains("+pub fn unchecked() -> bool { false }"),
+        "an escaped mutant must show a readable source diff: {stdout}"
+    );
+    assert!(
+        stdout.contains("Killed: 1")
+            && stdout.contains("Escaped: 1")
+            && stdout.contains("Errored: 0")
+            && stdout.contains("Not covered: 0")
+            && stdout.contains("Skipped: 0")
+            && stdout.contains("Mutation score: 50.00%")
+            && stdout.contains("Per-mutator results:")
+            && stdout.contains("conditional/bool-literal"),
+        "the summary must show result counts, score, and mutator results: {stdout}"
+    );
+
+    let original = fs::read_to_string(&source).expect("fixture source must remain readable");
+    fs::write(&source, format!("\n{original}")).expect("line-only source edit must be written");
+    let line_shifted = Command::new(command_path(&install))
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start after a line-only edit");
+    assert!(
+        line_shifted.status.success(),
+        "line-shifted mutation run must succeed: {}",
+        String::from_utf8_lossy(&line_shifted.stderr)
+    );
+    assert_eq!(
+        stable_mutant_ids(&stdout),
+        stable_mutant_ids(
+            &String::from_utf8(line_shifted.stdout)
+                .expect("line-shifted mutation output must be UTF-8")
+        ),
+        "a line-only edit must not change stable mutant IDs"
+    );
+
+    let no_diffs = Command::new(command_path(&install))
+        .arg("--no-diffs")
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start without diffs");
+    assert!(
+        no_diffs.status.success(),
+        "no-diffs mutation run must succeed: {}",
+        String::from_utf8_lossy(&no_diffs.stderr)
+    );
+    let no_diffs_stdout =
+        String::from_utf8(no_diffs.stdout).expect("no-diffs mutation output must be UTF-8");
+    assert!(
+        no_diffs_stdout.contains("escaped ")
+            && !no_diffs_stdout.contains("--- checked/src/lib.rs")
+            && !no_diffs_stdout.contains("@@ -"),
+        "--no-diffs must keep the escaped state and hide the source diff: {no_diffs_stdout}"
+    );
+
+    let failed_gate = Command::new(command_path(&install))
+        .args(["--min-msi", "51"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start with a failing score gate");
+    assert_eq!(
+        failed_gate.status.code(),
+        Some(4),
+        "a failed total-score gate must return exit value 4: {}",
+        String::from_utf8_lossy(&failed_gate.stderr)
+    );
+
+    let passed_gate = Command::new(command_path(&install))
+        .args(["--min-msi", "50"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start with a passing score gate");
+    assert!(
+        passed_gate.status.success(),
+        "a passed total-score gate must return exit value 0: {}",
+        String::from_utf8_lossy(&passed_gate.stderr)
+    );
+
+    let selected_id = ids.first().expect("a mutant ID must exist");
+    let one_mutant = Command::new(command_path(&install))
+        .args(["--run-mutant-id", selected_id, "--min-msi", "100"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start for one mutant");
+    assert!(
+        one_mutant.status.success(),
+        "one-mutant execution must ignore unrelated score gates: {}",
+        String::from_utf8_lossy(&one_mutant.stderr)
+    );
+    let one_mutant_stdout =
+        String::from_utf8(one_mutant.stdout).expect("one-mutant output must be UTF-8");
+    assert!(
+        one_mutant_stdout.matches("  ID: ").count() == 1
+            && !one_mutant_stdout.contains("Killed:")
+            && !one_mutant_stdout.contains("Mutation score:")
+            && !one_mutant_stdout.contains("Per-mutator results:"),
+        "one-mutant execution must show one evidence result without a summary or score gate: {one_mutant_stdout}"
     );
 }
 
@@ -2037,6 +2175,14 @@ fn git_status(directory: &Path) -> String {
         .expect("Git status must start");
     assert!(output.status.success(), "Git status must succeed");
     String::from_utf8(output.stdout).expect("Git status must be UTF-8")
+}
+
+fn stable_mutant_ids(output: &str) -> Vec<String> {
+    output
+        .lines()
+        .filter_map(|line| line.strip_prefix("  ID: "))
+        .map(str::to_owned)
+        .collect()
 }
 
 #[cfg(unix)]

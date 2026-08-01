@@ -16,9 +16,9 @@ Schema is [schema/mutarust.schema.json](../schema/mutarust.schema.json).
 All fields are optional. A Boolean field defaults to `false`. An omitted score
 has no score gate. An omitted list is empty. This configuration contract is
 complete before each related run feature is complete. The current command uses
-silent mode and mutator selection. Later feature changes use the stored source
-selection, report, and score settings. The command does not silently change a
-user setting to a different value.
+silent mode, mutator selection, and the total-score policy. Later feature
+changes use the stored source selection, report, and covered-score settings.
+The command does not silently change a user setting to a different value.
 
 | Field | Type | Purpose |
 | --- | --- | --- |
@@ -50,6 +50,10 @@ When supplied, `--silent`, `--no-silent`, `--min-msi`, `--min-covered-msi`,
 and `--enable` take priority over their configuration fields. `--disable` adds
 to `disable_mutators`; it does not replace that list. Do not use `--silent`
 and `--no-silent` together.
+
+Mutarust checks the total-score policy after a normal mutation run. A result
+below `min_msi` returns exit value 4. The covered-score policy takes effect
+with the later coverage feature.
 
 Mutarust uses the same configuration field set as Mutago v2.7.7, with the
 Rust conditional-compilation field name described above.

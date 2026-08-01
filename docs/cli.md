@@ -31,8 +31,21 @@ temporary copy of the Cargo workspace that contains the selected source. A
 test failure kills the mutant. A successful test run lets the mutant escape.
 Mutarust skips a mutant that does not compile. A test-command or timeout
 failure produces an errored mutant. Mutarust then removes the temporary
-workspace and prints one result line for each mutant, followed by result
-counts.
+workspace and prints one result line for each mutant. Each result has a stable
+ID. An escaped mutant also has a unified source diff. Use `--no-diffs` to hide
+these diffs.
+
+A normal run prints killed, escaped, errored, not-covered, skipped, and total
+counts. It also prints the total mutation score and a sorted result table for
+each mutator. The score is the killed, errored, and skipped count divided by
+the full mutant count. The score is zero when no mutant exists.
+
+Use `--min-msi PERCENT` to require a total mutation score. A failed score gate
+returns exit value 4. A score equal to the required percentage passes.
+
+Use `--run-mutant-id ID` to run one stable mutant ID. This mode prints only
+the selected mutant evidence. It does not print the normal summary or apply
+score gates.
 
 Each test run has a fixed 60 second timeout by default. Use `--timeout
 SECONDS` to set a different positive whole-second timeout. A timeout produces
