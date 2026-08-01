@@ -214,17 +214,27 @@ fn package_crate(package_target: &Path) -> PathBuf {
 }
 
 fn smoke_root() -> PathBuf {
+    loop {
+        let root = smoke_root_name();
+
+        match fs::create_dir(&root) {
+            Ok(()) => return root,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => panic!("smoke test root must be created: {error}"),
+        }
+    }
+}
+
+fn smoke_root_name() -> PathBuf {
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("system time must be after the Unix epoch")
         .as_nanos();
     let sequence = NEXT_SMOKE_ROOT.fetch_add(1, Ordering::Relaxed);
-    let root = env::temp_dir().join(format!(
+    env::temp_dir().join(format!(
         "mutarust-install-smoke-{}-{nonce}-{sequence}",
         std::process::id(),
-    ));
-    fs::create_dir_all(&root).expect("smoke test root must be created");
-    root
+    ))
 }
 
 fn command_path(install: &Path) -> PathBuf {
