@@ -24,7 +24,9 @@ It excludes test, benchmark, example, fixture, vendor, generated, build-output,
 hidden, and `build.rs` sources during recursive discovery. It also excludes
 files that end in `_test.rs`.
 
-An explicit file or directory target can select vendor or generated source.
+An explicit file or directory target can select test, fixture, vendor, or
+generated source. Broader package, workspace, and directory selection excludes
+these sources by default.
 
 Mutation execution is not available yet. This command lets users confirm the
 source scope before that work is added.

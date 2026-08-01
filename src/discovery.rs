@@ -50,8 +50,11 @@ fn collect_target(target: Target, files: &mut BTreeSet<PathBuf>) -> Result<(), S
         return collect_path(&path, target.recursive, files);
     }
 
-    if collect_package(&target, files)? {
-        return Ok(());
+    match collect_package(&target, files) {
+        Ok(true) => return Ok(()),
+        Ok(false) | Err(_) if path.exists() => return collect_path(&path, target.recursive, files),
+        Ok(false) => {}
+        Err(error) => return Err(error),
     }
 
     if path.exists() {
@@ -82,7 +85,7 @@ fn collect_path(
     let path = canonical_path(path)?;
 
     if path.is_file() {
-        add_direct_source_file(&path, files);
+        add_explicit_source_file(&path, files);
         return Ok(());
     }
 
@@ -114,11 +117,11 @@ fn collect_directory(
     recursive: bool,
     files: &mut BTreeSet<PathBuf>,
 ) -> Result<(), SourceError> {
-    if directory.file_name().is_some_and(is_test_directory) {
-        return Ok(());
-    }
-
-    let excluded_sources = non_production_source_paths(directory);
+    let excluded_sources = directory
+        .file_name()
+        .is_some_and(is_test_directory)
+        .then(BTreeSet::new)
+        .unwrap_or_else(|| non_production_source_paths(directory));
     collect_directory_from_root(directory, directory, recursive, files, &excluded_sources)
 }
 
@@ -153,10 +156,10 @@ fn read_error(path: &Path, error: std::io::Error) -> SourceError {
     ))
 }
 
-fn add_direct_source_file(path: &Path, files: &mut BTreeSet<PathBuf>) {
-    let source_root =
-        cargo_root(path).unwrap_or_else(|| path.parent().unwrap_or(path).to_path_buf());
-    add_source_file_from_root(path, &source_root, files, &BTreeSet::new());
+fn add_explicit_source_file(path: &Path, files: &mut BTreeSet<PathBuf>) {
+    if path.extension().is_some_and(|extension| extension == "rs") {
+        files.insert(path.to_path_buf());
+    }
 }
 
 fn cargo_root(path: &Path) -> Option<PathBuf> {

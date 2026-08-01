@@ -78,8 +78,17 @@ fn installed_command_lists_production_sources() {
     assert_eq!(from_vendor, vendor_source.display().to_string());
 
     let excluded_test = fixture.join("tests").join("integration.rs");
-    assert_no_sources(&install, &fixture, &excluded_test);
-    assert_no_sources(&install, &fixture, &fixture.join("tests"));
+    let explicit_test = list_files(&install, &fixture, &[excluded_test.as_os_str()]);
+    assert_eq!(explicit_test, excluded_test.display().to_string());
+    let explicit_test_directory =
+        list_files(&install, &fixture, &[fixture.join("tests").as_os_str()]);
+    assert_eq!(explicit_test_directory, excluded_test.display().to_string());
+    let explicit_test_file = fixture.join("src").join("math_test.rs");
+    let from_explicit_test_file = list_files(&install, &fixture, &[explicit_test_file.as_os_str()]);
+    assert_eq!(
+        from_explicit_test_file,
+        explicit_test_file.display().to_string()
+    );
 
     let from_package = list_files(&install, &fixture, &["sample".as_ref()]);
     assert_eq!(from_package, expected_direct);
@@ -142,6 +151,14 @@ fn installed_command_lists_production_sources() {
             .collect::<Vec<_>>()
             .join("\n")
     );
+
+    let plain = root.join("plain");
+    fs::create_dir_all(plain.join("src")).expect("plain source directory must be created");
+    let plain_source_path = plain.join("src").join("plain.rs");
+    fs::write(&plain_source_path, "pub fn plain() {}\n").expect("plain source must be written");
+    let plain_source = fs::canonicalize(plain_source_path).expect("plain source must resolve");
+    let from_plain_directory = list_files(&install, &plain, &["src".as_ref()]);
+    assert_eq!(from_plain_directory, plain_source.display().to_string());
 
     fs::remove_dir_all(root).expect("smoke test files must be removed");
 }
@@ -287,22 +304,6 @@ fn list_files(install: &Path, fixture: &Path, targets: &[&std::ffi::OsStr]) -> S
         .expect("file list must be UTF-8")
         .trim()
         .to_owned()
-}
-
-fn assert_no_sources(install: &Path, fixture: &Path, target: &Path) {
-    let output = Command::new(command_path(install))
-        .arg("--list-files")
-        .arg(target)
-        .current_dir(fixture)
-        .output()
-        .expect("installed mutarust must start");
-
-    assert_eq!(output.status.code(), Some(3));
-    assert!(
-        String::from_utf8_lossy(&output.stderr)
-            .contains("could not find any suitable Rust source files"),
-        "test sources must be excluded"
-    );
 }
 
 fn package_crate(package_target: &Path) -> PathBuf {
