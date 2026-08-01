@@ -114,6 +114,10 @@ fn collect_directory(
     recursive: bool,
     files: &mut BTreeSet<PathBuf>,
 ) -> Result<(), SourceError> {
+    if directory.file_name().is_some_and(is_test_directory) {
+        return Ok(());
+    }
+
     collect_directory_from_root(directory, directory, recursive, files, &BTreeSet::new())
 }
 
@@ -131,7 +135,7 @@ fn collect_directory_from_root(
             .file_type()
             .map_err(|error| read_error(&path, error))?;
 
-        if file_type.is_file() {
+        if file_type.is_file() && !is_hidden(entry.file_name().as_ref()) {
             add_source_file_from_root(&path, source_root, files, excluded_sources);
         } else if recursive && file_type.is_dir() && !skip_directory(entry.file_name().as_ref()) {
             collect_directory_from_root(&path, source_root, true, files, excluded_sources)?;
@@ -196,10 +200,9 @@ fn has_test_parent_below(path: &Path, source_root: &Path) -> bool {
 }
 
 fn skip_directory(name: &std::ffi::OsStr) -> bool {
-    let name = name.to_string_lossy();
-    name.starts_with('.')
+    is_hidden(name)
         || matches!(
-            name.as_ref(),
+            name.to_string_lossy().as_ref(),
             "target"
                 | "tests"
                 | "benches"
@@ -210,6 +213,10 @@ fn skip_directory(name: &std::ffi::OsStr) -> bool {
                 | "generated"
                 | "gen"
         )
+}
+
+fn is_hidden(name: &std::ffi::OsStr) -> bool {
+    name.to_string_lossy().starts_with('.')
 }
 
 fn is_test_directory(name: &std::ffi::OsStr) -> bool {

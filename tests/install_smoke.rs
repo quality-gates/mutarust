@@ -79,6 +79,7 @@ fn installed_command_lists_production_sources() {
 
     let excluded_test = fixture.join("tests").join("integration.rs");
     assert_no_sources(&install, &fixture, &excluded_test);
+    assert_no_sources(&install, &fixture, &fixture.join("tests"));
 
     let from_package = list_files(&install, &fixture, &["sample".as_ref()]);
     assert_eq!(from_package, expected_direct);
@@ -171,6 +172,11 @@ fn write_fixture(root: &Path) -> PathBuf {
         .expect("fixture library must be written");
     fs::write(fixture.join("src").join("math.rs"), "pub fn add() {}\n")
         .expect("fixture source must be written");
+    fs::write(
+        fixture.join("src").join(".hidden.rs"),
+        "pub fn hidden() {}\n",
+    )
+    .expect("fixture hidden source must be written");
     fs::write(
         fixture.join("src").join("nested").join("inside.rs"),
         "pub fn inside() {}\n",
