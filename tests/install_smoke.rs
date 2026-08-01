@@ -56,6 +56,66 @@ fn installed_command_prints_help() {
 }
 
 #[test]
+fn installed_command_lists_builtin_mutators() {
+    let root = smoke_root();
+    let install = install_command(&root);
+
+    let output = Command::new(command_path(&install))
+        .arg("--list-mutators")
+        .output()
+        .expect("installed mutarust must start");
+
+    assert!(output.status.success(), "--list-mutators must succeed");
+    assert_eq!(
+        String::from_utf8(output.stdout)
+            .expect("mutator list must be UTF-8")
+            .trim(),
+        "conditional/bool-literal",
+        "the built-in mutator list must be stable and sorted"
+    );
+}
+
+#[test]
+fn packaged_library_builds_a_custom_mutator() {
+    let root = smoke_root();
+    let package = package_crate(&root.join("package-target"));
+    let downstream = root.join("downstream");
+    fs::create_dir_all(downstream.join("src"))
+        .expect("downstream source directory must be created");
+    fs::write(
+        downstream.join("Cargo.toml"),
+        format!(
+            "[package]\nname = \"downstream\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[dependencies]\nmutarust = {{ path = \"{}\" }}\n",
+            package.display()
+        ),
+    )
+    .expect("downstream manifest must be written");
+    fs::write(
+        downstream.join("src").join("main.rs"),
+        "use mutarust::{Mutation, Mutator, Registry, RegistryBuilder};\n\nstruct Custom;\nstruct Invalid;\n\nimpl Mutator for Custom {\n    fn name(&self) -> &str { \"custom/no-op\" }\n\n    fn mutations(&self, _source: &str) -> Vec<Mutation> { Vec::new() }\n}\n\nimpl Mutator for Invalid {\n    fn name(&self) -> &str { \"Custom\" }\n\n    fn mutations(&self, _source: &str) -> Vec<Mutation> { Vec::new() }\n}\n\nfn mutate(registry: &Registry, source: &str) -> String {\n    let mutation = registry.get(\"conditional/bool-literal\").expect(\"built-in mutator must exist\").mutations(source).pop().expect(\"boolean must mutate\");\n    mutation.apply(source).expect(\"mutation must apply\")\n}\n\nfn main() {\n    let registry = RegistryBuilder::with_builtins().register(Custom).expect(\"custom mutator must register\").build();\n    assert_eq!(registry.names().collect::<Vec<_>>(), vec![\"conditional/bool-literal\", \"custom/no-op\"]);\n    let duplicate = RegistryBuilder::new().register(Custom).expect(\"first custom mutator must register\").register(Custom).err().expect(\"duplicate must fail\");\n    assert_eq!(duplicate.to_string(), \"duplicate mutator name: custom/no-op\");\n    let invalid = RegistryBuilder::new().register(Invalid).err().expect(\"invalid name must fail\");\n    assert_eq!(invalid.to_string(), \"invalid mutator name: Custom\");\n    assert_eq!(mutate(&registry, \"fn enabled() -> bool { true }\"), \"fn enabled() -> bool { false }\");\n    assert_eq!(mutate(&registry, \"fn enabled() -> bool { let label = \\\"é\\\"; true }\"), \"fn enabled() -> bool { let label = \\\"é\\\"; false }\");\n    assert_eq!(mutate(&registry, \"fn check() { assert!(true); }\"), \"fn check() { assert!(false); }\");\n    println!(\"custom mutator works\");\n}\n",
+    )
+    .expect("downstream source must be written");
+
+    let output = Command::new(env!("CARGO"))
+        .args(["run", "--quiet"])
+        .current_dir(&downstream)
+        .output()
+        .expect("downstream command must start");
+
+    assert!(
+        output.status.success(),
+        "downstream command must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout)
+            .expect("downstream output must be UTF-8")
+            .trim(),
+        "custom mutator works"
+    );
+}
+
+#[test]
 fn installed_command_lists_production_sources() {
     let root = smoke_root();
     let install = install_command(&root);

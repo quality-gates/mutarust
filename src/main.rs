@@ -12,6 +12,7 @@ fn run(command: Command) -> io::Result<ExitCode> {
     match command {
         Command::Help => print_help().map(|()| ExitCode::SUCCESS),
         Command::Version => print_version().map(|()| ExitCode::SUCCESS),
+        Command::ListMutators => list_mutators(),
         Command::ListFiles(targets) => list_files(&targets),
         Command::Invalid(argument) => Ok(invalid_argument(argument)),
     }
@@ -25,6 +26,7 @@ fn parse_command(arguments: &[String]) -> Command {
     match first.as_str() {
         "--help" | "-h" if arguments.len() == 1 => Command::Help,
         "--version" | "-V" if arguments.len() == 1 => Command::Version,
+        "--list-mutators" if arguments.len() == 1 => Command::ListMutators,
         "--list-files" => Command::ListFiles(arguments[1..].to_vec()),
         _ => Command::Invalid(first.clone()),
     }
@@ -34,16 +36,24 @@ fn print_help() -> io::Result<()> {
     let mut stdout = io::stdout().lock();
     writeln!(
         stdout,
-        "Mutation testing for Rust\n\nUsage: mutarust --list-files [TARGET]..."
+        "Mutation testing for Rust\n\nUsage:\n  mutarust --list-files [TARGET]...\n  mutarust --list-mutators"
     )?;
     writeln!(
         stdout,
-        "\nOptions:\n  -h, --help        Print help\n  -V, --version     Print version\n      --list-files  List selected Rust production source files"
+        "\nOptions:\n  -h, --help        Print help\n  -V, --version     Print version\n      --list-files  List selected Rust production source files\n      --list-mutators  List available mutators"
     )
 }
 
 fn print_version() -> io::Result<()> {
     writeln!(io::stdout().lock(), "mutarust {}", mutarust::VERSION)
+}
+
+fn list_mutators() -> io::Result<ExitCode> {
+    let mut stdout = io::stdout().lock();
+    for name in mutarust::Registry::builtins().names() {
+        writeln!(stdout, "{name}")?;
+    }
+    Ok(ExitCode::SUCCESS)
 }
 
 fn list_files(targets: &[String]) -> io::Result<ExitCode> {
@@ -83,6 +93,7 @@ fn write_error(message: &str) {
 enum Command {
     Help,
     Version,
+    ListMutators,
     ListFiles(Vec<String>),
     Invalid(String),
 }
