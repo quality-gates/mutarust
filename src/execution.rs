@@ -361,7 +361,7 @@ fn collect_manifest_paths(
     match value {
         toml::Value::Table(table) => {
             for (name, value) in table {
-                if name == "path" && is_cargo_dependency_path(sections) {
+                if name == "path" && is_cargo_manifest_path(sections) {
                     add_manifest_path(value, directory, paths)?;
                 }
                 let mut nested_sections = sections.to_vec();
@@ -401,22 +401,32 @@ fn add_manifest_path(
     Ok(())
 }
 
+fn is_cargo_manifest_path(sections: &[String]) -> bool {
+    is_cargo_dependency_path(sections) || is_cargo_target_path(sections)
+}
+
 fn is_cargo_dependency_path(sections: &[String]) -> bool {
-    let Some(last) = sections.last() else {
-        return false;
-    };
-    if matches!(
-        last.as_str(),
-        "dependencies" | "dev-dependencies" | "build-dependencies"
-    ) {
-        return matches!(
-            sections.first().map(String::as_str),
-            None | Some("target") | Some("workspace")
-        );
+    match sections.first().map(String::as_str) {
+        Some("dependencies" | "dev-dependencies" | "build-dependencies" | "patch" | "replace") => {
+            true
+        }
+        Some("workspace") => sections.get(1).is_some_and(is_dependency_section),
+        Some("target") => sections.get(2).is_some_and(is_dependency_section),
+        _ => false,
     }
+}
+
+fn is_dependency_section(section: &String) -> bool {
+    matches!(
+        section.as_str(),
+        "dependencies" | "dev-dependencies" | "build-dependencies"
+    )
+}
+
+fn is_cargo_target_path(sections: &[String]) -> bool {
     matches!(
         sections.first().map(String::as_str),
-        Some("patch") | Some("replace")
+        Some("lib" | "bin" | "test" | "bench" | "example")
     )
 }
 
