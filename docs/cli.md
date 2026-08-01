@@ -10,8 +10,20 @@ mutarust --list-mutators
 
 The first built-in mutator, `conditional/bool-literal`, changes each Rust
 Boolean literal token between `true` and `false`, including macro input.
-Mutation execution is not
-available yet.
+Run mutation testing for selected production source:
+
+```text
+mutarust [TARGET]...
+```
+
+Mutarust runs each mutant in a new temporary copy of the Cargo workspace that
+contains the selected source. A test failure kills the mutant. A successful
+test run lets the mutant escape. Mutarust then removes the temporary workspace
+and prints one result line for each mutant, followed by result counts.
+
+Each test run has a fixed 60 second timeout by default. Use `--timeout
+SECONDS` to set a different positive whole-second timeout. A timeout produces
+an errored mutant result with an error message.
 
 ## Source Listing
 
@@ -42,5 +54,4 @@ An explicit file or directory target can select test, fixture, vendor, or
 generated source. Broader package, workspace, and directory selection excludes
 these sources by default.
 
-Mutation execution is not available yet. This command lets users confirm the
-source scope before that work is added.
+This command lets users confirm the source scope before mutation testing.

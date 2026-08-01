@@ -29,6 +29,11 @@ impl Mutation {
         let after = source.get(self.range.end..)?;
         Some(format!("{before}{}{after}", self.replacement))
     }
+
+    /// Returns the replaced byte range and the replacement source text.
+    pub fn identity(&self) -> (Range<usize>, &str) {
+        (self.range.clone(), &self.replacement)
+    }
 }
 
 /// Produces source mutations for one named mutation operator.
