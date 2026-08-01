@@ -859,17 +859,31 @@ fn rustc_configurations() -> &'static BTreeSet<String> {
 }
 
 fn read_rustc_configurations() -> BTreeSet<String> {
-    let Ok(output) = Command::new("rustc").args(["--print", "cfg"]).output() else {
-        return default_rustc_configurations();
+    cargo_rustc_configurations()
+        .or_else(direct_rustc_configurations)
+        .unwrap_or_else(default_rustc_configurations)
+}
+
+fn cargo_rustc_configurations() -> Option<BTreeSet<String>> {
+    command_configurations(Command::new("cargo").args(["rustc", "--lib", "--", "--print", "cfg"]))
+}
+
+fn direct_rustc_configurations() -> Option<BTreeSet<String>> {
+    command_configurations(Command::new("rustc").args(["--print", "cfg"]))
+}
+
+fn command_configurations(command: &mut Command) -> Option<BTreeSet<String>> {
+    let Ok(output) = command.output() else {
+        return None;
     };
     if !output.status.success() {
-        return default_rustc_configurations();
+        return None;
     }
     let Ok(configurations) = String::from_utf8(output.stdout) else {
-        return default_rustc_configurations();
+        return None;
     };
 
-    configurations.lines().map(str::to_owned).collect()
+    Some(configurations.lines().map(str::to_owned).collect())
 }
 
 fn default_rustc_configurations() -> BTreeSet<String> {
