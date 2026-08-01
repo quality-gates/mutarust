@@ -2,7 +2,10 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+static NEXT_SMOKE_ROOT: AtomicU64 = AtomicU64::new(0);
 
 #[test]
 fn installed_command_prints_help() {
@@ -215,9 +218,10 @@ fn smoke_root() -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .expect("system time must be after the Unix epoch")
         .as_nanos();
+    let sequence = NEXT_SMOKE_ROOT.fetch_add(1, Ordering::Relaxed);
     let root = env::temp_dir().join(format!(
-        "mutarust-install-smoke-{}-{nonce}",
-        std::process::id()
+        "mutarust-install-smoke-{}-{nonce}-{sequence}",
+        std::process::id(),
     ));
     fs::create_dir_all(&root).expect("smoke test root must be created");
     root
