@@ -1,0 +1,16 @@
+[package]
+name = "mutarust"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Mutation testing for Rust"
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/quality-gates/mutarust"
+keywords = ["mutation-testing", "testing", "rust"]
+categories = ["development-tools::testing", "command-line-utilities"]
+
+[[bin]]
+name = "mutarust"
+path = "src/main.rs"
+
