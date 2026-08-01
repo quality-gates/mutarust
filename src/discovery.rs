@@ -224,16 +224,7 @@ fn non_production_source_paths(path: &Path) -> BTreeSet<PathBuf> {
         .packages
         .iter()
         .filter(|package| metadata.workspace_members.contains(&package.id))
-        .flat_map(|package| &package.targets)
-        .filter(|target| !is_production_target(&target.kind))
-        .flat_map(|target| source_tree(target.src_path.as_std_path()))
-        .chain(
-            metadata
-                .packages
-                .iter()
-                .filter(|package| metadata.workspace_members.contains(&package.id))
-                .flat_map(test_only_package_sources),
-        )
+        .flat_map(non_production_package_sources)
         .collect()
 }
 
@@ -339,13 +330,17 @@ fn collect_test_only_item_source_tree(
     directory: &Path,
     sources: &mut BTreeSet<PathBuf>,
 ) {
+    if let Item::Macro(item) = item {
+        collect_test_only_include_source(item, directory, sources);
+        return;
+    }
     let Item::Mod(module) = item else {
         return;
     };
 
     if let Some((_, items)) = &module.content {
         let nested_directory = directory.join(module.ident.to_string());
-        if has_test_configuration(module) {
+        if has_test_configuration(&module.attrs) {
             for item in items {
                 collect_item_source_tree(item, &nested_directory, sources);
             }
@@ -361,16 +356,31 @@ fn collect_test_only_item_source_tree(
         return;
     };
     let module_directory = module_directory(&source);
-    if has_test_configuration(module) {
+    if has_test_configuration(&module.attrs) {
         collect_source_tree(&source, &module_directory, sources);
     } else {
         collect_test_only_source_tree(&source, &module_directory, sources);
     }
 }
 
-fn has_test_configuration(module: &ItemMod) -> bool {
-    module
-        .attrs
+fn collect_test_only_include_source(
+    item: &ItemMacro,
+    directory: &Path,
+    sources: &mut BTreeSet<PathBuf>,
+) {
+    let Some(source) = include_source(item, directory) else {
+        return;
+    };
+
+    if has_test_configuration(&item.attrs) {
+        collect_source_tree(&source, directory, sources);
+    } else {
+        collect_test_only_source_tree(&source, directory, sources);
+    }
+}
+
+fn has_test_configuration(attributes: &[syn::Attribute]) -> bool {
+    attributes
         .iter()
         .filter(|attribute| attribute.path().is_ident("cfg"))
         .filter_map(|attribute| match &attribute.meta {
@@ -573,12 +583,28 @@ fn collect_package_sources(
 }
 
 fn non_production_package_sources(package: &Package) -> BTreeSet<PathBuf> {
-    package
+    let test_only_sources = test_only_package_sources(package);
+    let production_sources = production_package_sources(package);
+    let mut non_production_sources = package
         .targets
         .iter()
         .filter(|target| !is_production_target(&target.kind))
         .flat_map(|target| source_tree(target.src_path.as_std_path()))
-        .chain(test_only_package_sources(package))
+        .collect::<BTreeSet<_>>();
+
+    non_production_sources.retain(|source| {
+        test_only_sources.contains(source) || !production_sources.contains(source)
+    });
+    non_production_sources.extend(test_only_sources);
+    non_production_sources
+}
+
+fn production_package_sources(package: &Package) -> BTreeSet<PathBuf> {
+    package
+        .targets
+        .iter()
+        .filter(|target| is_production_target(&target.kind))
+        .flat_map(|target| source_tree(target.src_path.as_std_path()))
         .collect()
 }
 
@@ -630,7 +656,7 @@ fn collect_declared_target(
 }
 
 fn add_declared_source_file(path: &Path, files: &mut BTreeSet<PathBuf>) {
-    if is_source_file(path) {
+    if is_rust_file(path) {
         files.insert(path.to_path_buf());
     }
 }

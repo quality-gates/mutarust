@@ -109,7 +109,7 @@ fn installed_command_lists_production_sources() {
     let beta = workspace.join("beta");
     let workspace_direct = format!(
         "{}\n{}\n{}\n{}\n{}",
-        alpha.join("bin").join("tool.rs").display(),
+        alpha.join("bin").join("cli_test.rs").display(),
         alpha.join("source").join("entry.rs").display(),
         alpha.join("source").join("helper.rs").display(),
         alpha.join("tests").join("selected.rs").display(),
@@ -120,7 +120,7 @@ fn installed_command_lists_production_sources() {
 
     let workspace_recursive = format!(
         "{}\n{}\n{}\n{}\n{}\n{}",
-        alpha.join("bin").join("tool.rs").display(),
+        alpha.join("bin").join("cli_test.rs").display(),
         alpha.join("source").join("entry.rs").display(),
         alpha.join("source").join("helper.rs").display(),
         alpha
@@ -224,7 +224,7 @@ fn write_fixture(root: &Path) -> PathBuf {
     .expect("fixture manifest must be written");
     fs::write(
         fixture.join("src").join("lib.rs"),
-        "mod math;\n#[cfg(test)] mod test_support;\n",
+        "mod math;\n#[cfg(test)] include!(\"test_support.rs\");\n",
     )
     .expect("fixture library must be written");
     fs::write(fixture.join("src").join("math.rs"), "pub fn add() {}\n")
@@ -292,7 +292,7 @@ fn write_workspace_fixture(root: &Path) -> PathBuf {
     .expect("workspace manifest must be written");
     fs::write(
         alpha.join("Cargo.toml"),
-        "[package]\nname = \"alpha\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[lib]\npath = \"source/entry.rs\"\n\n[[bin]]\nname = \"alpha-tool\"\npath = \"bin/tool.rs\"\n\n[[bin]]\nname = \"alpha-selected\"\npath = \"tests/selected.rs\"\n\n[[test]]\nname = \"alpha-check\"\npath = \"source/check.rs\"\n",
+        "[package]\nname = \"alpha\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[lib]\npath = \"source/entry.rs\"\n\n[[bin]]\nname = \"alpha-tool\"\npath = \"bin/cli_test.rs\"\n\n[[bin]]\nname = \"alpha-selected\"\npath = \"tests/selected.rs\"\n\n[[test]]\nname = \"alpha-check\"\npath = \"source/check.rs\"\n",
     )
     .expect("alpha manifest must be written");
     fs::write(
@@ -300,7 +300,7 @@ fn write_workspace_fixture(root: &Path) -> PathBuf {
         "[package]\nname = \"beta\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
     )
     .expect("beta manifest must be written");
-    fs::write(alpha.join("bin").join("tool.rs"), "fn main() {}\n")
+    fs::write(alpha.join("bin").join("cli_test.rs"), "fn main() {}\n")
         .expect("workspace binary source must be written");
     fs::write(alpha.join("tests").join("selected.rs"), "fn main() {}\n")
         .expect("workspace selected source must be written");
@@ -308,7 +308,7 @@ fn write_workspace_fixture(root: &Path) -> PathBuf {
         .expect("workspace library source must be written");
     fs::write(
         alpha.join("source").join("check.rs"),
-        "include!(\"check_support.rs\");\n#[test] fn check() {}\n",
+        "include!(\"check_support.rs\");\n#[path = \"helper.rs\"] mod shared_helper;\n#[test] fn check() {}\n",
     )
     .expect("workspace test source must be written");
     fs::write(
