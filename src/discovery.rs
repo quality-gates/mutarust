@@ -1,5 +1,6 @@
 use cargo_metadata::{Metadata, MetadataCommand, Package, TargetKind};
 use std::collections::BTreeSet;
+use std::env;
 use std::error::Error;
 use std::fmt;
 use std::fs;
@@ -859,17 +860,18 @@ fn rustc_configurations() -> &'static BTreeSet<String> {
 }
 
 fn read_rustc_configurations() -> BTreeSet<String> {
-    cargo_rustc_configurations()
-        .or_else(direct_rustc_configurations)
-        .unwrap_or_else(default_rustc_configurations)
-}
-
-fn cargo_rustc_configurations() -> Option<BTreeSet<String>> {
-    command_configurations(Command::new("cargo").args(["rustc", "--lib", "--", "--print", "cfg"]))
+    direct_rustc_configurations().unwrap_or_else(default_rustc_configurations)
 }
 
 fn direct_rustc_configurations() -> Option<BTreeSet<String>> {
-    command_configurations(Command::new("rustc").args(["--print", "cfg"]))
+    let compiler = env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+    let mut command = Command::new(compiler);
+    command.args(["--print", "cfg"]);
+    if let Ok(target) = env::var("CARGO_BUILD_TARGET") {
+        command.args(["--target", &target]);
+    }
+
+    command_configurations(&mut command)
 }
 
 fn command_configurations(command: &mut Command) -> Option<BTreeSet<String>> {

@@ -171,6 +171,10 @@ fn installed_command_lists_production_sources() {
     );
     let from_workspace = list_files(&install, &workspace, &[workspace.as_os_str()]);
     assert_eq!(from_workspace, workspace_direct);
+    assert!(
+        !alpha.join("build-script-ran").exists(),
+        "source listing must not run the package build script"
+    );
 
     let workspace_recursive = format!(
         "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}{}\n{}\n{}\n{}",
@@ -409,9 +413,14 @@ fn write_workspace_fixture(root: &Path) -> PathBuf {
     .expect("workspace manifest must be written");
     fs::write(
         alpha.join("Cargo.toml"),
-        "[package]\nname = \"alpha\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[features]\ndefault = [\"enabled\"]\nenabled = []\n\n[lib]\npath = \"source/entry.rs\"\n\n[[bin]]\nname = \"alpha-tool\"\npath = \"bin/cli_test.rs\"\n\n[[bin]]\nname = \"alpha-selected\"\npath = \"tests/nested/selected.rs\"\n\n[[bin]]\nname = \"alpha-disabled\"\npath = \"bin/disabled.rs\"\nrequired-features = [\"experimental\"]\n\n[[test]]\nname = \"alpha-check\"\npath = \"source/check.rs\"\n",
+        "[package]\nname = \"alpha\"\nversion = \"0.1.0\"\nedition = \"2024\"\nbuild = \"build.rs\"\n\n[features]\ndefault = [\"enabled\"]\nenabled = []\n\n[lib]\npath = \"source/entry.rs\"\n\n[[bin]]\nname = \"alpha-tool\"\npath = \"bin/cli_test.rs\"\n\n[[bin]]\nname = \"alpha-selected\"\npath = \"tests/nested/selected.rs\"\n\n[[bin]]\nname = \"alpha-disabled\"\npath = \"bin/disabled.rs\"\nrequired-features = [\"experimental\"]\n\n[[test]]\nname = \"alpha-check\"\npath = \"source/check.rs\"\n",
     )
     .expect("alpha manifest must be written");
+    fs::write(
+        alpha.join("build.rs"),
+        "std::fs::write(\"build-script-ran\", \"ran\").unwrap();\n",
+    )
+    .expect("workspace build script must be written");
     fs::write(
         beta.join("Cargo.toml"),
         "[package]\nname = \"beta\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
