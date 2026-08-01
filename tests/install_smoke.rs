@@ -142,6 +142,20 @@ fn installed_command_lists_production_sources() {
             .join("\n")
     );
 
+    let from_alpha_directory = list_files(
+        &install,
+        &workspace,
+        &[workspace.join("alpha").join("...").as_os_str()],
+    );
+    assert_eq!(
+        from_alpha_directory,
+        workspace_recursive
+            .lines()
+            .take(5)
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+
     let from_custom_package = list_files(&install, &workspace, &["alpha...".as_ref()]);
     assert_eq!(
         from_custom_package,
@@ -273,9 +287,14 @@ fn write_workspace_fixture(root: &Path) -> PathBuf {
         .expect("workspace library source must be written");
     fs::write(
         alpha.join("source").join("check.rs"),
-        "#[test] fn check() {}\n",
+        "mod check_support;\n#[test] fn check() {}\n",
     )
     .expect("workspace test source must be written");
+    fs::write(
+        alpha.join("source").join("check_support.rs"),
+        "pub fn check_support() {}\n",
+    )
+    .expect("workspace test helper must be written");
     fs::write(
         alpha.join("source").join("helper.rs"),
         "pub fn helper() {}\n",

@@ -4,6 +4,7 @@ use std::error::Error;
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
+use syn::{Expr, Item, ItemMod, Lit, Meta};
 
 /// An error that prevents Rust source discovery.
 #[derive(Debug)]
@@ -122,7 +123,30 @@ fn collect_directory(
         .is_some_and(is_test_directory)
         .then(BTreeSet::new)
         .unwrap_or_else(|| non_production_source_paths(directory));
-    collect_directory_from_root(directory, directory, recursive, files, &excluded_sources)
+    collect_directory_from_root(directory, directory, recursive, files, &excluded_sources)?;
+
+    if let Some(package) = package_at_directory(directory) {
+        collect_package_sources(&package, recursive, files)?;
+    }
+
+    Ok(())
+}
+
+fn package_at_directory(directory: &Path) -> Option<Package> {
+    let metadata = MetadataCommand::new().current_dir(directory).exec().ok()?;
+    metadata
+        .packages
+        .into_iter()
+        .filter(|package| metadata.workspace_members.contains(&package.id))
+        .find(|package| package_directory(package).is_some_and(|path| path == directory))
+}
+
+fn package_directory(package: &Package) -> Option<PathBuf> {
+    package
+        .manifest_path
+        .as_std_path()
+        .parent()
+        .and_then(|path| canonical_path(path).ok())
 }
 
 fn collect_directory_from_root(
@@ -183,8 +207,102 @@ fn non_production_source_paths(path: &Path) -> BTreeSet<PathBuf> {
         .filter(|package| metadata.workspace_members.contains(&package.id))
         .flat_map(|package| &package.targets)
         .filter(|target| !is_production_target(&target.kind))
-        .filter_map(|target| canonical_path(target.src_path.as_std_path()).ok())
+        .flat_map(|target| source_tree(target.src_path.as_std_path()))
         .collect()
+}
+
+fn source_tree(source: &Path) -> BTreeSet<PathBuf> {
+    let mut sources = BTreeSet::new();
+    let Ok(source) = canonical_path(source) else {
+        return sources;
+    };
+    let Some(directory) = source.parent() else {
+        return sources;
+    };
+
+    collect_source_tree(&source, directory, &mut sources);
+    sources
+}
+
+fn collect_source_tree(source: &Path, directory: &Path, sources: &mut BTreeSet<PathBuf>) {
+    if !sources.insert(source.to_path_buf()) {
+        return;
+    }
+    let Ok(text) = fs::read_to_string(source) else {
+        return;
+    };
+    let Ok(syntax) = syn::parse_file(&text) else {
+        return;
+    };
+
+    for item in &syntax.items {
+        collect_item_source_tree(item, directory, sources);
+    }
+}
+
+fn collect_item_source_tree(item: &Item, directory: &Path, sources: &mut BTreeSet<PathBuf>) {
+    let Item::Mod(module) = item else {
+        return;
+    };
+
+    if let Some((_, items)) = &module.content {
+        let nested_directory = directory.join(module.ident.to_string());
+        for item in items {
+            collect_item_source_tree(item, &nested_directory, sources);
+        }
+        return;
+    }
+
+    let Some(source) = external_module_source(module, directory) else {
+        return;
+    };
+    let module_directory = module_directory(&source);
+    collect_source_tree(&source, &module_directory, sources);
+}
+
+fn external_module_source(module: &ItemMod, directory: &Path) -> Option<PathBuf> {
+    module_path_attribute(module)
+        .map(|path| directory.join(path))
+        .or_else(|| module_source_by_name(module, directory))
+        .and_then(|path| canonical_path(&path).ok())
+}
+
+fn module_path_attribute(module: &ItemMod) -> Option<PathBuf> {
+    module.attrs.iter().find_map(|attribute| {
+        let Meta::NameValue(value) = &attribute.meta else {
+            return None;
+        };
+        let Expr::Lit(literal) = &value.value else {
+            return None;
+        };
+        let Lit::Str(path) = &literal.lit else {
+            return None;
+        };
+
+        attribute
+            .path()
+            .is_ident("path")
+            .then(|| PathBuf::from(path.value()))
+    })
+}
+
+fn module_source_by_name(module: &ItemMod, directory: &Path) -> Option<PathBuf> {
+    let name = module.ident.to_string();
+    [
+        directory.join(format!("{name}.rs")),
+        directory.join(name).join("mod.rs"),
+    ]
+    .into_iter()
+    .find(|path| path.is_file())
+}
+
+fn module_directory(source: &Path) -> PathBuf {
+    let parent = source.parent().unwrap_or(source);
+    if source.file_stem().is_some_and(|name| name == "mod") {
+        parent.to_path_buf()
+    } else {
+        parent.join(source.file_stem().unwrap_or_default())
+    }
 }
 
 fn add_source_file_from_root(
@@ -312,7 +430,7 @@ fn non_production_package_sources(package: &Package) -> BTreeSet<PathBuf> {
         .targets
         .iter()
         .filter(|target| !is_production_target(&target.kind))
-        .filter_map(|target| canonical_path(target.src_path.as_std_path()).ok())
+        .flat_map(|target| source_tree(target.src_path.as_std_path()))
         .collect()
 }
 
