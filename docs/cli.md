@@ -14,7 +14,8 @@ directory, a Cargo workspace directory, or a package name in the current
 Cargo workspace. Mutarust uses Cargo target data for package and workspace
 targets. It includes declared library and binary source paths, including paths
 outside `src`. A directory, package, or workspace target selects its direct
-source files. Add a trailing `...` to select all nested source files.
+source files. Targets that require inactive Cargo features are not selected.
+Add a trailing `...` to select all nested source files.
 
 A bare target name selects a workspace package when that name exists. Use a
 relative path such as `./name` to select a directory with the same name.

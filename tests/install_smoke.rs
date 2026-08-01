@@ -252,7 +252,7 @@ fn write_fixture(root: &Path) -> PathBuf {
     .expect("fixture manifest must be written");
     fs::write(
         fixture.join("src").join("lib.rs"),
-        "mod math;\n#[cfg(test)] mod tests { include!(\"test_support.rs\"); }\n#[cfg(test)] mod shared_tests { #[path = \"../math.rs\"] mod shared_math; }\n#[cfg(test)] mod external_tests;\n",
+        "mod math;\n#[cfg(test)] mod tests { include!(\"test_support.rs\"); }\n#[cfg(test)] mod shared_tests { #[path = \"../math.rs\"] mod shared_math; }\n#[cfg(test)] mod external_tests;\n#[cfg_attr(test, path = \"cfg_attr_test_support.rs\")] mod cfg_attr_switch;\n#[cfg(not(not(test)))] mod double_test_support;\n",
     )
     .expect("fixture library must be written");
     fs::write(fixture.join("src").join("math.rs"), "pub fn add() {}\n")
@@ -287,6 +287,16 @@ fn write_fixture(root: &Path) -> PathBuf {
         "pub fn external_test_support() {}\n",
     )
     .expect("fixture external test support must be written");
+    fs::write(
+        fixture.join("src").join("cfg_attr_test_support.rs"),
+        "pub fn cfg_attr_test_support() {}\n",
+    )
+    .expect("fixture cfg_attr test support must be written");
+    fs::write(
+        fixture.join("src").join("double_test_support.rs"),
+        "pub fn double_test_support() {}\n",
+    )
+    .expect("fixture double test support must be written");
     fs::write(
         fixture.join("tests").join("example_test.rs"),
         "#[test] fn test() {}\n",
@@ -335,7 +345,8 @@ fn write_workspace_fixture(root: &Path) -> PathBuf {
     fs::create_dir_all(alpha.join("bin")).expect("workspace binary directory must be created");
     fs::create_dir_all(alpha.join("source").join("nested"))
         .expect("workspace library directory must be created");
-    fs::create_dir_all(alpha.join("tests")).expect("workspace test directory must be created");
+    fs::create_dir_all(alpha.join("tests").join("support"))
+        .expect("workspace test directory must be created");
     fs::create_dir_all(beta.join("src")).expect("workspace member directory must be created");
     fs::write(
         workspace.join("Cargo.toml"),
@@ -344,7 +355,7 @@ fn write_workspace_fixture(root: &Path) -> PathBuf {
     .expect("workspace manifest must be written");
     fs::write(
         alpha.join("Cargo.toml"),
-        "[package]\nname = \"alpha\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[lib]\npath = \"source/entry.rs\"\n\n[[bin]]\nname = \"alpha-tool\"\npath = \"bin/cli_test.rs\"\n\n[[bin]]\nname = \"alpha-selected\"\npath = \"tests/selected.rs\"\n\n[[test]]\nname = \"alpha-check\"\npath = \"source/check.rs\"\n",
+        "[package]\nname = \"alpha\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[lib]\npath = \"source/entry.rs\"\n\n[[bin]]\nname = \"alpha-tool\"\npath = \"bin/cli_test.rs\"\n\n[[bin]]\nname = \"alpha-selected\"\npath = \"tests/selected.rs\"\n\n[[bin]]\nname = \"alpha-disabled\"\npath = \"bin/disabled.rs\"\nrequired-features = [\"experimental\"]\n\n[[test]]\nname = \"alpha-check\"\npath = \"source/check.rs\"\n",
     )
     .expect("alpha manifest must be written");
     fs::write(
@@ -356,6 +367,13 @@ fn write_workspace_fixture(root: &Path) -> PathBuf {
         .expect("workspace binary source must be written");
     fs::write(alpha.join("tests").join("selected.rs"), "fn main() {}\n")
         .expect("workspace selected source must be written");
+    fs::write(
+        alpha.join("tests").join("support").join("unused.rs"),
+        "pub fn unused() {}\n",
+    )
+    .expect("workspace unused test source must be written");
+    fs::write(alpha.join("bin").join("disabled.rs"), "fn main() {}\n")
+        .expect("workspace disabled source must be written");
     fs::write(alpha.join("source").join("entry.rs"), "mod helper;\n")
         .expect("workspace library source must be written");
     fs::write(

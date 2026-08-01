@@ -131,8 +131,8 @@ fn collect_directory(
         include_excluded_sources,
     )?;
 
-    if let Some(package) = package_at_directory(directory) {
-        collect_package_sources(&package, recursive, files)?;
+    if let Some((package, active_features)) = package_at_directory(directory) {
+        collect_package_sources(&package, &active_features, recursive, files)?;
     }
 
     Ok(())
@@ -153,13 +153,17 @@ fn is_excluded_source_directory(name: &std::ffi::OsStr) -> bool {
         )
 }
 
-fn package_at_directory(directory: &Path) -> Option<Package> {
+fn package_at_directory(directory: &Path) -> Option<(Package, BTreeSet<String>)> {
     let metadata = MetadataCommand::new().current_dir(directory).exec().ok()?;
-    metadata
+    let package = metadata
         .packages
-        .into_iter()
+        .iter()
         .filter(|package| metadata.workspace_members.contains(&package.id))
-        .find(|package| package_directory(package).is_some_and(|path| path == directory))
+        .find(|package| package_directory(package).is_some_and(|path| path == directory))?
+        .clone();
+    let active_features = active_package_features(&metadata, &package);
+
+    Some((package, active_features))
 }
 
 fn package_directory(package: &Package) -> Option<PathBuf> {
@@ -237,7 +241,9 @@ fn non_production_source_paths(path: &Path) -> BTreeSet<PathBuf> {
         .packages
         .iter()
         .filter(|package| metadata.workspace_members.contains(&package.id))
-        .flat_map(non_production_package_sources)
+        .flat_map(|package| {
+            non_production_package_sources(package, &active_package_features(&metadata, package))
+        })
         .collect()
 }
 
@@ -499,13 +505,21 @@ fn collect_test_only_item_source_tree(
         return;
     }
 
-    let Some(source) = external_module_source(module, module_root, path_directory) else {
-        return;
-    };
-    let module_directory = module_directory(&source);
     if has_test_configuration(&module.attrs) {
+        let Some(source) = test_module_source(module, module_root, path_directory) else {
+            return;
+        };
+        let module_directory = module_directory(&source);
         collect_source_tree(&source, &module_directory, sources);
     } else {
+        if let Some(source) = test_path_module_source(module, path_directory) {
+            let module_directory = module_directory(&source);
+            collect_source_tree(&source, &module_directory, sources);
+        }
+        let Some(source) = external_module_source(module, module_root, path_directory) else {
+            return;
+        };
+        let module_directory = module_directory(&source);
         collect_test_only_source_tree(&source, &module_directory, sources);
     }
 }
@@ -539,24 +553,68 @@ fn has_test_configuration(attributes: &[syn::Attribute]) -> bool {
 }
 
 fn configuration_requires_test(configuration: Meta) -> bool {
+    !configuration_can_be_true_without_test(configuration)
+}
+
+fn configuration_can_be_true_without_test(configuration: Meta) -> bool {
     if configuration.path().is_ident("test") {
-        return true;
+        return false;
     }
     let Meta::List(list) = configuration else {
-        return false;
+        return true;
     };
     let Ok(options) =
         list.parse_args_with(syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated)
     else {
-        return false;
+        return true;
     };
 
     if list.path.is_ident("all") {
-        options.into_iter().any(configuration_requires_test)
+        options
+            .into_iter()
+            .all(configuration_can_be_true_without_test)
     } else if list.path.is_ident("any") {
-        !options.is_empty() && options.into_iter().all(configuration_requires_test)
+        options
+            .into_iter()
+            .any(configuration_can_be_true_without_test)
+    } else if list.path.is_ident("not") {
+        options
+            .into_iter()
+            .next()
+            .is_none_or(configuration_can_be_false_without_test)
     } else {
-        false
+        true
+    }
+}
+
+fn configuration_can_be_false_without_test(configuration: Meta) -> bool {
+    if configuration.path().is_ident("test") {
+        return true;
+    }
+    let Meta::List(list) = configuration else {
+        return true;
+    };
+    let Ok(options) =
+        list.parse_args_with(syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated)
+    else {
+        return true;
+    };
+
+    if list.path.is_ident("all") {
+        options
+            .into_iter()
+            .any(configuration_can_be_false_without_test)
+    } else if list.path.is_ident("any") {
+        options
+            .into_iter()
+            .all(configuration_can_be_false_without_test)
+    } else if list.path.is_ident("not") {
+        options
+            .into_iter()
+            .next()
+            .is_none_or(configuration_can_be_true_without_test)
+    } else {
+        true
     }
 }
 
@@ -569,6 +627,59 @@ fn external_module_source(
         .map(|path| path_directory.join(path))
         .or_else(|| module_source_by_name(module, module_directory))
         .and_then(|path| canonical_path(&path).ok())
+}
+
+fn test_module_source(
+    module: &ItemMod,
+    module_directory: &Path,
+    path_directory: &Path,
+) -> Option<PathBuf> {
+    test_path_module_source(module, path_directory)
+        .or_else(|| external_module_source(module, module_directory, path_directory))
+}
+
+fn test_path_module_source(module: &ItemMod, directory: &Path) -> Option<PathBuf> {
+    test_path_attribute(module)
+        .map(|path| directory.join(path))
+        .and_then(|path| canonical_path(&path).ok())
+}
+
+fn test_path_attribute(module: &ItemMod) -> Option<PathBuf> {
+    module.attrs.iter().find_map(|attribute| {
+        let Meta::List(list) = &attribute.meta else {
+            return None;
+        };
+        if !attribute.path().is_ident("cfg_attr") {
+            return None;
+        }
+        let Ok(options) = list
+            .parse_args_with(syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated)
+        else {
+            return None;
+        };
+        let mut options = options.into_iter();
+        let configuration = options.next()?;
+        configuration_requires_test(configuration)
+            .then(|| options.find_map(path_from_meta))
+            .flatten()
+    })
+}
+
+fn path_from_meta(meta: Meta) -> Option<PathBuf> {
+    let Meta::NameValue(value) = meta else {
+        return None;
+    };
+    let Expr::Lit(literal) = value.value else {
+        return None;
+    };
+    let Lit::Str(path) = literal.lit else {
+        return None;
+    };
+
+    value
+        .path
+        .is_ident("path")
+        .then(|| PathBuf::from(path.value()))
 }
 
 fn module_path_attribute(module: &ItemMod) -> Option<PathBuf> {
@@ -617,7 +728,7 @@ fn add_source_file_from_root(
     accept_all_rust: bool,
 ) {
     if (accept_all_rust && is_rust_file(path) || is_source_file(path))
-        && (accept_all_rust || !has_test_parent_below(path, source_root))
+        && (accept_all_rust || !has_test_parent_at_or_below(path, source_root))
         && !excluded_sources.contains(path)
     {
         files.insert(path.to_path_buf());
@@ -638,12 +749,20 @@ fn is_source_file(path: &Path) -> bool {
         && !name.ends_with("_test.rs")
 }
 
-fn has_test_parent_below(path: &Path, source_root: &Path) -> bool {
-    path.strip_prefix(source_root)
-        .ok()
-        .and_then(Path::parent)
-        .into_iter()
-        .flat_map(Path::ancestors)
+fn has_test_parent_at_or_below(path: &Path, source_root: &Path) -> bool {
+    is_test_path(source_root)
+        || path
+            .strip_prefix(source_root)
+            .ok()
+            .and_then(Path::parent)
+            .into_iter()
+            .flat_map(Path::ancestors)
+            .filter_map(Path::file_name)
+            .any(is_test_directory)
+}
+
+fn is_test_path(path: &Path) -> bool {
+    path.ancestors()
         .filter_map(Path::file_name)
         .any(is_test_directory)
 }
@@ -684,7 +803,8 @@ fn collect_package(target: &Target, files: &mut BTreeSet<PathBuf>) -> Result<boo
     }) else {
         return Ok(false);
     };
-    collect_package_sources(package, target.recursive, files)?;
+    let active_features = active_package_features(&metadata, package);
+    collect_package_sources(package, &active_features, target.recursive, files)?;
     Ok(true)
 }
 
@@ -706,7 +826,8 @@ fn collect_workspace(
 ) -> Result<(), SourceError> {
     for package in &metadata.packages {
         if metadata.workspace_members.contains(&package.id) {
-            collect_package_sources(package, recursive, files)?;
+            let active_features = active_package_features(metadata, package);
+            collect_package_sources(package, &active_features, recursive, files)?;
         }
     }
 
@@ -715,13 +836,14 @@ fn collect_workspace(
 
 fn collect_package_sources(
     package: &Package,
+    active_features: &BTreeSet<String>,
     recursive: bool,
     files: &mut BTreeSet<PathBuf>,
 ) -> Result<(), SourceError> {
-    let excluded_sources = non_production_package_sources(package);
+    let excluded_sources = non_production_package_sources(package, active_features);
 
     for target in &package.targets {
-        if is_production_target(&target.kind) {
+        if is_production_target(&target.kind) && is_active_target(target, active_features) {
             collect_declared_target(
                 target.src_path.as_std_path(),
                 recursive,
@@ -734,13 +856,18 @@ fn collect_package_sources(
     Ok(())
 }
 
-fn non_production_package_sources(package: &Package) -> BTreeSet<PathBuf> {
-    let test_only_sources = test_only_package_sources(package);
-    let production_sources = production_package_sources(package);
+fn non_production_package_sources(
+    package: &Package,
+    active_features: &BTreeSet<String>,
+) -> BTreeSet<PathBuf> {
+    let test_only_sources = test_only_package_sources(package, active_features);
+    let production_sources = production_package_sources(package, active_features);
     let mut non_production_sources = package
         .targets
         .iter()
-        .filter(|target| !is_production_target(&target.kind))
+        .filter(|target| {
+            !is_production_target(&target.kind) || !is_active_target(target, active_features)
+        })
         .flat_map(|target| source_tree(target.src_path.as_std_path()))
         .chain(test_only_sources)
         .collect::<BTreeSet<_>>();
@@ -749,22 +876,48 @@ fn non_production_package_sources(package: &Package) -> BTreeSet<PathBuf> {
     non_production_sources
 }
 
-fn production_package_sources(package: &Package) -> BTreeSet<PathBuf> {
+fn production_package_sources(
+    package: &Package,
+    active_features: &BTreeSet<String>,
+) -> BTreeSet<PathBuf> {
     package
         .targets
         .iter()
-        .filter(|target| is_production_target(&target.kind))
+        .filter(|target| {
+            is_production_target(&target.kind) && is_active_target(target, active_features)
+        })
         .flat_map(|target| production_source_tree(target.src_path.as_std_path()))
         .collect()
 }
 
-fn test_only_package_sources(package: &Package) -> BTreeSet<PathBuf> {
+fn test_only_package_sources(
+    package: &Package,
+    active_features: &BTreeSet<String>,
+) -> BTreeSet<PathBuf> {
     package
         .targets
         .iter()
-        .filter(|target| is_production_target(&target.kind))
+        .filter(|target| {
+            is_production_target(&target.kind) && is_active_target(target, active_features)
+        })
         .flat_map(|target| test_only_source_tree(target.src_path.as_std_path()))
         .collect()
+}
+
+fn active_package_features(metadata: &Metadata, package: &Package) -> BTreeSet<String> {
+    metadata
+        .resolve
+        .as_ref()
+        .and_then(|resolve| resolve.nodes.iter().find(|node| node.id == package.id))
+        .map(|node| node.features.iter().map(ToString::to_string).collect())
+        .unwrap_or_default()
+}
+
+fn is_active_target(target: &cargo_metadata::Target, active_features: &BTreeSet<String>) -> bool {
+    target
+        .required_features
+        .iter()
+        .all(|feature| active_features.contains(feature))
 }
 
 fn is_production_target(kinds: &[TargetKind]) -> bool {
