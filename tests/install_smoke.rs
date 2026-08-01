@@ -97,6 +97,14 @@ fn installed_command_lists_production_sources() {
         from_explicit_test_file,
         explicit_test_file.display().to_string()
     );
+    let nested_test_directory = fixture.join("tests").join("support");
+    let nested_test_file = nested_test_directory.join("nested_test.rs");
+    let from_nested_test_directory =
+        list_files(&install, &fixture, &[nested_test_directory.as_os_str()]);
+    assert_eq!(
+        from_nested_test_directory,
+        nested_test_file.display().to_string()
+    );
 
     let from_package = list_files(&install, &fixture, &["sample".as_ref()]);
     assert_eq!(from_package, expected_direct);
@@ -211,6 +219,8 @@ fn write_fixture(root: &Path) -> PathBuf {
     fs::create_dir_all(fixture.join("src").join("nested"))
         .expect("fixture nested source directory must be created");
     fs::create_dir_all(fixture.join("tests")).expect("fixture test directory must be created");
+    fs::create_dir_all(fixture.join("tests").join("support"))
+        .expect("fixture nested test directory must be created");
     fs::create_dir_all(fixture.join("examples"))
         .expect("fixture example directory must be created");
     fs::create_dir_all(fixture.join("fixtures")).expect("fixture data directory must be created");
@@ -224,7 +234,7 @@ fn write_fixture(root: &Path) -> PathBuf {
     .expect("fixture manifest must be written");
     fs::write(
         fixture.join("src").join("lib.rs"),
-        "mod math;\n#[cfg(test)] include!(\"test_support.rs\");\n",
+        "mod math;\n#[cfg(test)] mod tests { include!(\"test_support.rs\"); }\n",
     )
     .expect("fixture library must be written");
     fs::write(fixture.join("src").join("math.rs"), "pub fn add() {}\n")
@@ -254,6 +264,11 @@ fn write_fixture(root: &Path) -> PathBuf {
         "#[test] fn test() {}\n",
     )
     .expect("fixture test helper must be written");
+    fs::write(
+        fixture.join("tests").join("support").join("nested_test.rs"),
+        "#[test] fn test() {}\n",
+    )
+    .expect("fixture nested test helper must be written");
     fs::write(
         fixture.join("tests").join("integration.rs"),
         "#[test] fn test() {}\n",

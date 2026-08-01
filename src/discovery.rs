@@ -123,7 +123,7 @@ fn collect_directory(
         .is_some_and(is_test_directory)
         .then(BTreeSet::new)
         .unwrap_or_else(|| non_production_source_paths(directory));
-    let accept_all_rust = directory.file_name().is_some_and(is_test_directory);
+    let accept_all_rust = is_test_directory_target(directory);
     collect_directory_from_root(
         directory,
         directory,
@@ -138,6 +138,13 @@ fn collect_directory(
     }
 
     Ok(())
+}
+
+fn is_test_directory_target(directory: &Path) -> bool {
+    directory
+        .ancestors()
+        .filter_map(Path::file_name)
+        .any(is_test_directory)
 }
 
 fn package_at_directory(directory: &Path) -> Option<Package> {
@@ -252,14 +259,20 @@ fn collect_source_tree(source: &Path, directory: &Path, sources: &mut BTreeSet<P
         return;
     };
 
+    let source_directory = source.parent().unwrap_or(directory);
     for item in &syntax.items {
-        collect_item_source_tree(item, directory, sources);
+        collect_item_source_tree(item, directory, source_directory, sources);
     }
 }
 
-fn collect_item_source_tree(item: &Item, directory: &Path, sources: &mut BTreeSet<PathBuf>) {
+fn collect_item_source_tree(
+    item: &Item,
+    module_root: &Path,
+    source_directory: &Path,
+    sources: &mut BTreeSet<PathBuf>,
+) {
     if let Item::Macro(item) = item {
-        collect_include_source(item, directory, sources);
+        collect_include_source(item, module_root, source_directory, sources);
         return;
     }
     let Item::Mod(module) = item else {
@@ -267,26 +280,31 @@ fn collect_item_source_tree(item: &Item, directory: &Path, sources: &mut BTreeSe
     };
 
     if let Some((_, items)) = &module.content {
-        let nested_directory = directory.join(module.ident.to_string());
+        let nested_directory = module_root.join(module.ident.to_string());
         for item in items {
-            collect_item_source_tree(item, &nested_directory, sources);
+            collect_item_source_tree(item, &nested_directory, source_directory, sources);
         }
         return;
     }
 
-    let Some(source) = external_module_source(module, directory) else {
+    let Some(source) = external_module_source(module, module_root) else {
         return;
     };
     let module_directory = module_directory(&source);
     collect_source_tree(&source, &module_directory, sources);
 }
 
-fn collect_include_source(item: &ItemMacro, directory: &Path, sources: &mut BTreeSet<PathBuf>) {
-    let Some(source) = include_source(item, directory) else {
+fn collect_include_source(
+    item: &ItemMacro,
+    module_root: &Path,
+    source_directory: &Path,
+    sources: &mut BTreeSet<PathBuf>,
+) {
+    let Some(source) = include_source(item, source_directory) else {
         return;
     };
 
-    collect_source_tree(&source, directory, sources);
+    collect_source_tree(&source, module_root, sources);
 }
 
 fn include_source(item: &ItemMacro, directory: &Path) -> Option<PathBuf> {
@@ -320,18 +338,20 @@ fn collect_test_only_source_tree(source: &Path, directory: &Path, sources: &mut 
         return;
     };
 
+    let source_directory = source.parent().unwrap_or(directory);
     for item in &syntax.items {
-        collect_test_only_item_source_tree(item, directory, sources);
+        collect_test_only_item_source_tree(item, directory, source_directory, sources);
     }
 }
 
 fn collect_test_only_item_source_tree(
     item: &Item,
-    directory: &Path,
+    module_root: &Path,
+    source_directory: &Path,
     sources: &mut BTreeSet<PathBuf>,
 ) {
     if let Item::Macro(item) = item {
-        collect_test_only_include_source(item, directory, sources);
+        collect_test_only_include_source(item, module_root, source_directory, sources);
         return;
     }
     let Item::Mod(module) = item else {
@@ -339,20 +359,25 @@ fn collect_test_only_item_source_tree(
     };
 
     if let Some((_, items)) = &module.content {
-        let nested_directory = directory.join(module.ident.to_string());
+        let nested_directory = module_root.join(module.ident.to_string());
         if has_test_configuration(&module.attrs) {
             for item in items {
-                collect_item_source_tree(item, &nested_directory, sources);
+                collect_item_source_tree(item, &nested_directory, source_directory, sources);
             }
         } else {
             for item in items {
-                collect_test_only_item_source_tree(item, &nested_directory, sources);
+                collect_test_only_item_source_tree(
+                    item,
+                    &nested_directory,
+                    source_directory,
+                    sources,
+                );
             }
         }
         return;
     }
 
-    let Some(source) = external_module_source(module, directory) else {
+    let Some(source) = external_module_source(module, module_root) else {
         return;
     };
     let module_directory = module_directory(&source);
@@ -365,17 +390,18 @@ fn collect_test_only_item_source_tree(
 
 fn collect_test_only_include_source(
     item: &ItemMacro,
-    directory: &Path,
+    module_root: &Path,
+    source_directory: &Path,
     sources: &mut BTreeSet<PathBuf>,
 ) {
-    let Some(source) = include_source(item, directory) else {
+    let Some(source) = include_source(item, source_directory) else {
         return;
     };
 
     if has_test_configuration(&item.attrs) {
-        collect_source_tree(&source, directory, sources);
+        collect_source_tree(&source, module_root, sources);
     } else {
-        collect_test_only_source_tree(&source, directory, sources);
+        collect_test_only_source_tree(&source, module_root, sources);
     }
 }
 
