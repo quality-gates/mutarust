@@ -867,11 +867,45 @@ fn direct_rustc_configurations() -> Option<BTreeSet<String>> {
     let compiler = env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
     let mut command = Command::new(compiler);
     command.args(["--print", "cfg"]);
-    if let Ok(target) = env::var("CARGO_BUILD_TARGET") {
+    if let Some(target) = configured_cargo_target() {
         command.args(["--target", &target]);
     }
 
     command_configurations(&mut command)
+}
+
+fn configured_cargo_target() -> Option<String> {
+    env::var("CARGO_BUILD_TARGET")
+        .ok()
+        .or_else(cargo_configuration_target)
+}
+
+fn cargo_configuration_target() -> Option<String> {
+    let current_directory = env::current_dir().ok()?;
+    let directories = current_directory.ancestors().collect::<Vec<_>>();
+
+    directories
+        .into_iter()
+        .filter_map(cargo_configuration_target_in)
+        .next()
+}
+
+fn cargo_configuration_target_in(directory: &Path) -> Option<String> {
+    ["config.toml", "config"]
+        .into_iter()
+        .find_map(|name| cargo_configuration_target_from(&directory.join(".cargo").join(name)))
+}
+
+fn cargo_configuration_target_from(path: &Path) -> Option<String> {
+    let configuration = fs::read_to_string(path).ok()?;
+    let table = toml::from_str::<toml::Table>(&configuration).ok()?;
+
+    table
+        .get("build")?
+        .as_table()?
+        .get("target")?
+        .as_str()
+        .map(str::to_owned)
 }
 
 fn command_configurations(command: &mut Command) -> Option<BTreeSet<String>> {

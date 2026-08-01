@@ -236,6 +236,7 @@ version = "0.1.0"
 dependencies = [
  "cargo_metadata",
  "syn 2.0.119",
+ "toml",
 ]
 
 [[package]]

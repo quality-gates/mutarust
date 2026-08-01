@@ -262,6 +262,15 @@ fn installed_command_lists_production_sources() {
     let from_plain_directory = list_files(&install, &plain, &["src".as_ref()]);
     assert_eq!(from_plain_directory, plain_source.display().to_string());
 
+    let configured_target = write_configured_target_fixture(&root);
+    let windows_source = configured_target.join("src").join("windows.rs");
+    let from_configured_target = list_files(&install, &configured_target, &[]);
+    assert_eq!(
+        from_configured_target,
+        windows_source.display().to_string(),
+        "Cargo build target must select the target source"
+    );
+
     fs::remove_dir_all(root).expect("smoke test files must be removed");
 }
 
@@ -394,6 +403,35 @@ fn write_fixture(root: &Path) -> PathBuf {
     )
     .expect("fixture generated source must be written");
     fs::canonicalize(fixture).expect("fixture path must resolve")
+}
+
+fn write_configured_target_fixture(root: &Path) -> PathBuf {
+    let fixture = root.join("configured-target");
+    fs::create_dir_all(fixture.join(".cargo")).expect("target configuration directory must exist");
+    fs::create_dir_all(fixture.join("src")).expect("target source directory must exist");
+    fs::write(
+        fixture.join("Cargo.toml"),
+        "[package]\nname = \"configured-target\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .expect("target manifest must be written");
+    fs::write(
+        fixture.join(".cargo").join("config.toml"),
+        "[build]\ntarget = \"x86_64-pc-windows-gnu\"\n",
+    )
+    .expect("Cargo target configuration must be written");
+    fs::write(
+        fixture.join("src").join("lib.rs"),
+        "#[cfg(windows)] mod windows;\n#[cfg(unix)] mod unix;\n",
+    )
+    .expect("target library source must be written");
+    fs::write(
+        fixture.join("src").join("windows.rs"),
+        "pub fn windows() {}\n",
+    )
+    .expect("Windows source must be written");
+    fs::write(fixture.join("src").join("unix.rs"), "pub fn unix() {}\n")
+        .expect("Unix source must be written");
+    fs::canonicalize(fixture).expect("target fixture path must resolve")
 }
 
 fn write_workspace_fixture(root: &Path) -> PathBuf {
