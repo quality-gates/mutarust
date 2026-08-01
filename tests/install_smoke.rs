@@ -90,17 +90,18 @@ fn installed_command_lists_production_sources() {
     let alpha = workspace.join("alpha");
     let beta = workspace.join("beta");
     let workspace_direct = format!(
-        "{}\n{}\n{}\n{}",
+        "{}\n{}\n{}\n{}\n{}",
         alpha.join("bin").join("tool.rs").display(),
         alpha.join("source").join("entry.rs").display(),
         alpha.join("source").join("helper.rs").display(),
+        alpha.join("tests").join("selected.rs").display(),
         beta.join("src").join("lib.rs").display(),
     );
     let from_workspace = list_files(&install, &workspace, &[workspace.as_os_str()]);
     assert_eq!(from_workspace, workspace_direct);
 
     let workspace_recursive = format!(
-        "{}\n{}\n{}\n{}\n{}",
+        "{}\n{}\n{}\n{}\n{}\n{}",
         alpha.join("bin").join("tool.rs").display(),
         alpha.join("source").join("entry.rs").display(),
         alpha.join("source").join("helper.rs").display(),
@@ -109,6 +110,7 @@ fn installed_command_lists_production_sources() {
             .join("nested")
             .join("inside.rs")
             .display(),
+        alpha.join("tests").join("selected.rs").display(),
         beta.join("src").join("lib.rs").display(),
     );
     let from_recursive_workspace =
@@ -120,7 +122,7 @@ fn installed_command_lists_production_sources() {
         from_custom_package,
         workspace_recursive
             .lines()
-            .take(4)
+            .take(5)
             .collect::<Vec<_>>()
             .join("\n")
     );
@@ -208,6 +210,7 @@ fn write_workspace_fixture(root: &Path) -> PathBuf {
     fs::create_dir_all(alpha.join("bin")).expect("workspace binary directory must be created");
     fs::create_dir_all(alpha.join("source").join("nested"))
         .expect("workspace library directory must be created");
+    fs::create_dir_all(alpha.join("tests")).expect("workspace test directory must be created");
     fs::create_dir_all(beta.join("src")).expect("workspace member directory must be created");
     fs::write(
         workspace.join("Cargo.toml"),
@@ -216,7 +219,7 @@ fn write_workspace_fixture(root: &Path) -> PathBuf {
     .expect("workspace manifest must be written");
     fs::write(
         alpha.join("Cargo.toml"),
-        "[package]\nname = \"alpha\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[lib]\npath = \"source/entry.rs\"\n\n[[bin]]\nname = \"alpha-tool\"\npath = \"bin/tool.rs\"\n",
+        "[package]\nname = \"alpha\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[lib]\npath = \"source/entry.rs\"\n\n[[bin]]\nname = \"alpha-tool\"\npath = \"bin/tool.rs\"\n\n[[bin]]\nname = \"alpha-selected\"\npath = \"tests/selected.rs\"\n",
     )
     .expect("alpha manifest must be written");
     fs::write(
@@ -226,6 +229,8 @@ fn write_workspace_fixture(root: &Path) -> PathBuf {
     .expect("beta manifest must be written");
     fs::write(alpha.join("bin").join("tool.rs"), "fn main() {}\n")
         .expect("workspace binary source must be written");
+    fs::write(alpha.join("tests").join("selected.rs"), "fn main() {}\n")
+        .expect("workspace selected source must be written");
     fs::write(alpha.join("source").join("entry.rs"), "mod helper;\n")
         .expect("workspace library source must be written");
     fs::write(

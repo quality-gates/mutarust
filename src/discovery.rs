@@ -46,11 +46,32 @@ fn default_targets(targets: &[String]) -> Vec<Target> {
 fn collect_target(target: Target, files: &mut BTreeSet<PathBuf>) -> Result<(), SourceError> {
     let path = PathBuf::from(&target.value);
 
+    if path.is_file() || is_path_target(&target.value) {
+        return collect_path(&path, target.recursive, files);
+    }
+
+    if collect_package(&target, files)? {
+        return Ok(());
+    }
+
     if path.exists() {
         return collect_path(&path, target.recursive, files);
     }
 
-    collect_package(&target, files)
+    Err(SourceError::new(format!(
+        "cannot find Cargo package: {}",
+        target.value
+    )))
+}
+
+fn is_path_target(value: &str) -> bool {
+    Path::new(value).is_absolute()
+        || value == "."
+        || value == ".."
+        || value.starts_with("./")
+        || value.starts_with(".\\")
+        || value.starts_with("../")
+        || value.starts_with("..\\")
 }
 
 fn collect_path(
@@ -61,7 +82,7 @@ fn collect_path(
     let path = canonical_path(path)?;
 
     if path.is_file() {
-        add_source_file(&path, files);
+        add_direct_source_file(&path, files);
         return Ok(());
     }
 
@@ -93,6 +114,15 @@ fn collect_directory(
     recursive: bool,
     files: &mut BTreeSet<PathBuf>,
 ) -> Result<(), SourceError> {
+    collect_directory_from_root(directory, directory, recursive, files)
+}
+
+fn collect_directory_from_root(
+    directory: &Path,
+    source_root: &Path,
+    recursive: bool,
+    files: &mut BTreeSet<PathBuf>,
+) -> Result<(), SourceError> {
     for entry in fs::read_dir(directory).map_err(|error| read_error(directory, error))? {
         let entry = entry.map_err(|error| read_error(directory, error))?;
         let path = entry.path();
@@ -101,9 +131,9 @@ fn collect_directory(
             .map_err(|error| read_error(&path, error))?;
 
         if file_type.is_file() {
-            add_source_file(&path, files);
+            add_source_file_from_root(&path, source_root, files);
         } else if recursive && file_type.is_dir() && !skip_directory(entry.file_name().as_ref()) {
-            collect_directory(&path, true, files)?;
+            collect_directory_from_root(&path, source_root, true, files)?;
         }
     }
 
@@ -117,8 +147,21 @@ fn read_error(path: &Path, error: std::io::Error) -> SourceError {
     ))
 }
 
-fn add_source_file(path: &Path, files: &mut BTreeSet<PathBuf>) {
-    if is_source_file(path) {
+fn add_direct_source_file(path: &Path, files: &mut BTreeSet<PathBuf>) {
+    let source_root =
+        cargo_root(path).unwrap_or_else(|| path.parent().unwrap_or(path).to_path_buf());
+    add_source_file_from_root(path, &source_root, files);
+}
+
+fn cargo_root(path: &Path) -> Option<PathBuf> {
+    path.ancestors()
+        .skip(1)
+        .find(|candidate| candidate.join("Cargo.toml").is_file())
+        .map(Path::to_path_buf)
+}
+
+fn add_source_file_from_root(path: &Path, source_root: &Path, files: &mut BTreeSet<PathBuf>) {
+    if is_source_file(path) && !has_test_parent_below(path, source_root) {
         files.insert(path.to_path_buf());
     }
 }
@@ -131,12 +174,14 @@ fn is_source_file(path: &Path) -> bool {
     path.extension().is_some_and(|extension| extension == "rs")
         && name != "build.rs"
         && !name.ends_with("_test.rs")
-        && !has_test_parent(path)
 }
 
-fn has_test_parent(path: &Path) -> bool {
-    path.ancestors()
-        .skip(1)
+fn has_test_parent_below(path: &Path, source_root: &Path) -> bool {
+    path.strip_prefix(source_root)
+        .ok()
+        .and_then(Path::parent)
+        .into_iter()
+        .flat_map(Path::ancestors)
         .filter_map(Path::file_name)
         .any(is_test_directory)
 }
@@ -165,19 +210,17 @@ fn is_test_directory(name: &std::ffi::OsStr) -> bool {
     )
 }
 
-fn collect_package(target: &Target, files: &mut BTreeSet<PathBuf>) -> Result<(), SourceError> {
+fn collect_package(target: &Target, files: &mut BTreeSet<PathBuf>) -> Result<bool, SourceError> {
     let metadata = MetadataCommand::new()
         .exec()
         .map_err(|error| SourceError::new(format!("cannot read Cargo metadata: {error}")))?;
-    let package = metadata
-        .packages
-        .iter()
-        .find(|package| {
-            package.name.as_ref() == target.value
-                && metadata.workspace_members.contains(&package.id)
-        })
-        .ok_or_else(|| SourceError::new(format!("cannot find Cargo package: {}", target.value)))?;
-    collect_package_sources(package, target.recursive, files)
+    let Some(package) = metadata.packages.iter().find(|package| {
+        package.name.as_ref() == target.value && metadata.workspace_members.contains(&package.id)
+    }) else {
+        return Ok(false);
+    };
+    collect_package_sources(package, target.recursive, files)?;
+    Ok(true)
 }
 
 fn workspace_metadata(path: &Path) -> Option<Metadata> {
@@ -240,13 +283,19 @@ fn collect_declared_target(
     files: &mut BTreeSet<PathBuf>,
 ) -> Result<(), SourceError> {
     let source = canonical_path(source)?;
-    add_source_file(&source, files);
+    add_declared_source_file(&source, files);
 
     let Some(directory) = source.parent() else {
         return Ok(());
     };
 
     collect_directory(directory, recursive, files)
+}
+
+fn add_declared_source_file(path: &Path, files: &mut BTreeSet<PathBuf>) {
+    if is_source_file(path) {
+        files.insert(path.to_path_buf());
+    }
 }
 
 impl SourceError {

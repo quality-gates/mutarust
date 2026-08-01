@@ -16,6 +16,9 @@ targets. It includes declared library and binary source paths, including paths
 outside `src`. A directory, package, or workspace target selects its direct
 source files. Add a trailing `...` to select all nested source files.
 
+A bare target name selects a workspace package when that name exists. Use a
+relative path such as `./name` to select a directory with the same name.
+
 Mutarust returns absolute paths in sorted order. It removes duplicate paths.
 It excludes test, benchmark, example, fixture, vendor, generated, build-output,
 hidden, and `build.rs` sources during recursive discovery. It also excludes
