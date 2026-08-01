@@ -13,4 +13,3 @@ categories = ["development-tools::testing", "command-line-utilities"]
 [[bin]]
 name = "mutarust"
 path = "src/main.rs"
-

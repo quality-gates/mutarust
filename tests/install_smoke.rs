@@ -7,11 +7,15 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[test]
 fn installed_command_prints_help() {
     let root = smoke_root();
+    let package_target = root.join("package-target");
     let target = root.join("target");
     let install = root.join("install");
+    let package = package_crate(&package_target);
 
     let install_status = Command::new(env!("CARGO"))
-        .args(["install", "--path", env!("CARGO_MANIFEST_DIR"), "--root"])
+        .args(["install", "--path"])
+        .arg(package)
+        .arg("--root")
         .arg(&install)
         .args(["--debug", "--locked", "--force"])
         .env("CARGO_TARGET_DIR", &target)
@@ -46,6 +50,24 @@ fn installed_command_prints_help() {
     );
 
     fs::remove_dir_all(root).expect("smoke test files must be removed");
+}
+
+fn package_crate(package_target: &Path) -> PathBuf {
+    let package_status = Command::new(env!("CARGO"))
+        .args([
+            "package",
+            "--manifest-path",
+            concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml"),
+            "--allow-dirty",
+            "--locked",
+        ])
+        .env("CARGO_TARGET_DIR", package_target)
+        .status()
+        .expect("cargo package must start");
+
+    assert!(package_status.success(), "cargo package must succeed");
+
+    package_target.join("package").join("mutarust-0.1.0")
 }
 
 fn smoke_root() -> PathBuf {
