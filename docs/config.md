@@ -14,11 +14,10 @@ Schema is [schema/mutarust.schema.json](../schema/mutarust.schema.json).
 ## Policy Fields
 
 All fields are optional. A Boolean field defaults to `false`. An omitted score
-has no score gate. An omitted list is empty. This configuration contract is
-complete before each related run feature is complete. The current command uses
-silent mode, mutator selection, and the total-score policy. Later feature
-changes use the stored source selection, report, and covered-score settings.
-The command does not silently change a user setting to a different value.
+has no score gate. An omitted list is empty. The current command uses silent
+mode, mutator selection, source selection, and the total-score policy. Later
+feature changes use the stored report and covered-score settings. The command
+does not silently change a user setting to a different value.
 
 | Field | Type | Purpose |
 | --- | --- | --- |
@@ -34,8 +33,9 @@ The command does not silently change a user setting to a different value.
 | `enable_mutators` | List of names or group patterns | Select an initial mutator allowlist. |
 | `ignore_source_lines` | List of regular expressions | Set source lines to ignore. |
 
-A mutator pattern is an exact name, such as `conditional/bool-literal`, or a
-group pattern with a final `*`, such as `conditional/*`.
+A mutator pattern is an exact name, such as `conditional/bool-literal`, a
+group pattern with a final `*`, such as `conditional/*`, or `*` for all
+mutators.
 
 `skip_with_cfg` is the Rust adaptation of Mutago `skip_with_build_tags`.
 
@@ -54,6 +54,47 @@ and `--no-silent` together.
 Mutarust checks the total-score policy after a normal mutation run. A result
 below `min_msi` returns exit value 4. The covered-score policy takes effect
 with the later coverage feature.
+
+## Source Selection
+
+`exclude_dirs` removes source candidates below each path prefix. A relative
+prefix is relative to the Cargo workspace root. If the source is outside that
+root, the prefix is relative to the common parent directory. For example,
+`checked/src/generated` removes candidates in that directory and its child
+directories. This setting limits mutation runs. It does not change
+`--list-files` output.
+
+Each `ignore_source_lines` expression is checked against complete source
+lines. Mutarust does not create a mutation when its changed range touches a
+matching line.
+
+Use `--match REGEXP` to mutate only functions whose names match the regular
+expression. The expression is not anchored unless it has `^` and `$`.
+
+## Source Annotations
+
+The following file-local line comments disable mutations:
+
+```rust
+// mutator-disable-func
+fn all_mutators_disabled() -> bool { true }
+
+// mutator-disable-func conditional/bool-literal
+fn one_mutator_disabled() -> bool { true }
+
+// mutator-disable-next-line conditional/bool-literal
+fn next_line_disabled() -> bool { true }
+
+// mutator-disable-regexp generated conditional/bool-literal
+fn generated_value() -> bool { true }
+```
+
+An empty mutator list, or `*`, means all mutators. Mutarust checks annotation
+mutator names against the full built-in list. A function annotation must be on
+the line before its function. A regular-expression annotation uses the first
+space to separate its expression from its optional mutator list. Use an
+expression without spaces. Invalid annotations return exit value 3 with the
+source path and line.
 
 Mutarust uses the same configuration field set as Mutago v2.7.7, with the
 Rust conditional-compilation field name described above.

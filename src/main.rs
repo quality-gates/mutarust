@@ -49,7 +49,7 @@ fn print_help() -> io::Result<()> {
     )?;
     writeln!(
         stdout,
-        "\nOptions:\n  -h, --help           Print help\n  -V, --version        Print version\n      --config FILE     Read mutation policy from a YAML file\n      --list-files      List selected Rust production source files\n      --list-mutators   List available mutators\n      --timeout         Stop each test run after this many seconds\n      --silent          Hide mutant status output\n      --no-silent       Print mutant status output\n      --no-diffs        Hide escaped-mutant source diffs\n      --run-mutant-id ID  Run one mutant without score gates\n      --min-msi         Set the minimum mutation score percentage\n      --min-covered-msi Set the minimum covered-code score percentage\n      --enable NAME     Select a mutator name or group pattern\n      --disable NAME    Disable a mutator name or group pattern"
+        "\nOptions:\n  -h, --help           Print help\n  -V, --version        Print version\n      --config FILE     Read mutation policy from a YAML file\n      --list-files      List selected Rust production source files\n      --list-mutators   List available mutators\n      --timeout         Stop each test run after this many seconds\n      --match REGEXP    Mutate only functions with matching names\n      --silent          Hide mutant status output\n      --no-silent       Print mutant status output\n      --no-diffs        Hide escaped-mutant source diffs\n      --run-mutant-id ID  Run one mutant without score gates\n      --min-msi         Set the minimum mutation score percentage\n      --min-covered-msi Set the minimum covered-code score percentage\n      --enable NAME     Select a mutator name or group pattern\n      --disable NAME    Disable a mutator name or group pattern"
     )
 }
 
@@ -120,6 +120,7 @@ fn parse_value_option(
     let value = || required_value(next, argument);
     Some(match argument {
         "--timeout" => value().and_then(|value| set_timeout(command, value)),
+        "--match" => value().and_then(|value| set_function_match(command, value)),
         "--config" => value().and_then(|value| set_config(command, value)),
         "--min-msi" => {
             value().and_then(|value| set_score(&mut command.settings.min_msi, value, argument))
@@ -151,6 +152,14 @@ fn parse_switch_option(command: &mut RunCommand, argument: &str) -> Result<(), S
 fn set_run_mutant_id(command: &mut RunCommand, value: String) -> Result<(), String> {
     if command.run_mutant_id.replace(value).is_some() {
         Err("--run-mutant-id can be supplied only once".to_owned())
+    } else {
+        Ok(())
+    }
+}
+
+fn set_function_match(command: &mut RunCommand, value: String) -> Result<(), String> {
+    if command.function_match.replace(value).is_some() {
+        Err("--match can be supplied only once".to_owned())
     } else {
         Ok(())
     }
@@ -214,37 +223,54 @@ fn run_mutation_tests(command: RunCommand) -> io::Result<ExitCode> {
         Ok(configuration) => configuration,
         Err(error) => return source_error(&error.to_string()),
     };
-    let mut registry = Registry::builtins();
-    let names = registry.names().map(str::to_owned).collect::<Vec<_>>();
-    let selected = match configuration.select_mutators(&names) {
-        Ok(selected) => selected,
-        Err(error) => {
-            return source_error(&selection_error(command.configuration.as_deref(), &error));
-        }
+    let (registry, filters) = match configured_registry(&command, &configuration) {
+        Ok(values) => values,
+        Err(error) => return source_error(&error),
     };
-    registry.retain(|name| selected.iter().any(|selected_name| selected_name == name));
-    match mutarust::run_mutation_tests_with_timeout_for_mutant(
+    let run = match mutarust::run_mutation_tests_with_timeout_for_mutant_and_filters(
         &command.targets,
         &registry,
         command.timeout,
         command.run_mutant_id.as_deref(),
+        &filters,
     ) {
-        Ok(run) => {
-            let one_mutant = command.run_mutant_id.is_some();
-            print_mutation_results(
-                &run,
-                configuration.silent_mode,
-                command.no_diffs,
-                one_mutant,
-            )?;
-            if command.run_mutant_id.is_some() {
-                Ok(ExitCode::SUCCESS)
-            } else {
-                Ok(total_score_gate(&run, configuration.min_msi))
-            }
-        }
-        Err(error) => source_error(&error.to_string()),
-    }
+        Ok(run) => run,
+        Err(error) => return source_error(&error.to_string()),
+    };
+    finish_mutation_run(&command, &configuration, &run)
+}
+
+fn configured_registry(
+    command: &RunCommand,
+    configuration: &Configuration,
+) -> Result<(Registry, mutarust::SourceFilters), String> {
+    let mut registry = Registry::builtins();
+    let names = registry.names().map(str::to_owned).collect::<Vec<_>>();
+    let filters = mutarust::SourceFilters::new(
+        &configuration.exclude_dirs,
+        &configuration.ignore_source_lines,
+        command.function_match.as_deref(),
+        &names,
+    )?;
+    let selected = configuration
+        .select_mutators(&names)
+        .map_err(|error| selection_error(command.configuration.as_deref(), &error))?;
+    registry.retain(|name| selected.iter().any(|selected_name| selected_name == name));
+    Ok((registry, filters))
+}
+
+fn finish_mutation_run(
+    command: &RunCommand,
+    configuration: &Configuration,
+    run: &mutarust::MutationRun,
+) -> io::Result<ExitCode> {
+    let one_mutant = command.run_mutant_id.is_some();
+    print_mutation_results(run, configuration.silent_mode, command.no_diffs, one_mutant)?;
+    Ok(if one_mutant {
+        ExitCode::SUCCESS
+    } else {
+        total_score_gate(run, configuration.min_msi)
+    })
 }
 
 fn selection_error(path: Option<&std::path::Path>, error: &mutarust::ConfigurationError) -> String {
@@ -363,6 +389,7 @@ enum Command {
 struct RunCommand {
     targets: Vec<String>,
     timeout: Duration,
+    function_match: Option<String>,
     configuration: Option<PathBuf>,
     no_diffs: bool,
     run_mutant_id: Option<String>,
@@ -374,6 +401,7 @@ impl Default for RunCommand {
         Self {
             targets: Vec::new(),
             timeout: mutarust::DEFAULT_TEST_TIMEOUT,
+            function_match: None,
             configuration: None,
             no_diffs: false,
             run_mutant_id: None,

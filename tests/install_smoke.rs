@@ -162,6 +162,255 @@ fn installed_command_reads_yaml_configuration_and_command_options_take_priority(
 }
 
 #[test]
+fn installed_command_filters_mutator_and_source_candidates() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_mutation_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    let excluded = fixture
+        .join("checked")
+        .join("src")
+        .join("excluded")
+        .join("mod.rs");
+    fs::create_dir_all(
+        excluded
+            .parent()
+            .expect("excluded source must have a parent directory"),
+    )
+    .expect("excluded source directory must be created");
+    fs::write(&excluded, "pub fn excluded() -> bool { true }\n")
+        .expect("excluded source must be written");
+    fs::write(
+        &source,
+        "pub fn checked() -> bool { true }\npub fn ignored_by_line() -> bool { true }\n",
+    )
+    .expect("source filtering fixture must be written");
+    let configuration = fixture.join("filter.yml");
+    fs::write(
+        &configuration,
+        "enable_mutators:\n  - conditional/*\nexclude_dirs:\n  - checked/src/excluded\nignore_source_lines:\n  - ignored_by_line\n",
+    )
+    .expect("source filter configuration must be written");
+
+    let filtered = Command::new(command_path(&install))
+        .args(["--config"])
+        .arg(&configuration)
+        .args([&source, &excluded])
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start with source filters");
+    assert!(
+        filtered.status.success(),
+        "source filters must succeed: {}",
+        String::from_utf8_lossy(&filtered.stderr)
+    );
+    let filtered_output =
+        String::from_utf8(filtered.stdout).expect("source filter output must be UTF-8");
+    assert!(
+        filtered_output.contains("Killed: 1") && filtered_output.contains("Total: 1"),
+        "the directory and source-line filters must remove candidates: {filtered_output}"
+    );
+
+    let external_directory = root.join("excluded-external");
+    fs::create_dir_all(&external_directory).expect("external source directory must be created");
+    let external_source = external_directory.join("generated.rs");
+    fs::write(
+        &external_source,
+        "pub fn excluded_external() -> bool { true }\n",
+    )
+    .expect("external source must be written");
+    let external_configuration = fixture.join("external-filter.yml");
+    fs::write(
+        &external_configuration,
+        format!("exclude_dirs:\n  - {}\n", external_directory.display()),
+    )
+    .expect("external source configuration must be written");
+    let external_filtered = Command::new(command_path(&install))
+        .args(["--config"])
+        .arg(&external_configuration)
+        .arg(&external_source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must skip an excluded external source");
+    assert!(
+        external_filtered.status.success(),
+        "an excluded external source must not require a Cargo workspace: {}",
+        String::from_utf8_lossy(&external_filtered.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&external_filtered.stdout).contains("Total: 0"),
+        "an excluded external source must have no mutation candidates"
+    );
+
+    let matched = Command::new(command_path(&install))
+        .args(["--config"])
+        .arg(&configuration)
+        .args(["--match", "^checked$"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start with a function filter");
+    assert!(
+        matched.status.success(),
+        "a valid function filter must succeed: {}",
+        String::from_utf8_lossy(&matched.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&matched.stdout).contains("Total: 1"),
+        "the function filter must select only the matching function"
+    );
+
+    let nested = fixture.join("checked").join("src").join("nested.rs");
+    fs::write(
+        &nested,
+        "pub fn outer() -> bool {\n    fn inner() -> bool { true }\n    true\n}\n",
+    )
+    .expect("nested function source must be written");
+    let nested_match = Command::new(command_path(&install))
+        .args(["--config"])
+        .arg(&configuration)
+        .args(["--match", "^outer$"])
+        .arg(&nested)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start with a nested function filter");
+    assert!(
+        nested_match.status.success(),
+        "a nested function filter must succeed: {}",
+        String::from_utf8_lossy(&nested_match.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&nested_match.stdout).contains("Total: 1"),
+        "a function filter must not select a nested function with another name"
+    );
+
+    let disabled_configuration = fixture.join("disabled-filter.yml");
+    fs::write(
+        &disabled_configuration,
+        "enable_mutators:\n  - conditional/*\ndisable_mutators:\n  - conditional/bool-literal\n",
+    )
+    .expect("disabled filter configuration must be written");
+    let configured_denylist = Command::new(command_path(&install))
+        .args(["--config"])
+        .arg(&disabled_configuration)
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start with a configuration denylist");
+    assert!(configured_denylist.status.success());
+    assert!(
+        String::from_utf8_lossy(&configured_denylist.stdout).contains("Total: 0"),
+        "a configuration denylist must remove an allowed mutator"
+    );
+    let command_denylist = Command::new(command_path(&install))
+        .args(["--config"])
+        .arg(&configuration)
+        .args(["--disable", "conditional/*"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start with a command denylist");
+    assert!(command_denylist.status.success());
+    assert!(
+        String::from_utf8_lossy(&command_denylist.stdout).contains("Total: 0"),
+        "a command denylist must remove an allowed mutator"
+    );
+
+    let annotations = fixture.join("checked").join("src").join("annotations.rs");
+    fs::write(
+        &annotations,
+        "pub fn allowed() -> bool { true }\n\n// mutator-disable-func\npub fn function_all() -> bool { true }\n\n// mutator-disable-func conditional/bool-literal\n#[inline]\npub fn function_selected() -> bool { true }\n\n// mutator-disable-next-line\npub fn next_line_all() -> bool { true }\n\n// mutator-disable-next-line conditional/bool-literal\npub fn next_line_selected() -> bool { true }\n\n// mutator-disable-regexp regexp_all\npub fn regexp_all() -> bool { true }\n\n// mutator-disable-regexp regexp_selected conditional/bool-literal\npub fn regexp_selected() -> bool { true }\n",
+    )
+    .expect("annotation fixture must be written");
+    let annotations_elsewhere = fixture
+        .join("checked")
+        .join("src")
+        .join("annotations_elsewhere.rs");
+    fs::write(
+        &annotations_elsewhere,
+        "pub fn regexp_all_elsewhere() -> bool { true }\n",
+    )
+    .expect("second annotation fixture must be written");
+    let annotated = Command::new(command_path(&install))
+        .args(["--config"])
+        .arg(&configuration)
+        .arg(&annotations)
+        .arg(&annotations_elsewhere)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start with annotations");
+    assert!(
+        annotated.status.success(),
+        "valid annotations must succeed: {}",
+        String::from_utf8_lossy(&annotated.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&annotated.stdout).contains("Total: 2"),
+        "the three annotation forms must remove marked candidates only in their file"
+    );
+
+    fs::write(
+        &annotations,
+        "// mutator-disable-next-line unknown/mutator\npub fn invalid_annotation() -> bool { true }\n",
+    )
+    .expect("invalid annotation fixture must be written");
+    let invalid_annotation = Command::new(command_path(&install))
+        .arg(&annotations)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must reject an invalid annotation");
+    assert_eq!(
+        invalid_annotation.status.code(),
+        Some(3),
+        "an invalid annotation must return the source error value"
+    );
+    assert!(
+        String::from_utf8_lossy(&invalid_annotation.stderr).contains("unknown annotation mutator"),
+        "an invalid annotation must identify the bad mutator"
+    );
+
+    for (contents, expected) in [
+        (
+            "// mutator-disable-regexp ( *\npub fn invalid_annotation() -> bool { true }\n",
+            "invalid annotation regular expression",
+        ),
+        (
+            "// mutator-disable-func\n\npub fn invalid_annotation() -> bool { true }\n",
+            "function annotation must be directly before a function",
+        ),
+    ] {
+        fs::write(&annotations, contents).expect("invalid annotation fixture must be written");
+        let invalid_annotation = Command::new(command_path(&install))
+            .arg(&annotations)
+            .current_dir(&fixture)
+            .output()
+            .expect("installed mutarust must reject an invalid annotation");
+        assert_eq!(invalid_annotation.status.code(), Some(3));
+        assert!(
+            String::from_utf8_lossy(&invalid_annotation.stderr).contains(expected),
+            "an invalid annotation must have a clear diagnostic"
+        );
+    }
+
+    let invalid_match = Command::new(command_path(&install))
+        .args(["--match", "("])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must reject an invalid function filter");
+    assert_eq!(
+        invalid_match.status.code(),
+        Some(3),
+        "an invalid function filter must return the source error value"
+    );
+    assert!(
+        String::from_utf8_lossy(&invalid_match.stderr)
+            .contains("invalid --match regular expression"),
+        "an invalid function filter must have a clear diagnostic"
+    );
+}
+
+#[test]
 fn installed_command_rejects_invalid_configuration() {
     let root = smoke_root();
     let install = install_command(&root);

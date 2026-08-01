@@ -47,6 +47,11 @@ Use `--run-mutant-id ID` to run one stable mutant ID. This mode prints only
 the selected mutant evidence. It does not print the normal summary or apply
 score gates.
 
+Use `--match REGEXP` to limit mutations to functions with matching names. Use
+`--config FILE` with `exclude_dirs` and `ignore_source_lines` to limit source
+scope. See the [configuration guide](config.md#source-selection) for these
+rules and for the file-local mutation-disable annotations.
+
 Each test run has a fixed 60 second timeout by default. Use `--timeout
 SECONDS` to set a different positive whole-second timeout. A timeout produces
 an errored mutant result with an error message.
