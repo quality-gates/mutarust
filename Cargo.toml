@@ -10,6 +10,9 @@ repository = "https://github.com/quality-gates/mutarust"
 keywords = ["mutation-testing", "testing", "rust"]
 categories = ["development-tools::testing", "command-line-utilities"]
 
+[dependencies]
+cargo_metadata = "0.20.0"
+
 [[bin]]
 name = "mutarust"
 path = "src/main.rs"
