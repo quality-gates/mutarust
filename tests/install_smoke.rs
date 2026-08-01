@@ -139,8 +139,16 @@ fn installed_command_lists_production_sources() {
             .join("nested")
             .join("production_feature.rs")
             .display(),
-        alpha.join("tests").join("helper.rs").display(),
-        alpha.join("tests").join("selected.rs").display(),
+        alpha
+            .join("tests")
+            .join("nested")
+            .join("helper.rs")
+            .display(),
+        alpha
+            .join("tests")
+            .join("nested")
+            .join("selected.rs")
+            .display(),
         beta.join("src").join("lib.rs").display(),
     );
     let from_workspace = list_files(&install, &workspace, &[workspace.as_os_str()]);
@@ -161,8 +169,16 @@ fn installed_command_lists_production_sources() {
             .join("nested")
             .join("production_feature.rs")
             .display(),
-        alpha.join("tests").join("helper.rs").display(),
-        alpha.join("tests").join("selected.rs").display(),
+        alpha
+            .join("tests")
+            .join("nested")
+            .join("helper.rs")
+            .display(),
+        alpha
+            .join("tests")
+            .join("nested")
+            .join("selected.rs")
+            .display(),
         beta.join("src").join("lib.rs").display(),
     );
     let from_recursive_workspace =
@@ -357,7 +373,7 @@ fn write_workspace_fixture(root: &Path) -> PathBuf {
     fs::create_dir_all(alpha.join("bin")).expect("workspace binary directory must be created");
     fs::create_dir_all(alpha.join("source").join("nested"))
         .expect("workspace library directory must be created");
-    fs::create_dir_all(alpha.join("tests").join("support"))
+    fs::create_dir_all(alpha.join("tests").join("nested").join("support"))
         .expect("workspace test directory must be created");
     fs::create_dir_all(beta.join("src")).expect("workspace member directory must be created");
     fs::write(
@@ -367,7 +383,7 @@ fn write_workspace_fixture(root: &Path) -> PathBuf {
     .expect("workspace manifest must be written");
     fs::write(
         alpha.join("Cargo.toml"),
-        "[package]\nname = \"alpha\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[lib]\npath = \"source/entry.rs\"\n\n[[bin]]\nname = \"alpha-tool\"\npath = \"bin/cli_test.rs\"\n\n[[bin]]\nname = \"alpha-selected\"\npath = \"tests/selected.rs\"\n\n[[bin]]\nname = \"alpha-disabled\"\npath = \"bin/disabled.rs\"\nrequired-features = [\"experimental\"]\n\n[[test]]\nname = \"alpha-check\"\npath = \"source/check.rs\"\n",
+        "[package]\nname = \"alpha\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[lib]\npath = \"source/entry.rs\"\n\n[[bin]]\nname = \"alpha-tool\"\npath = \"bin/cli_test.rs\"\n\n[[bin]]\nname = \"alpha-selected\"\npath = \"tests/nested/selected.rs\"\n\n[[bin]]\nname = \"alpha-disabled\"\npath = \"bin/disabled.rs\"\nrequired-features = [\"experimental\"]\n\n[[test]]\nname = \"alpha-check\"\npath = \"source/check.rs\"\n",
     )
     .expect("alpha manifest must be written");
     fs::write(
@@ -378,17 +394,21 @@ fn write_workspace_fixture(root: &Path) -> PathBuf {
     fs::write(alpha.join("bin").join("cli_test.rs"), "fn main() {}\n")
         .expect("workspace binary source must be written");
     fs::write(
-        alpha.join("tests").join("selected.rs"),
+        alpha.join("tests").join("nested").join("selected.rs"),
         "mod helper;\nfn main() {}\n",
     )
     .expect("workspace selected source must be written");
     fs::write(
-        alpha.join("tests").join("helper.rs"),
+        alpha.join("tests").join("nested").join("helper.rs"),
         "pub fn selected_helper() {}\n",
     )
     .expect("workspace selected helper must be written");
     fs::write(
-        alpha.join("tests").join("support").join("unused.rs"),
+        alpha
+            .join("tests")
+            .join("nested")
+            .join("support")
+            .join("unused.rs"),
         "pub fn unused() {}\n",
     )
     .expect("workspace unused test source must be written");
@@ -396,7 +416,7 @@ fn write_workspace_fixture(root: &Path) -> PathBuf {
         .expect("workspace disabled source must be written");
     fs::write(
         alpha.join("source").join("entry.rs"),
-        "mod helper;\n#[cfg_attr(not(test), path = \"nested/production_feature.rs\")]\n#[cfg_attr(test, path = \"nested/test_feature.rs\")]\nmod configured;\n",
+        "mod helper;\n#[cfg(feature = \"extra\")] mod extra;\n#[cfg_attr(not(test), path = \"nested/production_feature.rs\")]\n#[cfg_attr(test, path = \"nested/test_feature.rs\")]\nmod configured;\n",
     )
     .expect("workspace library source must be written");
     fs::write(
@@ -424,9 +444,19 @@ fn write_workspace_fixture(root: &Path) -> PathBuf {
             .join("source")
             .join("nested")
             .join("production_feature.rs"),
-        "pub fn production_feature() {}\n",
+        "#[cfg(test)] #[path = \"test_only_helper.rs\"] mod test_only;\npub fn production_feature() {}\n",
     )
     .expect("workspace production cfg_attr source must be written");
+    fs::write(alpha.join("source").join("extra.rs"), "pub fn extra() {}\n")
+        .expect("workspace inactive feature source must be written");
+    fs::write(
+        alpha
+            .join("source")
+            .join("nested")
+            .join("test_only_helper.rs"),
+        "pub fn test_only_helper() {}\n",
+    )
+    .expect("workspace cfg_attr test helper must be written");
     fs::write(
         alpha.join("source").join("nested").join("test_feature.rs"),
         "pub fn test_feature() {}\n",
