@@ -1859,6 +1859,65 @@ fn installed_command_writes_full_and_compact_json_reports() {
     assert_eq!(one_ids, vec![selected_id.to_owned()]);
     validate_full_report_schema(&one);
 
+    let coverage_fixture = write_coverage_fixture(&root);
+    let coverage_source = coverage_fixture.join("checked").join("src").join("lib.rs");
+    let coverage_config = coverage_fixture.join("mutarust.yml");
+    fs::write(
+        &coverage_config,
+        "json_output: true\nenable_mutators:\n  - conditional/bool-literal\n",
+    )
+    .expect("coverage report configuration must be written");
+    let coverage_report = coverage_fixture.join("report.json");
+    let fake_cargo = root.join("json-report-coverage-cargo");
+    let temporary_root = root.join("json-report-coverage-temporary");
+    fs::create_dir(&temporary_root).expect("coverage temporary root must be created");
+    write_json_report_coverage_cargo(&fake_cargo);
+    let coverage_run = Command::new(command_path(&install))
+        .args([
+            "--config",
+            coverage_config
+                .to_str()
+                .expect("coverage config path must be UTF-8"),
+            "--logger-summary-json",
+            "--coverage",
+            "--per-test",
+            "--workers",
+            "1",
+        ])
+        .arg(&coverage_source)
+        .current_dir(&coverage_fixture)
+        .env("CARGO", &fake_cargo)
+        .env("MUTARUST_REAL_CARGO", env!("CARGO"))
+        .env("MUTARUST_COVERAGE_SOURCE", &coverage_source)
+        .env("TMPDIR", &temporary_root)
+        .output()
+        .expect("installed mutarust must start for coverage reports");
+    assert!(
+        coverage_run.status.success(),
+        "coverage report run must succeed: {}",
+        String::from_utf8_lossy(&coverage_run.stderr)
+    );
+    let covered = read_json_object(&coverage_report);
+    assert_eq!(covered["metadata"]["hasCoverage"], true);
+    assert_eq!(covered["stats"]["notCoveredCount"], 1);
+    assert_eq!(covered["stats"]["killedCount"], 1);
+    assert_eq!(covered["stats"]["escapedCount"], 1);
+    assert_eq!(covered["stats"]["msi"], 1.0 / 3.0);
+    assert_eq!(covered["stats"]["coveredCodeMsi"], 0.5);
+    assert_eq!(
+        covered["notCovered"].as_array().expect("notCovered").len(),
+        1
+    );
+    assert_eq!(
+        covered["notCovered"][0]["mutator"]["originalFilePath"],
+        "checked/src/lib.rs"
+    );
+    assert_eq!(covered["notCovered"][0]["mutator"]["originalStartLine"], 3);
+    validate_full_report_schema(&covered);
+    validate_compact_summary_schema(&read_json_object(
+        &coverage_fixture.join("mutarust-summary.json"),
+    ));
+
     let baseline = fixture.join("mutarust-baseline.json");
     let _ = fs::remove_file(&full_report);
     let _ = fs::remove_file(&compact_summary);
@@ -1886,6 +1945,20 @@ fn installed_command_writes_full_and_compact_json_reports() {
         baseline.exists() && !full_report.exists() && !compact_summary.exists(),
         "baseline update must write the baseline and must not write JSON reports"
     );
+}
+
+fn write_json_report_coverage_cargo(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+
+    // Match the coverage smoke harness: normal map leaves line 3 uncovered and
+    // per-test maps cover only the matching test for lines 1 and 2.
+    fs::write(
+        path,
+        "#!/bin/sh\nif [ \"$1\" = \"metadata\" ]; then\n  exec \"$MUTARUST_REAL_CARGO\" \"$@\"\nfi\nif [ \"$1\" = \"llvm-cov\" ]; then\n  output=\n  while [ \"$#\" -gt 0 ]; do\n    if [ \"$1\" = \"--output-path\" ]; then\n      output=$2\n      break\n    fi\n    shift\n  done\n  case \" $* \" in\n    *\" --exact detects_detected \"*) data='DA:1,1' ;;\n    *\" --exact detects_escaped \"*) data='DA:2,1' ;;\n    *) data='DA:1,1\\nDA:2,1\\nDA:3,0' ;;\n  esac\n  printf 'SF:%s\\n%b\\nend_of_record\\n' \"$MUTARUST_COVERAGE_SOURCE\" \"$data\" > \"$output\"\n  exit 0\nfi\ncase \" $* \" in\n  *\" --list \"*) printf 'detects_detected: test\\ndetects_escaped: test\\n'; exit 0 ;;\nesac\nif ! grep -q false checked/src/lib.rs 2>/dev/null; then\n  exit 0\nfi\nif grep -q 'pub fn detected() -> bool { let value = false; value }' checked/src/lib.rs; then\n  mutant=detected\nelif grep -q 'pub fn escaped() -> bool { let value = false; value }' checked/src/lib.rs; then\n  mutant=escaped\nelif grep -q 'pub fn uncovered() -> bool { let value = false; value }' checked/src/lib.rs; then\n  mutant=uncovered\nelse\n  exit 94\nfi\ncase \" $* \" in\n  *\" --no-run \"*) exit 0 ;;\n  *\" --exact detects_detected \"*) exit 1 ;;\n  *\" --exact detects_escaped \"*) exit 0 ;;\n  *) exit 93 ;;\nesac\n",
+    )
+    .expect("coverage Cargo command must be written");
+    fs::set_permissions(path, fs::Permissions::from_mode(0o755))
+        .expect("coverage Cargo command must be executable");
 }
 
 fn read_json_object(path: &Path) -> serde_json::Value {
@@ -1917,89 +1990,56 @@ fn report_mutant_ids(report: &serde_json::Value) -> Vec<String> {
 }
 
 fn validate_compact_summary_schema(summary: &serde_json::Value) {
-    for field in [
-        "totalMutantsCount",
-        "killedCount",
-        "notCoveredCount",
-        "escapedCount",
-        "errorCount",
-        "skippedCount",
-    ] {
-        assert!(
-            summary[field].as_u64().is_some(),
-            "compact summary must include integer {field}: {summary}"
-        );
-    }
-    for field in ["msi", "coveredCodeMsi"] {
-        let score = summary[field]
-            .as_f64()
-            .unwrap_or_else(|| panic!("compact summary must include number {field}: {summary}"));
-        assert!(
-            (0.0..=1.0).contains(&score),
-            "compact summary {field} must be a ratio from zero to one: {summary}"
-        );
-    }
-    assert!(
-        summary.as_object().expect("summary object").len() == 8,
-        "compact summary must match the published field set: {summary}"
-    );
+    validate_against_published_schema(summary, published_summary_schema(), "compact summary");
 }
 
 fn validate_full_report_schema(report: &serde_json::Value) {
-    assert!(report["metadata"]["version"].as_str().is_some());
-    assert!(report["metadata"]["hasCoverage"].as_bool().is_some());
-    assert!(report["metadata"]["oneMutant"].as_bool().is_some());
-    validate_compact_summary_schema(&report["stats"]);
-    for key in ["escaped", "killed", "errored"] {
-        let mutants = report[key]
-            .as_array()
-            .unwrap_or_else(|| panic!("full report must include {key}: {report}"));
-        for mutant in mutants {
-            validate_report_mutant(mutant);
-        }
-    }
-    for key in ["skipped", "notCovered", "generated"] {
-        if let Some(mutants) = report.get(key) {
-            for mutant in mutants.as_array().expect("{key} must be an array") {
-                validate_report_mutant(mutant);
-            }
-        }
-    }
-    if let Some(stats) = report.get("mutatorStats") {
-        for entry in stats.as_array().expect("mutatorStats must be an array") {
-            assert!(entry["name"].as_str().is_some());
-            assert!(entry["killed"].as_u64().is_some());
-            assert!(entry["escaped"].as_u64().is_some());
-            assert!(entry["skipped"].as_u64().is_some());
-            assert!(entry["total"].as_u64().is_some());
+    validate_against_published_schema(report, published_full_report_schema(), "full report");
+    for key in [
+        "escaped",
+        "killed",
+        "errored",
+        "skipped",
+        "notCovered",
+        "generated",
+    ] {
+        let Some(mutants) = report.get(key) else {
+            continue;
+        };
+        for mutant in mutants.as_array().expect("{key} must be an array") {
+            let path = mutant["mutator"]["originalFilePath"]
+                .as_str()
+                .expect("originalFilePath");
+            assert!(
+                !path.is_empty() && !path.contains('\\') && !path.starts_with('/'),
+                "source paths must be repository-relative with / separators: {mutant}"
+            );
         }
     }
 }
 
-fn validate_report_mutant(mutant: &serde_json::Value) {
-    let id = mutant["id"].as_str().expect("mutant id");
-    assert_eq!(
-        id.len(),
-        32,
-        "stable ID must be 32 hex characters: {mutant}"
-    );
-    assert!(
-        id.bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)),
-        "stable ID must be lower-case hex: {mutant}"
-    );
-    assert!(mutant["mutator"]["mutatorName"].as_str().is_some());
-    let path = mutant["mutator"]["originalFilePath"]
-        .as_str()
-        .expect("originalFilePath");
-    assert!(!path.is_empty() && !path.contains('\\'));
-    assert!(path.chars().next().is_some_and(|c| c != '/'));
-    assert!(
-        mutant["mutator"]["originalStartLine"]
-            .as_u64()
-            .is_some_and(|line| line >= 1)
-    );
-    assert!(mutant["diff"].as_str().is_some());
+fn validate_against_published_schema(
+    instance: &serde_json::Value,
+    schema: serde_json::Value,
+    label: &str,
+) {
+    if let Err(error) = jsonschema::validate(&schema, instance) {
+        panic!("{label} must match the published schema: {error}\n{instance}");
+    }
+}
+
+fn published_summary_schema() -> serde_json::Value {
+    serde_json::from_str(include_str!("../schema/summary.schema.json"))
+        .expect("summary schema must be valid JSON")
+}
+
+fn published_full_report_schema() -> serde_json::Value {
+    let mut schema: serde_json::Value =
+        serde_json::from_str(include_str!("../schema/report.schema.json"))
+            .expect("report schema must be valid JSON");
+    // Resolve the published relative $ref for offline validation.
+    schema["properties"]["stats"] = published_summary_schema();
+    schema
 }
 
 #[cfg(unix)]
