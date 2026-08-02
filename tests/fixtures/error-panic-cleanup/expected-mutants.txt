@@ -1,5 +1,3 @@
-expression/error-guard :: result.is_err() :: false :: Killed
-expression/error-guard :: result.is_ok() :: true :: Escaped
 expression/errorf-wrap :: ::core::option::Option::Some(&self.cause) :: ::core::option::Option::None :: Killed
 expression/errorf-wrap :: ::std::option::Option::Some(&self.cause) :: ::core::option::Option::None :: Escaped
 expression/recover-clear :: ::std::panic::catch_unwind(move || panic!("{message}")) :: match ::std::panic::catch_unwind(move || panic!("{message}")) { ::core::result::Result::Ok(value) => ::core::result::Result::<_, ::std::boxed::Box<dyn ::core::any::Any + ::core::marker::Send>>::Ok(value), ::core::result::Result::Err(payload) => ::std::panic::resume_unwind(payload), } :: Killed

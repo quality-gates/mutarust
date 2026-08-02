@@ -102,7 +102,7 @@ fn installed_command_lists_builtin_mutators() {
         String::from_utf8(output.stdout)
             .expect("mutator list must be UTF-8")
             .trim(),
-        "arithmetic/assign_invert\narithmetic/assignment\narithmetic/base\narithmetic/bitwise\narithmetic/negate\nbranch/case\nbranch/else\nbranch/if\ncomposite/field-clear\nconcurrency/goroutine-remove\nconditional/bool-literal\nconditional/negated\nconditional/not\nexpression/comparison\nexpression/context-nil\nexpression/error-guard\nexpression/errorf-wrap\nexpression/logical\nexpression/recover-clear\nexpression/string-literal\nloop/break\nloop/condition\nloop/range_break\nnumbers/decrementer\nnumbers/float-negate\nnumbers/incrementer\nselect/case-remove\nselect/default-remove\nstatement/defer-remove\nstatement/remove\nstatement/remove-self-assign\nstatement/return",
+        "arithmetic/assign_invert\narithmetic/assignment\narithmetic/base\narithmetic/bitwise\narithmetic/negate\nbranch/case\nbranch/else\nbranch/if\ncomposite/field-clear\nconcurrency/goroutine-remove\nconditional/bool-literal\nconditional/negated\nconditional/not\nexpression/comparison\nexpression/context-nil\nexpression/errorf-wrap\nexpression/logical\nexpression/recover-clear\nexpression/string-literal\nloop/break\nloop/condition\nloop/range_break\nnumbers/decrementer\nnumbers/float-negate\nnumbers/incrementer\nselect/case-remove\nselect/default-remove\nstatement/defer-remove\nstatement/remove\nstatement/remove-self-assign\nstatement/return",
         "the built-in mutator list must be stable and sorted"
     );
 }
@@ -521,8 +521,6 @@ fn installed_command_classifies_error_panic_and_cleanup_fixture_mutants() {
             "--workers",
             "1",
             "--enable",
-            "expression/error-guard",
-            "--enable",
             "expression/errorf-wrap",
             "--enable",
             "expression/recover-clear",
@@ -541,12 +539,11 @@ fn installed_command_classifies_error_panic_and_cleanup_fixture_mutants() {
     );
     let stdout = String::from_utf8(output.stdout).expect("error output must be UTF-8");
     assert!(
-        stdout.contains("Killed: 4")
-            && stdout.contains("Escaped: 4")
+        stdout.contains("Killed: 3")
+            && stdout.contains("Escaped: 3")
             && stdout.contains("Errored: 0")
             && stdout.contains("Skipped: 1")
-            && stdout.contains("Total: 9")
-            && stdout.contains("expression/error-guard | 1 | 1 | 0 | 2")
+            && stdout.contains("Total: 7")
             && stdout.contains("expression/errorf-wrap | 1 | 1 | 0 | 2")
             && stdout.contains("expression/recover-clear | 1 | 1 | 0 | 2")
             && stdout.contains("statement/defer-remove | 1 | 1 | 1 | 3"),
@@ -555,8 +552,6 @@ fn installed_command_classifies_error_panic_and_cleanup_fixture_mutants() {
     assert_eq!(
         stable_mutant_ids(&stdout),
         vec![
-            "1584ffa1507d9402b5f658c269c5581a",
-            "11e013114a99cacbb82aacbe3e541f15",
             "ba130386994e969a61fba20bd9efea6e",
             "e07eaab28c22849c0ac5787dd7e2436f",
             "2609b2967ac366d27b8373d14d364564",
@@ -568,9 +563,7 @@ fn installed_command_classifies_error_panic_and_cleanup_fixture_mutants() {
         "the error fixture IDs must stay stable: {stdout}"
     );
     assert!(
-        stdout.contains("-    if result.is_ok() {")
-            && stdout.contains("+    if true {")
-            && stdout.contains("-        ::std::option::Option::Some(&self.cause)")
+        stdout.contains("-        ::std::option::Option::Some(&self.cause)")
             && stdout.contains("+        ::core::option::Option::None")
             && stdout.contains("-    ::std::panic::catch_unwind(|| 7).is_ok()")
             && stdout.contains("+    match ::std::panic::catch_unwind(|| 7)")
@@ -595,7 +588,6 @@ fn assert_error_panic_cleanup_oracle(fixture: &Path, source: &[u8], stdout: &str
     let source = String::from_utf8(source.to_vec()).expect("error source must be UTF-8");
     let registry = mutarust::Registry::builtins();
     let names = [
-        "expression/error-guard",
         "expression/errorf-wrap",
         "expression/recover-clear",
         "statement/defer-remove",
@@ -3581,7 +3573,7 @@ fn packaged_library_builds_a_custom_mutator() {
     .expect("downstream manifest must be written");
     fs::write(
         downstream.join("src").join("main.rs"),
-        "use mutarust::{Mutation, Mutator, Registry, RegistryBuilder};\n\nstruct Custom;\nstruct Invalid;\n\nimpl Mutator for Custom {\n    fn name(&self) -> &str { \"custom/no-op\" }\n\n    fn mutations(&self, _source: &str) -> Vec<Mutation> { Vec::new() }\n}\n\nimpl Mutator for Invalid {\n    fn name(&self) -> &str { \"Custom\" }\n\n    fn mutations(&self, _source: &str) -> Vec<Mutation> { Vec::new() }\n}\n\nfn mutate(registry: &Registry, source: &str) -> String {\n    let mutation = registry.get(\"conditional/bool-literal\").expect(\"built-in mutator must exist\").mutations(source).pop().expect(\"boolean must mutate\");\n    mutation.apply(source).expect(\"mutation must apply\")\n}\n\nfn main() {\n    let registry = RegistryBuilder::with_builtins().register(Custom).expect(\"custom mutator must register\").build();\n    assert_eq!(registry.names().collect::<Vec<_>>(), vec![\"arithmetic/assign_invert\", \"arithmetic/assignment\", \"arithmetic/base\", \"arithmetic/bitwise\", \"arithmetic/negate\", \"branch/case\", \"branch/else\", \"branch/if\", \"composite/field-clear\", \"concurrency/goroutine-remove\", \"conditional/bool-literal\", \"conditional/negated\", \"conditional/not\", \"custom/no-op\", \"expression/comparison\", \"expression/context-nil\", \"expression/error-guard\", \"expression/errorf-wrap\", \"expression/logical\", \"expression/recover-clear\", \"expression/string-literal\", \"loop/break\", \"loop/condition\", \"loop/range_break\", \"numbers/decrementer\", \"numbers/float-negate\", \"numbers/incrementer\", \"select/case-remove\", \"select/default-remove\", \"statement/defer-remove\", \"statement/remove\", \"statement/remove-self-assign\", \"statement/return\"]);\n    let duplicate = RegistryBuilder::new().register(Custom).expect(\"first custom mutator must register\").register(Custom).err().expect(\"duplicate must fail\");\n    assert_eq!(duplicate.to_string(), \"duplicate mutator name: custom/no-op\");\n    let invalid = RegistryBuilder::new().register(Invalid).err().expect(\"invalid name must fail\");\n    assert_eq!(invalid.to_string(), \"invalid mutator name: Custom\");\n    assert_eq!(mutate(&registry, \"fn enabled() -> bool { let enabled = true; enabled }\"), \"fn enabled() -> bool { let enabled = false; enabled }\");\n    assert_eq!(mutate(&registry, \"fn enabled() -> bool { let label = \\\"é\\\"; let enabled = true; enabled }\"), \"fn enabled() -> bool { let label = \\\"é\\\"; let enabled = false; enabled }\");\n    assert!(registry.get(\"conditional/bool-literal\").unwrap().mutations(\"fn check() { assert!(true); }\").is_empty());\n    println!(\"custom mutator works\");\n}\n",
+        "use mutarust::{Mutation, Mutator, Registry, RegistryBuilder};\n\nstruct Custom;\nstruct Invalid;\n\nimpl Mutator for Custom {\n    fn name(&self) -> &str { \"custom/no-op\" }\n\n    fn mutations(&self, _source: &str) -> Vec<Mutation> { Vec::new() }\n}\n\nimpl Mutator for Invalid {\n    fn name(&self) -> &str { \"Custom\" }\n\n    fn mutations(&self, _source: &str) -> Vec<Mutation> { Vec::new() }\n}\n\nfn mutate(registry: &Registry, source: &str) -> String {\n    let mutation = registry.get(\"conditional/bool-literal\").expect(\"built-in mutator must exist\").mutations(source).pop().expect(\"boolean must mutate\");\n    mutation.apply(source).expect(\"mutation must apply\")\n}\n\nfn main() {\n    let registry = RegistryBuilder::with_builtins().register(Custom).expect(\"custom mutator must register\").build();\n    assert_eq!(registry.names().collect::<Vec<_>>(), vec![\"arithmetic/assign_invert\", \"arithmetic/assignment\", \"arithmetic/base\", \"arithmetic/bitwise\", \"arithmetic/negate\", \"branch/case\", \"branch/else\", \"branch/if\", \"composite/field-clear\", \"concurrency/goroutine-remove\", \"conditional/bool-literal\", \"conditional/negated\", \"conditional/not\", \"custom/no-op\", \"expression/comparison\", \"expression/context-nil\", \"expression/errorf-wrap\", \"expression/logical\", \"expression/recover-clear\", \"expression/string-literal\", \"loop/break\", \"loop/condition\", \"loop/range_break\", \"numbers/decrementer\", \"numbers/float-negate\", \"numbers/incrementer\", \"select/case-remove\", \"select/default-remove\", \"statement/defer-remove\", \"statement/remove\", \"statement/remove-self-assign\", \"statement/return\"]);\n    let duplicate = RegistryBuilder::new().register(Custom).expect(\"first custom mutator must register\").register(Custom).err().expect(\"duplicate must fail\");\n    assert_eq!(duplicate.to_string(), \"duplicate mutator name: custom/no-op\");\n    let invalid = RegistryBuilder::new().register(Invalid).err().expect(\"invalid name must fail\");\n    assert_eq!(invalid.to_string(), \"invalid mutator name: Custom\");\n    assert_eq!(mutate(&registry, \"fn enabled() -> bool { let enabled = true; enabled }\"), \"fn enabled() -> bool { let enabled = false; enabled }\");\n    assert_eq!(mutate(&registry, \"fn enabled() -> bool { let label = \\\"é\\\"; let enabled = true; enabled }\"), \"fn enabled() -> bool { let label = \\\"é\\\"; let enabled = false; enabled }\");\n    assert!(registry.get(\"conditional/bool-literal\").unwrap().mutations(\"fn check() { assert!(true); }\").is_empty());\n    println!(\"custom mutator works\");\n}\n",
     )
     .expect("downstream source must be written");
 

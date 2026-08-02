@@ -1,5 +1,4 @@
 mod cleanup;
-mod error_guard;
 mod error_wrap;
 mod recovery;
 
@@ -8,7 +7,6 @@ use std::collections::BTreeSet;
 use syn::visit::{self, Visit};
 
 pub(crate) use cleanup::CleanupMutator;
-pub(crate) use error_guard::ErrorGuardMutator;
 pub(crate) use error_wrap::ErrorWrapMutator;
 pub(crate) use recovery::RecoveryMutator;
 

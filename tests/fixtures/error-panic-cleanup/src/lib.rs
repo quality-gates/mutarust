@@ -1,15 +1,5 @@
 use std::cell::Cell;
 
-pub fn observed_error_guard(result: ::core::result::Result<u8, &'static str>) -> u8 {
-    if result.is_err() {
-        return 1;
-    }
-    if result.is_ok() {
-        return 2;
-    }
-    3
-}
-
 #[derive(Debug)]
 pub struct Cause;
 

@@ -2,15 +2,7 @@ use std::cell::Cell;
 use std::error::Error;
 
 #[test]
-fn detects_error_guard_and_source_mutations() {
-    assert_eq!(
-        error_panic_cleanup_mutator_fixture::observed_error_guard(Err("failure")),
-        1
-    );
-    assert_eq!(
-        error_panic_cleanup_mutator_fixture::observed_error_guard(Ok(7)),
-        2
-    );
+fn detects_error_source_mutations() {
     assert!(
         error_panic_cleanup_mutator_fixture::ObservedWrapper::new()
             .source()

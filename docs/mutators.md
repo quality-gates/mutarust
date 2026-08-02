@@ -21,7 +21,6 @@ changes macro token input only for the documented Tokio selection forms.
 | `conditional/not` | Remove direct unary `!` from a condition or logical operand |
 | `expression/comparison` | `<` to `<=`, `<=` to `<`, `>` to `>=`, and `>=` to `>` |
 | `expression/context-nil` | Replace a direct `Some(value)` argument with `::core::option::Option::None` |
-| `expression/error-guard` | Replace a direct `Result::is_err` guard with `false`, or a direct `Result::is_ok` guard with `true` |
 | `expression/errorf-wrap` | Replace a supported standard error source link with `::core::option::Option::None` |
 | `expression/logical` | `&&` to `||`, and `||` to `&&` |
 | `expression/recover-clear` | Make a supported standard panic catch resume the panic |
@@ -90,14 +89,6 @@ reference, an unconstrained type parameter, or a general borrowed value.
 Cargo checks replacements that need type proof before it runs tests. Mutarust
 skips these replacements before a custom test command because that command
 selects its own compiler.
-
-`expression/error-guard` accepts a direct `if value.is_err()` or
-`if value.is_ok()` condition. The receiver must be one identifier. A function
-parameter or an earlier local declaration in the same scope must give it the
-exact type `::core::result::Result<...>` or
-`::std::result::Result<...>`. The mutator does not change a nested condition,
-an inferred type, another method with the same name, or a standard path that a
-crate-root alias replaces.
 
 `expression/errorf-wrap` accepts the tail expression of a `source` method in
 an exact `impl ::core::error::Error` or `impl ::std::error::Error` block. The

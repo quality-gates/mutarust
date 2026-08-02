@@ -34,7 +34,6 @@ fn builtin_mutator_names_match_completed_mutago_groups() {
             "conditional/not",
             "expression/comparison",
             "expression/context-nil",
-            "expression/error-guard",
             "expression/errorf-wrap",
             "expression/logical",
             "expression/recover-clear",

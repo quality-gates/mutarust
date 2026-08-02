@@ -6,9 +6,7 @@ use proc_macro2::Span;
 
 use crate::concurrency_selection::{ConcurrencyMutator, SelectionMutator};
 use crate::control_flow::ControlFlowMutator;
-use crate::error_panic_cleanup::{
-    CleanupMutator, ErrorGuardMutator, ErrorWrapMutator, RecoveryMutator,
-};
+use crate::error_panic_cleanup::{CleanupMutator, ErrorWrapMutator, RecoveryMutator};
 use crate::expression::{
     ArithmeticNegate, BinaryOperatorMutator, BoolLiteralMutator, ConditionalNotMutator,
     NumberMutator, StringLiteralMutator,
@@ -120,8 +118,6 @@ impl RegistryBuilder {
             .register(BinaryOperatorMutator::expression_logical())
             .expect("built-in mutator registration must be valid")
             .register(StringLiteralMutator)
-            .expect("built-in mutator registration must be valid")
-            .register(ErrorGuardMutator)
             .expect("built-in mutator registration must be valid")
             .register(ErrorWrapMutator)
             .expect("built-in mutator registration must be valid")

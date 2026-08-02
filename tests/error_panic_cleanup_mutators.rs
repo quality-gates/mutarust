@@ -1,7 +1,6 @@
 use mutarust::Registry;
 
-const MUTATOR_NAMES: [&str; 4] = [
-    "expression/error-guard",
+const MUTATOR_NAMES: [&str; 3] = [
     "expression/errorf-wrap",
     "expression/recover-clear",
     "statement/defer-remove",
@@ -31,43 +30,6 @@ fn builtin_error_panic_and_cleanup_names_match_mutago() {
             "missing built-in {expected}"
         );
     }
-}
-
-#[test]
-fn error_guard_clears_direct_checks_on_explicit_result_values() {
-    let source = "fn check(result: ::core::result::Result<(), ()>) { if result.is_err() { failed(); } if result.is_ok() { passed(); } }";
-
-    assert_eq!(
-        changed_sources("expression/error-guard", source),
-        vec![
-            source.replacen("result.is_err()", "false", 1),
-            source.replacen("result.is_ok()", "true", 1),
-        ]
-    );
-}
-
-#[test]
-fn error_guard_rejects_unproved_methods_and_nested_conditions() {
-    let source = "struct Status; impl Status { fn is_err(&self) -> bool { true } } fn check(status: Status, result: ::core::result::Result<(), ()>, ready: bool) { if status.is_err() { failed(); } if result.is_err() && ready { failed(); } { let result = Status; if result.is_err() { failed(); } } }";
-
-    assert!(changed_sources("expression/error-guard", source).is_empty());
-}
-
-#[test]
-fn error_guard_keeps_bindings_that_shadow_a_proved_result() {
-    let source = "struct Status; impl Status { fn is_err(&self) -> bool { true } } fn check(result: ::core::result::Result<(), ()>) { let closure = |result: Status| { if result.is_err() { failed(); } }; for result in [Status] { if result.is_err() { failed(); } } closure(Status); }";
-
-    assert!(changed_sources("expression/error-guard", source).is_empty());
-}
-
-#[test]
-fn error_guard_accepts_explicit_result_locals() {
-    let source = "fn check() { let result: ::std::result::Result<(), ()> = Ok(()); if result.is_ok() { passed(); } }";
-
-    assert_eq!(
-        changed_sources("expression/error-guard", source),
-        vec![source.replacen("result.is_ok()", "true", 1)]
-    );
 }
 
 #[test]
@@ -178,11 +140,9 @@ fn cleanup_rejects_shadowed_drop_functions() {
 
 #[test]
 fn standard_root_aliases_are_not_candidates() {
-    let core_alias = "extern crate fake_core as core; fn check(result: ::core::result::Result<(), ()>) { if result.is_err() {} }";
     let std_alias = "extern crate fake_std as std; fn run(value: String) { ::std::mem::drop(value); let _ = ::std::panic::catch_unwind(|| 1); }";
     let source_alias = "extern crate fake_core as core; #[derive(Debug)] struct Failure; impl ::std::error::Error for Failure { fn source(&self) -> ::core::option::Option<&(dyn ::std::error::Error + 'static)> { ::core::option::Option::Some(self) } }";
 
-    assert!(changed_sources("expression/error-guard", core_alias).is_empty());
     assert!(changed_sources("expression/errorf-wrap", source_alias).is_empty());
     assert!(changed_sources("expression/recover-clear", std_alias).is_empty());
     assert!(changed_sources("statement/defer-remove", std_alias).is_empty());
@@ -202,8 +162,7 @@ fn error_panic_cleanup_fixture_candidate_oracle_is_current() {
     let source = include_str!("fixtures/error-panic-cleanup/src/lib.rs");
     let expected = include_str!("fixtures/error-panic-cleanup/expected-mutants.txt");
     let states = [
-        "Killed", "Escaped", "Killed", "Escaped", "Killed", "Escaped", "Killed", "Escaped",
-        "Skipped",
+        "Killed", "Escaped", "Killed", "Escaped", "Killed", "Escaped", "Skipped",
     ];
     let registry = Registry::builtins();
     let mut state_index = 0;
