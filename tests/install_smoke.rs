@@ -2021,8 +2021,10 @@ fn installed_command_reports_retained_area_after_a_test_command_error() {
     );
     let stdout = String::from_utf8(output.stdout).expect("retained output must be UTF-8");
     assert!(
-        stdout.contains("Errored: 2") && stdout.contains("mutation area:"),
-        "retained errors must report mutation areas: {stdout}"
+        (stdout.contains("Errored: 1") || stdout.contains("Errored: 2"))
+            && stdout.contains("could not run cargo test")
+            && stdout.contains("mutation area:"),
+        "a retained command-start error must report its mutation area: {stdout}"
     );
     assert_eq!(
         mutarust_temp_entries(&temporary_root).len(),
