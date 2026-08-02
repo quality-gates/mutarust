@@ -239,7 +239,10 @@ fn valid_mutator_name(name: &str) -> bool {
         && name.split('/').all(|part| {
             !part.is_empty()
                 && part.chars().all(|character| {
-                    character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-'
+                    character.is_ascii_lowercase()
+                        || character.is_ascii_digit()
+                        || character == '-'
+                        || character == '_'
                 })
         })
 }

@@ -2115,6 +2115,12 @@ fn add_mutator_candidates(
         if !scope.filter.allows_mutation(name, &range) {
             continue;
         }
+        let Some(changed_source) = mutation.apply(scope.text) else {
+            continue;
+        };
+        if syn::parse_file(&changed_source).is_err() {
+            continue;
+        }
         let evidence = mutation_evidence(
             &scope.workspace.source_root,
             scope.source,
