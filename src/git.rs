@@ -233,13 +233,13 @@ fn merge_ranges(ranges: &mut Vec<LineRange>) {
     ranges.sort_by_key(|range| range.first);
     let mut merged = Vec::<LineRange>::with_capacity(ranges.len());
     for range in ranges.drain(..) {
-        if let Some(previous) = merged.last_mut()
-            && range.first <= previous.last.saturating_add(1)
-        {
-            previous.last = previous.last.max(range.last);
-        } else {
-            merged.push(range);
+        if let Some(previous) = merged.last_mut() {
+            if range.first <= previous.last.saturating_add(1) {
+                previous.last = previous.last.max(range.last);
+                continue;
+            }
         }
+        merged.push(range);
     }
     *ranges = merged;
 }
