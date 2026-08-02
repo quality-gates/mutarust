@@ -2129,7 +2129,7 @@ fn add_mutator_candidates(
         {
             continue;
         }
-        if blacklist.accepts(&evidence.blacklist_checksum) {
+        if blacklist.contains_or_insert(&evidence.blacklist_checksum) {
             continue;
         }
         candidates.push(MutationCandidate {
