@@ -27,10 +27,12 @@ fn builtin_mutator_names_match_completed_mutago_groups() {
             "branch/case",
             "branch/else",
             "branch/if",
+            "composite/field-clear",
             "conditional/bool-literal",
             "conditional/negated",
             "conditional/not",
             "expression/comparison",
+            "expression/context-nil",
             "expression/logical",
             "expression/string-literal",
             "loop/break",
@@ -40,6 +42,8 @@ fn builtin_mutator_names_match_completed_mutago_groups() {
             "numbers/float-negate",
             "numbers/incrementer",
             "statement/remove",
+            "statement/remove-self-assign",
+            "statement/return",
         ]
     );
 }

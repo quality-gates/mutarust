@@ -29,6 +29,8 @@ mod expression;
 mod filter;
 mod git;
 mod mutator;
+mod return_value;
+mod value;
 
 pub use baseline::Baseline;
 pub use configuration::{CommandSettings, Configuration, ConfigurationError};

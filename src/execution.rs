@@ -2233,7 +2233,29 @@ fn test_cargo_mutant(
     execution: &TestExecution,
 ) -> Result<(MutationState, Option<String>), RunError> {
     write_mutant(&candidate.workspace, temporary, candidate)?;
-    match run_cargo_command(
+    if let Some(result) =
+        compile_mutant(candidate, temporary, copied_workspace, timeout, execution)?
+    {
+        return Ok(result);
+    }
+    test_compiled_mutant(
+        temporary,
+        copied_workspace,
+        &candidate.workspace,
+        &candidate.test_selection,
+        timeout,
+        execution,
+    )
+}
+
+fn compile_mutant(
+    candidate: &MutationCandidate,
+    temporary: &Path,
+    copied_workspace: &Path,
+    timeout: Duration,
+    execution: &TestExecution,
+) -> Result<Option<(MutationState, Option<String>)>, RunError> {
+    let outcome = run_cargo_command(
         temporary,
         copied_workspace,
         &candidate.workspace,
@@ -2241,36 +2263,31 @@ fn test_cargo_mutant(
         timeout,
         execution,
         None,
-    )? {
+    )?;
+    let result = match outcome {
         CargoCommandOutcome {
             outcome: CargoOutcome::Passed,
             ..
-        } => test_compiled_mutant(
-            temporary,
-            copied_workspace,
-            &candidate.workspace,
-            &candidate.test_selection,
-            timeout,
-            execution,
-        ),
+        } => None,
         CargoCommandOutcome {
             outcome: CargoOutcome::Failed(detail),
             ..
-        } => Ok((
+        } => Some((
             MutationState::Skipped,
             Some(format!("mutant did not compile: {}", cargo_detail(detail))),
         )),
         CargoCommandOutcome {
             outcome: CargoOutcome::TimedOut,
             ..
-        } => Ok((
+        } => Some((
             MutationState::Errored,
             Some(format!(
                 "mutant compilation timed out after {} seconds",
                 timeout.as_secs()
             )),
         )),
-    }
+    };
+    Ok(result)
 }
 
 fn test_custom_mutant(
@@ -2281,6 +2298,12 @@ fn test_custom_mutant(
     execution: &TestExecution,
     timeout: Duration,
 ) -> Result<(MutationState, Option<String>), RunError> {
+    if candidate.mutation.requires_compile_validation() {
+        return Ok((
+            MutationState::Skipped,
+            Some("mutant needs Cargo type validation before a custom command".to_owned()),
+        ));
+    }
     let sources = write_custom_mutant(&candidate.workspace, temporary, candidate)?;
     run_custom_command(
         command,

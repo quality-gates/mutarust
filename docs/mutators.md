@@ -14,10 +14,12 @@ token input.
 | `branch/case` | Remove all statements from a nonempty block arm, or replace another nonunit arm expression with `{}` |
 | `branch/else` | Remove all statements from a nonempty direct `else` block |
 | `branch/if` | Remove all statements from a nonempty `if` or `else if` body |
+| `composite/field-clear` | Remove one nondefault named struct field before a local derived `Default` rest, or replace one explicit field value with a known Rust default |
 | `conditional/bool-literal` | Change `true` to `false`, or `false` to `true` |
 | `conditional/negated` | `>` to `<=`, `<` to `>=`, `>=` to `<`, `<=` to `>`, `==` to `!=`, and `!=` to `==` |
 | `conditional/not` | Remove direct unary `!` from a condition or logical operand |
 | `expression/comparison` | `<` to `<=`, `<=` to `<`, `>` to `>=`, and `>=` to `>` |
+| `expression/context-nil` | Replace a direct `Some(value)` argument with `::core::option::Option::None` |
 | `expression/logical` | `&&` to `||`, and `||` to `&&` |
 | `expression/string-literal` | Change a direct, nonempty string operand of `==` or `!=` to `""` |
 | `loop/break` | Change `break` to `continue`, or `continue` to `break` |
@@ -27,6 +29,8 @@ token input.
 | `numbers/float-negate` | Change a nonzero float literal to `0.0` |
 | `numbers/incrementer` | Add one to a decimal integer or float literal |
 | `statement/remove` | Remove a semicolon assignment, compound assignment, call, method call, or macro statement |
+| `statement/remove-self-assign` | Remove a semicolon assignment when both sides are the same safe place |
+| `statement/return` | Replace an explicit return value with a valid default for its declared return type |
 
 `branch/case` keeps the match pattern, guard, arrow, and comma. It does not
 change an arm that is already `{}` or `()`. `branch/else` does not treat an
@@ -40,7 +44,45 @@ a second direct `break;` when the `for` body starts with one.
 
 `statement/remove` changes only expressions that end with a semicolon. It does
 not remove a `let`, item, tail expression, `return`, `break`, `continue`, or
-control-flow expression. It does not change macro token input.
+control-flow expression. It does not change macro token input. The separate
+`statement/remove-self-assign` mutator owns a plain self-assignment. It accepts
+a local path, a field or tuple field that starts at a local path, or a tuple of
+these places. It does not accept an index, dereference, call, macro, or compound
+assignment.
+
+`composite/field-clear` accepts named struct expressions. For a local struct
+with a `Default` derive, an unshadowed `..Default::default()` rest lets it
+remove one nondefault field and its comma. It does not use a type method or a
+manual `Default` implementation because either one can set a nonstandard field
+value. Without a rest, it changes only an explicit field value. The supported
+direct values are `true`, nonzero integers
+and floats, a non-NUL character, nonempty string and byte-string literals, and
+an unshadowed `Some(value)`. It keeps literal suffixes and uses a fully
+qualified `None`. It does not change shorthand fields without a default rest,
+tuple values, array values, arbitrary rest expressions, or values that are
+already known defaults.
+
+`expression/context-nil` accepts `Some(value)`, `Option::Some(value)`, and the
+fully qualified `::core` or `::std` form when one of these expressions is a
+direct function or method argument. It uses `::core::option::Option::None`. It does not
+change an indirect option value, an existing `None`, or an unqualified name
+that a local item shadows. A replacement that Cargo cannot type-check is
+`Skipped` before tests run. For a custom test command, Mutarust runs a candidate
+only when a concrete local function parameter proves the option type. It marks
+other candidates `Skipped` because the custom command selects its own compiler.
+
+`statement/return` accepts an explicit `return value;` in a function, method,
+trait default method, or closure with an explicit return type. It supports
+Boolean, integer, float, character, string-slice, slice, option, and recursive
+tuple return types. It also uses `Default::default()` for `String`, `Vec`, a
+local type with a `Default` implementation or derive, and a type parameter with
+a direct `Default` bound. For a tuple expression, it changes one supported
+element at a time. It does not change a bare return, a tail expression, a
+return in an inferred closure or async block, `Result`, `impl Trait`, a mutable
+reference, an unconstrained type parameter, or a general borrowed value.
+Cargo checks replacements that need type proof before it runs tests. Mutarust
+skips these replacements before a custom test command because that command
+selects its own compiler.
 
 `conditional/bool-literal` changes direct local initializers, assignment
 right-hand sides, function arguments, and method arguments. It does not change

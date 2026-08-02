@@ -102,7 +102,7 @@ fn installed_command_lists_builtin_mutators() {
         String::from_utf8(output.stdout)
             .expect("mutator list must be UTF-8")
             .trim(),
-        "arithmetic/assign_invert\narithmetic/assignment\narithmetic/base\narithmetic/bitwise\narithmetic/negate\nbranch/case\nbranch/else\nbranch/if\nconditional/bool-literal\nconditional/negated\nconditional/not\nexpression/comparison\nexpression/logical\nexpression/string-literal\nloop/break\nloop/condition\nloop/range_break\nnumbers/decrementer\nnumbers/float-negate\nnumbers/incrementer\nstatement/remove",
+        "arithmetic/assign_invert\narithmetic/assignment\narithmetic/base\narithmetic/bitwise\narithmetic/negate\nbranch/case\nbranch/else\nbranch/if\ncomposite/field-clear\nconditional/bool-literal\nconditional/negated\nconditional/not\nexpression/comparison\nexpression/context-nil\nexpression/logical\nexpression/string-literal\nloop/break\nloop/condition\nloop/range_break\nnumbers/decrementer\nnumbers/float-negate\nnumbers/incrementer\nstatement/remove\nstatement/remove-self-assign\nstatement/return",
         "the built-in mutator list must be stable and sorted"
     );
 }
@@ -188,6 +188,8 @@ fn assert_control_flow_oracle(fixture: &Path, source: &[u8], stdout: &str) {
                 .get(state_index)
                 .expect("each mutant must have a state");
             assert_eq!(*result_name, name, "result order must match plan order");
+            let original = original.replace('\n', "\\n");
+            let replacement = replacement.replace('\n', "\\n");
             actual.push(format!("{name} :: {original} :: {replacement} :: {state}"));
             state_index += 1;
         }
@@ -319,6 +321,155 @@ fn installed_command_classifies_expression_fixture_mutants() {
         !fixture.join("target").exists(),
         "the expression fixture must not get a Cargo target directory"
     );
+}
+
+#[test]
+fn installed_command_classifies_value_fixture_mutants() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_value_fixture(&root);
+    let source = fixture.join("src").join("lib.rs");
+    let source_before = fs::read(&source).expect("value fixture source must be readable");
+
+    let output = Command::new(command_path(&install))
+        .args([
+            "--enable",
+            "composite/field-clear",
+            "--enable",
+            "expression/context-nil",
+            "--enable",
+            "statement/remove-self-assign",
+            "--enable",
+            "statement/return",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start for the value fixture");
+
+    assert!(
+        output.status.success(),
+        "value fixture run must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("value output must be UTF-8");
+    assert!(
+        stdout.contains("Killed: 9")
+            && stdout.contains("Escaped: 1")
+            && stdout.contains("Errored: 0")
+            && stdout.contains("Skipped: 1")
+            && stdout.contains("Total: 11")
+            && stdout.contains("composite/field-clear | 4 | 0 | 0 | 4")
+            && stdout.contains("expression/context-nil | 1 | 0 | 1 | 2")
+            && stdout.contains("statement/remove-self-assign | 0 | 1 | 0 | 1")
+            && stdout.contains("statement/return | 4 | 0 | 0 | 4"),
+        "the fixture must classify every value mutant: {stdout}"
+    );
+    assert_value_oracle(&fixture, &source_before, &stdout);
+    assert_eq!(
+        fs::read(&source).expect("value source must remain readable"),
+        source_before
+    );
+    assert!(
+        !fixture.join("target").exists(),
+        "the value fixture must not get a Cargo target directory"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn custom_command_skips_a_value_mutant_that_does_not_compile() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_value_fixture(&root);
+    let source = fixture.join("src").join("lib.rs");
+    let manifest = fixture.join("Cargo.toml");
+    let manifest_text = fs::read_to_string(&manifest).expect("value manifest must be readable");
+    fs::write(
+        &manifest,
+        format!("{manifest_text}\n[features]\nrequired = []\n"),
+    )
+    .expect("value manifest must require an explicit feature");
+    let source_text = fs::read_to_string(&source).expect("value source must be readable");
+    fs::write(
+        &source,
+        format!(
+            "#[cfg(not(feature = \"required\"))]\ncompile_error!(\"required feature is missing\");\n{source_text}\nstruct String;\npub fn custom_string(value: String) -> String {{ return value; }}\n#[allow(non_camel_case_types)] trait unwrap_context {{}}\nfn shadowed(_: Option<i32>) {{}}\npub fn shadowing_value() {{ let shadowed = core::convert::identity; shadowed(Some(1)); }}\npub fn shadowing_if(generic: fn(Option<i32>)) {{ if let Some(shadowed) = Some(generic) {{ shadowed(Some(1)); }} }}\npub fn shadowing_while() {{ while let Some(shadowed) = None::<fn(Option<i32>)> {{ shadowed(Some(1)); }} }}\npub fn shadowing_for(values: [fn(Option<i32>); 0]) {{ for shadowed in values {{ shadowed(Some(1)); }} }}\nmod other {{ pub fn imported<T>(_: Option<T>) {{}} }}\nfn imported(_: Option<i32>) {{}}\npub fn shadowing_import() {{ use other::imported; imported(Some(1)); }}\nfn generic_consume<T>(value: Option<i32>, _: T) -> i32 {{ value.unwrap_or(-1) }}\npub fn generic_parameter() -> i32 {{ generic_consume(Some(1), ()) }}\npub fn before_binding() -> i32 {{ let result = unwrap_context(Some(1)); let unwrap_context: fn(i32) -> i32 = core::convert::identity; let _ = unwrap_context; result }}\n#[cfg(test)] mod scope_tests {{ #[test] fn checks_proved_calls() {{ assert_eq!(super::generic_parameter(), 1); assert_eq!(super::before_binding(), 1); }} }}\n"
+        ),
+    )
+    .expect("value source must require the feature");
+    let command = root.join("feature-command");
+    fs::write(
+        &command,
+        "#!/bin/sh\nif ! \"$MUTARUST_REAL_CARGO\" test --features required --no-run --quiet; then\n  exit 2\nfi\nif \"$MUTARUST_REAL_CARGO\" test --features required --quiet; then\n  exit 1\nfi\nexit 0\n",
+    )
+    .expect("feature command must be written");
+    fs::set_permissions(&command, fs::Permissions::from_mode(0o755))
+        .expect("feature command must be executable");
+
+    let output = Command::new(command_path(&install))
+        .args([
+            "--enable",
+            "expression/context-nil",
+            "--enable",
+            "statement/return",
+            "--exec",
+        ])
+        .arg(&command)
+        .arg(&source)
+        .current_dir(&fixture)
+        .env("MUTARUST_REAL_CARGO", env!("CARGO"))
+        .output()
+        .expect("installed mutarust must start the custom command");
+
+    assert!(
+        output.status.success(),
+        "custom mutation run must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("custom output must be UTF-8");
+    assert!(
+        stdout.contains("Killed: 5")
+            && stdout.contains("Skipped: 9")
+            && stdout.contains("Total: 14")
+            && stdout.contains("expression/context-nil | 3 | 0 | 6 | 9")
+            && stdout.contains("statement/return | 2 | 0 | 3 | 5"),
+        "the invalid custom-command mutant must be skipped: {stdout}"
+    );
+}
+
+fn assert_value_oracle(fixture: &Path, source: &[u8], stdout: &str) {
+    let expected = fs::read_to_string(fixture.join("expected-mutants.txt"))
+        .expect("expected value mutants must be readable");
+    let results = mutation_results(stdout);
+    let source = String::from_utf8(source.to_vec()).expect("value source must be UTF-8");
+    let registry = mutarust::Registry::builtins();
+    let names = [
+        "composite/field-clear",
+        "expression/context-nil",
+        "statement/remove-self-assign",
+        "statement/return",
+    ];
+    let mut actual = Vec::new();
+    let mut state_index = 0;
+    for name in names {
+        for mutation in registry.get(name).unwrap().mutations(&source) {
+            let (range, replacement) = mutation.identity();
+            let original = source.get(range).expect("mutation range must be valid");
+            let (state, result_name) = results
+                .get(state_index)
+                .expect("each value mutant must have a state");
+            assert_eq!(*result_name, name, "result order must match plan order");
+            let original = original.replace('\n', "\\n");
+            let replacement = replacement.replace('\n', "\\n");
+            actual.push(format!("{name} :: {original} :: {replacement} :: {state}"));
+            state_index += 1;
+        }
+    }
+    assert_eq!(state_index, results.len());
+    assert_eq!(actual.join("\n") + "\n", expected);
 }
 
 #[test]
@@ -3182,7 +3333,7 @@ fn packaged_library_builds_a_custom_mutator() {
     .expect("downstream manifest must be written");
     fs::write(
         downstream.join("src").join("main.rs"),
-        "use mutarust::{Mutation, Mutator, Registry, RegistryBuilder};\n\nstruct Custom;\nstruct Invalid;\n\nimpl Mutator for Custom {\n    fn name(&self) -> &str { \"custom/no-op\" }\n\n    fn mutations(&self, _source: &str) -> Vec<Mutation> { Vec::new() }\n}\n\nimpl Mutator for Invalid {\n    fn name(&self) -> &str { \"Custom\" }\n\n    fn mutations(&self, _source: &str) -> Vec<Mutation> { Vec::new() }\n}\n\nfn mutate(registry: &Registry, source: &str) -> String {\n    let mutation = registry.get(\"conditional/bool-literal\").expect(\"built-in mutator must exist\").mutations(source).pop().expect(\"boolean must mutate\");\n    mutation.apply(source).expect(\"mutation must apply\")\n}\n\nfn main() {\n    let registry = RegistryBuilder::with_builtins().register(Custom).expect(\"custom mutator must register\").build();\n    assert_eq!(registry.names().collect::<Vec<_>>(), vec![\"arithmetic/assign_invert\", \"arithmetic/assignment\", \"arithmetic/base\", \"arithmetic/bitwise\", \"arithmetic/negate\", \"branch/case\", \"branch/else\", \"branch/if\", \"conditional/bool-literal\", \"conditional/negated\", \"conditional/not\", \"custom/no-op\", \"expression/comparison\", \"expression/logical\", \"expression/string-literal\", \"loop/break\", \"loop/condition\", \"loop/range_break\", \"numbers/decrementer\", \"numbers/float-negate\", \"numbers/incrementer\", \"statement/remove\"]);\n    let duplicate = RegistryBuilder::new().register(Custom).expect(\"first custom mutator must register\").register(Custom).err().expect(\"duplicate must fail\");\n    assert_eq!(duplicate.to_string(), \"duplicate mutator name: custom/no-op\");\n    let invalid = RegistryBuilder::new().register(Invalid).err().expect(\"invalid name must fail\");\n    assert_eq!(invalid.to_string(), \"invalid mutator name: Custom\");\n    assert_eq!(mutate(&registry, \"fn enabled() -> bool { let enabled = true; enabled }\"), \"fn enabled() -> bool { let enabled = false; enabled }\");\n    assert_eq!(mutate(&registry, \"fn enabled() -> bool { let label = \\\"é\\\"; let enabled = true; enabled }\"), \"fn enabled() -> bool { let label = \\\"é\\\"; let enabled = false; enabled }\");\n    assert!(registry.get(\"conditional/bool-literal\").unwrap().mutations(\"fn check() { assert!(true); }\").is_empty());\n    println!(\"custom mutator works\");\n}\n",
+        "use mutarust::{Mutation, Mutator, Registry, RegistryBuilder};\n\nstruct Custom;\nstruct Invalid;\n\nimpl Mutator for Custom {\n    fn name(&self) -> &str { \"custom/no-op\" }\n\n    fn mutations(&self, _source: &str) -> Vec<Mutation> { Vec::new() }\n}\n\nimpl Mutator for Invalid {\n    fn name(&self) -> &str { \"Custom\" }\n\n    fn mutations(&self, _source: &str) -> Vec<Mutation> { Vec::new() }\n}\n\nfn mutate(registry: &Registry, source: &str) -> String {\n    let mutation = registry.get(\"conditional/bool-literal\").expect(\"built-in mutator must exist\").mutations(source).pop().expect(\"boolean must mutate\");\n    mutation.apply(source).expect(\"mutation must apply\")\n}\n\nfn main() {\n    let registry = RegistryBuilder::with_builtins().register(Custom).expect(\"custom mutator must register\").build();\n    assert_eq!(registry.names().collect::<Vec<_>>(), vec![\"arithmetic/assign_invert\", \"arithmetic/assignment\", \"arithmetic/base\", \"arithmetic/bitwise\", \"arithmetic/negate\", \"branch/case\", \"branch/else\", \"branch/if\", \"composite/field-clear\", \"conditional/bool-literal\", \"conditional/negated\", \"conditional/not\", \"custom/no-op\", \"expression/comparison\", \"expression/context-nil\", \"expression/logical\", \"expression/string-literal\", \"loop/break\", \"loop/condition\", \"loop/range_break\", \"numbers/decrementer\", \"numbers/float-negate\", \"numbers/incrementer\", \"statement/remove\", \"statement/remove-self-assign\", \"statement/return\"]);\n    let duplicate = RegistryBuilder::new().register(Custom).expect(\"first custom mutator must register\").register(Custom).err().expect(\"duplicate must fail\");\n    assert_eq!(duplicate.to_string(), \"duplicate mutator name: custom/no-op\");\n    let invalid = RegistryBuilder::new().register(Invalid).err().expect(\"invalid name must fail\");\n    assert_eq!(invalid.to_string(), \"invalid mutator name: Custom\");\n    assert_eq!(mutate(&registry, \"fn enabled() -> bool { let enabled = true; enabled }\"), \"fn enabled() -> bool { let enabled = false; enabled }\");\n    assert_eq!(mutate(&registry, \"fn enabled() -> bool { let label = \\\"é\\\"; let enabled = true; enabled }\"), \"fn enabled() -> bool { let label = \\\"é\\\"; let enabled = false; enabled }\");\n    assert!(registry.get(\"conditional/bool-literal\").unwrap().mutations(\"fn check() { assert!(true); }\").is_empty());\n    println!(\"custom mutator works\");\n}\n",
     )
     .expect("downstream source must be written");
 
@@ -4367,6 +4518,35 @@ fn write_expression_fixture(root: &Path) -> PathBuf {
         include_str!("fixtures/expression/expected-mutants.txt"),
     )
     .expect("expected expression mutants must be written");
+    fixture
+}
+
+fn write_value_fixture(root: &Path) -> PathBuf {
+    let fixture = root.join("value-fixture");
+    fs::create_dir_all(fixture.join("src"))
+        .expect("value fixture source directory must be created");
+    fs::create_dir_all(fixture.join("tests"))
+        .expect("value fixture test directory must be created");
+    fs::write(
+        fixture.join("Cargo.toml"),
+        include_str!("fixtures/value/Cargo.toml"),
+    )
+    .expect("value fixture manifest must be written");
+    fs::write(
+        fixture.join("src").join("lib.rs"),
+        include_str!("fixtures/value/src/lib.rs"),
+    )
+    .expect("value fixture source must be written");
+    fs::write(
+        fixture.join("tests").join("value.rs"),
+        include_str!("fixtures/value/tests/value.rs"),
+    )
+    .expect("value fixture tests must be written");
+    fs::write(
+        fixture.join("expected-mutants.txt"),
+        include_str!("fixtures/value/expected-mutants.txt"),
+    )
+    .expect("expected value mutants must be written");
     fixture
 }
 
