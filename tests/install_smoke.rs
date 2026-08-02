@@ -37,6 +37,19 @@ fn wait_for_file(path: &Path, message: &str) {
     panic!("{message}");
 }
 
+fn wait_for_file_lines(path: &Path, count: usize, message: &str) {
+    for _ in 0..1_000 {
+        let lines = fs::read_to_string(path)
+            .map(|content| content.lines().count())
+            .unwrap_or(0);
+        if lines >= count {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    panic!("{message}");
+}
+
 #[test]
 fn installed_command_prints_help() {
     let root = smoke_root();
@@ -511,22 +524,44 @@ fn installed_command_classifies_killed_and_escaped_mutants() {
     let source = fixture.join("checked").join("src").join("lib.rs");
     let user_target = root.join("user-target");
 
-    let output = Command::new(command_path(&install))
+    let sequential = Command::new(command_path(&install))
+        .args(["--workers", "1"])
+        .arg(&source)
+        .current_dir(&*root)
+        .env("CARGO_TARGET_DIR", &user_target)
+        .output()
+        .expect("installed mutarust must start");
+    let parallel = Command::new(command_path(&install))
+        .args(["--workers", "2"])
         .arg(&source)
         .current_dir(&*root)
         .env("CARGO_TARGET_DIR", &user_target)
         .output()
         .expect("installed mutarust must start");
 
-    assert!(output.status.success(), "mutation run must succeed");
-    let stdout = String::from_utf8(output.stdout).expect("mutation output must be UTF-8");
     assert!(
-        stdout.contains("killed ") && stdout.contains("escaped "),
-        "one mutant must be killed and one must escape: {stdout}"
+        sequential.status.success(),
+        "sequential mutation run must succeed"
     );
     assert!(
-        stdout.contains("Killed: 1") && stdout.contains("Escaped: 1"),
-        "the final counts must use mutation result terms: {stdout}"
+        parallel.status.success(),
+        "parallel mutation run must succeed"
+    );
+    let sequential_stdout =
+        String::from_utf8(sequential.stdout).expect("sequential mutation output must be UTF-8");
+    let parallel_stdout =
+        String::from_utf8(parallel.stdout).expect("parallel mutation output must be UTF-8");
+    assert!(
+        parallel_stdout.contains("killed ") && parallel_stdout.contains("escaped "),
+        "one mutant must be killed and one must escape: {parallel_stdout}"
+    );
+    assert!(
+        parallel_stdout.contains("Killed: 1") && parallel_stdout.contains("Escaped: 1"),
+        "the final counts must use mutation result terms: {parallel_stdout}"
+    );
+    assert_eq!(
+        parallel_stdout, sequential_stdout,
+        "parallel workers must keep mutation result records and summaries in plan order"
     );
     assert_eq!(
         fs::read_to_string(source).expect("fixture source must remain readable"),
@@ -537,6 +572,70 @@ fn installed_command_classifies_killed_and_escaped_mutants() {
         !user_target.exists(),
         "the mutation run must not write Cargo output to the user target directory"
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn installed_command_keeps_parallel_cargo_output_out_of_result_records() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_mutation_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    let source_before = fs::read(&source).expect("source must be readable");
+    let fake_cargo = root.join("parallel-output-cargo");
+    let markers = root.join("parallel-output-markers");
+    let temporary_root = root.join("parallel-output-temporary");
+    fs::create_dir(&markers).expect("parallel output markers must be created");
+    fs::create_dir(&temporary_root).expect("parallel output root must be created");
+    fs::write(
+        &fake_cargo,
+        format!(
+            "#!/bin/sh\nif [ \"$1\" = \"metadata\" ]; then\n  exec '{}' \"$@\"\nfi\nif ! grep -q false checked/src/lib.rs 2>/dev/null; then\n  exit 0\nfi\nif [ \"$(grep -c false checked/src/lib.rs)\" -ne 1 ]; then\n  exit 91\nfi\ncase \" $* \" in\n  *\" --no-run \"*) exit 0 ;;\nesac\ntouch \"$MUTARUST_OUTPUT_MARKERS/$$\"\nfor _ in $(seq 1 100); do\n  [ \"$(find \"$MUTARUST_OUTPUT_MARKERS\" -type f | wc -l)\" -ge 2 ] && break\n  sleep 0.01\ndone\nif [ \"$(find \"$MUTARUST_OUTPUT_MARKERS\" -type f | wc -l)\" -ne 2 ]; then\n  exit 92\nfi\nprintf 'parallel worker output: begin'\nsleep 0.05\nprintf ': complete\\n'\nexit 1\n",
+            env!("CARGO")
+        ),
+    )
+    .expect("parallel output Cargo command must be written");
+    fs::set_permissions(&fake_cargo, fs::Permissions::from_mode(0o755))
+        .expect("parallel output Cargo command must be executable");
+
+    let output = Command::new(command_path(&install))
+        .args(["--workers", "2"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .env("CARGO", &fake_cargo)
+        .env("MUTARUST_OUTPUT_MARKERS", &markers)
+        .env("TMPDIR", &temporary_root)
+        .output()
+        .expect("installed mutarust must start");
+
+    assert!(
+        output.status.success(),
+        "parallel Cargo run must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("mutation output must be UTF-8");
+    assert!(
+        stdout.contains("Killed: 2"),
+        "both concurrent Cargo workers must report complete results: {stdout}"
+    );
+    assert!(
+        !stdout.contains("parallel worker output"),
+        "concurrent Cargo output must not mix with mutation result records: {stdout}"
+    );
+    assert_eq!(
+        fs::read_dir(&markers)
+            .expect("parallel output markers must be readable")
+            .count(),
+        2,
+        "two Cargo workers must run at the same time"
+    );
+    assert!(
+        mutarust_temp_entries(&temporary_root).is_empty(),
+        "parallel workspaces must be removed after the run"
+    );
+    assert_eq!(fs::read(&source).unwrap(), source_before);
 }
 
 #[test]
@@ -1771,6 +1870,22 @@ fn installed_command_rejects_incompatible_execution_controls() {
             vec!["--no-exec", "--timeout", "1"],
             "--no-exec cannot be used with --timeout",
         ),
+        (
+            vec!["--workers", "0"],
+            "--workers requires a positive whole number",
+        ),
+        (
+            vec!["--workers", "two"],
+            "--workers requires a positive whole number",
+        ),
+        (
+            vec!["--workers", "1", "--workers", "2"],
+            "--workers can be supplied only once",
+        ),
+        (
+            vec!["--dry-run", "--workers", "2"],
+            "--dry-run cannot be used with --workers",
+        ),
     ] {
         let output = Command::new(command_path(&install))
             .args(arguments)
@@ -2173,7 +2288,7 @@ fn installed_command_stops_test_at_interrupt() {
     fs::write(
         &fake_cargo,
         format!(
-            "#!/bin/sh\nif [ \"$1\" = \"metadata\" ]; then\n  exec '{}' \"$@\"\nfi\nif ! grep -q false checked/src/lib.rs 2>/dev/null; then\n  exit 0\nfi\ncase \" $* \" in\n  *\" --no-run \"*) exit 0 ;;\nesac\necho $$ > \"$MUTARUST_INTERRUPTED_CARGO\"\nsleep 30\n",
+            "#!/bin/sh\nif [ \"$1\" = \"metadata\" ]; then\n  exec '{}' \"$@\"\nfi\nif ! grep -q false checked/src/lib.rs 2>/dev/null; then\n  exit 0\nfi\nif [ \"$(grep -c false checked/src/lib.rs)\" -ne 1 ]; then\n  exit 93\nfi\ncase \" $* \" in\n  *\" --no-run \"*) exit 0 ;;\nesac\necho $$ >> \"$MUTARUST_INTERRUPTED_CARGO\"\nsleep 30\n",
             env!("CARGO")
         ),
     )
@@ -2183,6 +2298,7 @@ fn installed_command_stops_test_at_interrupt() {
 
     let mut command = Command::new(command_path(&install));
     let process = command
+        .args(["--workers", "2"])
         .arg(&source)
         .current_dir(&fixture)
         .env("CARGO", &fake_cargo)
@@ -2192,7 +2308,11 @@ fn installed_command_stops_test_at_interrupt() {
         .stderr(std::process::Stdio::piped())
         .spawn()
         .expect("installed mutarust must start");
-    wait_for_file(&cargo_identifier, "interrupted Cargo process must start");
+    wait_for_file_lines(
+        &cargo_identifier,
+        2,
+        "parallel interrupted Cargo processes must start",
+    );
     let signal = Command::new("kill")
         .args(["-INT", &process.id().to_string()])
         .status()
@@ -2215,18 +2335,14 @@ fn installed_command_stops_test_at_interrupt() {
         String::from_utf8_lossy(&output.stderr).contains("mutation run interrupted"),
         "the interrupt diagnostic must be clear"
     );
-    let cargo = fs::read_to_string(&cargo_identifier)
-        .expect("interrupted Cargo identifier must be written")
-        .trim()
-        .to_owned();
-    let cargo_status = Command::new("kill")
-        .args(["-0", &cargo])
-        .status()
-        .expect("Cargo process check must start");
-    assert!(
-        !cargo_status.success(),
-        "the interrupt must stop the Cargo process"
-    );
+    let cargo_processes = fs::read_to_string(&cargo_identifier)
+        .expect("interrupted Cargo identifiers must be written");
+    for cargo in cargo_processes.lines() {
+        assert!(
+            process_has_stopped(cargo),
+            "the interrupt must stop each Cargo process"
+        );
+    }
     assert!(
         mutarust_temp_entries(&temporary_root).is_empty(),
         "the interrupt must remove each mutation workspace"

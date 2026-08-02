@@ -4,7 +4,9 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use mutarust::{CommandSettings, Configuration, ExecutionControls, Registry, TestExecution};
+use mutarust::{
+    CommandSettings, Configuration, ExecutionControls, Registry, TestExecution, WorkerLimit,
+};
 
 fn main() -> ExitCode {
     let arguments = env::args().skip(1).collect::<Vec<_>>();
@@ -49,7 +51,7 @@ fn print_help() -> io::Result<()> {
     )?;
     writeln!(
         stdout,
-        "\nOptions:\n  -h, --help           Print help\n  -V, --version        Print version\n      --config FILE     Read mutation policy from a YAML file\n      --list-files      List selected Rust production source files\n      --list-mutators   List available mutators\n      --exec COMMAND    Run a custom command for each mutant\n      --exec-timeout    Stop each test command after this many seconds\n      --timeout         Alias for --exec-timeout\n      --timeout-coefficient FACTOR  Set an adaptive Cargo timeout\n      --test-flags FLAGS  Add shell-quoted Cargo test flags\n      --test-recursive  Select all Cargo workspace packages\n      --dry-run         List mutants without writing files or running tests\n      --no-exec         Write mutants without running tests\n      --do-not-remove-tmp-folder  Keep mutation workspaces\n      --match REGEXP    Mutate only functions with matching names\n      --verbose         Tell a custom command to produce verbose output\n      --debug           Tell a custom command to produce debug output\n      --silent          Hide mutant status output\n      --no-silent       Print mutant status output\n      --no-diffs        Hide escaped-mutant source diffs\n      --run-mutant-id ID  Run one mutant without score gates\n      --min-msi         Set the minimum mutation score percentage\n      --min-covered-msi Set the minimum covered-code score percentage\n      --enable NAME     Select a mutator name or group pattern\n      --disable NAME    Disable a mutator name or group pattern"
+        "\nOptions:\n  -h, --help           Print help\n  -V, --version        Print version\n      --config FILE     Read mutation policy from a YAML file\n      --list-files      List selected Rust production source files\n      --list-mutators   List available mutators\n      --exec COMMAND    Run a custom command for each mutant\n      --exec-timeout    Stop each test command after this many seconds\n      --timeout         Alias for --exec-timeout\n      --timeout-coefficient FACTOR  Set an adaptive Cargo timeout\n      --test-flags FLAGS  Add shell-quoted Cargo test flags\n      --test-recursive  Select all Cargo workspace packages\n      --workers COUNT   Run this many Cargo mutation jobs\n      --dry-run         List mutants without writing files or running tests\n      --no-exec         Write mutants without running tests\n      --do-not-remove-tmp-folder  Keep mutation workspaces\n      --match REGEXP    Mutate only functions with matching names\n      --verbose         Tell a custom command to produce verbose output\n      --debug           Tell a custom command to produce debug output\n      --silent          Hide mutant status output\n      --no-silent       Print mutant status output\n      --no-diffs        Hide escaped-mutant source diffs\n      --run-mutant-id ID  Run one mutant without score gates\n      --min-msi         Set the minimum mutation score percentage\n      --min-covered-msi Set the minimum covered-code score percentage\n      --enable NAME     Select a mutator name or group pattern\n      --disable NAME    Disable a mutator name or group pattern"
     )
 }
 
@@ -126,6 +128,7 @@ fn parse_value_option(
         "--timeout-coefficient" => {
             value().and_then(|value| set_timeout_coefficient(command, value))
         }
+        "--workers" => value().and_then(|value| set_workers(command, value)),
         "--test-flags" => value().and_then(|value| set_test_flags(command, value)),
         "--exec" => value().and_then(|value| set_custom_command(command, value)),
         _ => return parse_policy_value_option(command, argument, next),
@@ -255,6 +258,19 @@ fn set_timeout_coefficient(command: &mut RunCommand, value: String) -> Result<()
     Ok(())
 }
 
+fn set_workers(command: &mut RunCommand, value: String) -> Result<(), String> {
+    if command.execution.workers.is_some() {
+        return Err("--workers can be supplied only once".to_owned());
+    }
+    let workers = value
+        .parse::<usize>()
+        .ok()
+        .and_then(WorkerLimit::new)
+        .ok_or_else(|| "--workers requires a positive whole number".to_owned())?;
+    command.execution.workers = Some(workers);
+    Ok(())
+}
+
 fn set_test_flags(command: &mut RunCommand, value: String) -> Result<(), String> {
     if command.execution.cargo_flags.is_some() {
         return Err("--test-flags can be supplied only once".to_owned());
@@ -362,6 +378,7 @@ fn execution_controls(command: &RunCommand) -> ExecutionControls {
         no_exec: command.execution.no_exec,
         keep_temporary: command.execution.keep_temporary,
         timeout_coefficient: command.execution.timeout_coefficient,
+        workers: command.execution.workers.unwrap_or_default(),
     }
 }
 
@@ -569,6 +586,7 @@ struct ExecutionOptions {
     keep_temporary: bool,
     fixed_timeout: bool,
     timeout_coefficient: Option<f64>,
+    workers: Option<WorkerLimit>,
     cargo_flags: Option<Vec<String>>,
 }
 
@@ -619,6 +637,10 @@ fn dry_run_control_error(command: &RunCommand) -> Option<&'static str> {
         (
             execution.dry_run && execution.cargo_flags.is_some(),
             "--dry-run cannot be used with --test-flags",
+        ),
+        (
+            execution.dry_run && execution.workers.is_some(),
+            "--dry-run cannot be used with --workers",
         ),
         (
             execution.dry_run && command.recursive_tests,

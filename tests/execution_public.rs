@@ -78,6 +78,13 @@ fn adaptive_timeout_requires_the_public_cargo_execution() {
     );
 }
 
+#[test]
+fn worker_limit_requires_a_positive_value() {
+    assert!(mutarust::WorkerLimit::new(0).is_none());
+    let workers = mutarust::WorkerLimit::new(2).expect("two workers must be valid");
+    assert_eq!(workers.get(), 2);
+}
+
 #[cfg(windows)]
 #[test]
 fn mutation_run_restores_the_host_interrupt_handler() {

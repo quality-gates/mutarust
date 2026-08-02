@@ -66,6 +66,15 @@ By default, Mutarust removes all isolated mutation areas after the run. Use
 retained path. This option can use much disk space because a normal Cargo run
 can create build output in each area.
 
+Mutarust runs Cargo mutants in parallel. By default, it starts up to one worker
+per logical CPU. Use `--workers COUNT` to set a positive whole-number limit.
+Mutarust never starts more workers than the number of mutants. Each worker uses
+one isolated mutation area and its own Cargo target directory. A higher worker
+limit can use more temporary disk space. Use a lower limit when disk space is
+limited. Mutarust prints result records and the final summary in the same plan
+order for sequential and parallel runs. A custom `--exec` command uses one
+worker so its command output cannot mix with another command output.
+
 Each Cargo test run has a fixed 60 second timeout by default. Use
 `--exec-timeout SECONDS` to set a different positive whole-second timeout.
 `--timeout` is an alias. A timeout produces an errored mutant result with an
@@ -88,7 +97,7 @@ in the selected Cargo workspace. With `--exec`, Mutarust instead sets
 used with `--no-exec`.
 
 `--dry-run` cannot be used with `--no-exec`, `--exec`, timeout controls, Cargo
-test controls, or `--do-not-remove-tmp-folder`. `--no-exec` cannot be used
+test controls, `--workers`, or `--do-not-remove-tmp-folder`. `--no-exec` cannot be used
 with `--exec`, timeout controls, or Cargo test controls. These rules prevent a
 command from silently ignoring a selected option.
 
