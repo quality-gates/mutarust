@@ -15,7 +15,7 @@ fn changed_sources(mutator: &str, source: &str) -> Vec<String> {
 }
 
 #[test]
-fn builtin_expression_mutator_names_match_mutago() {
+fn builtin_mutator_names_match_completed_mutago_groups() {
     assert_eq!(
         Registry::builtins().names().collect::<Vec<_>>(),
         vec![
@@ -24,15 +24,22 @@ fn builtin_expression_mutator_names_match_mutago() {
             "arithmetic/base",
             "arithmetic/bitwise",
             "arithmetic/negate",
+            "branch/case",
+            "branch/else",
+            "branch/if",
             "conditional/bool-literal",
             "conditional/negated",
             "conditional/not",
             "expression/comparison",
             "expression/logical",
             "expression/string-literal",
+            "loop/break",
+            "loop/condition",
+            "loop/range_break",
             "numbers/decrementer",
             "numbers/float-negate",
             "numbers/incrementer",
+            "statement/remove",
         ]
     );
 }

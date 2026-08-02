@@ -4,6 +4,7 @@ use std::ops::Range;
 
 use proc_macro2::Span;
 
+use crate::control_flow::ControlFlowMutator;
 use crate::expression::{
     ArithmeticNegate, BinaryOperatorMutator, BoolLiteralMutator, ConditionalNotMutator,
     NumberMutator, StringLiteralMutator,
@@ -66,6 +67,12 @@ impl RegistryBuilder {
     /// Creates a builder with all mutators supplied by Mutarust.
     pub fn with_builtins() -> Self {
         Self::new()
+            .register(ControlFlowMutator::branch_case())
+            .expect("built-in mutator registration must be valid")
+            .register(ControlFlowMutator::branch_else())
+            .expect("built-in mutator registration must be valid")
+            .register(ControlFlowMutator::branch_if())
+            .expect("built-in mutator registration must be valid")
             .register(BinaryOperatorMutator::arithmetic_base())
             .expect("built-in mutator registration must be valid")
             .register(BinaryOperatorMutator::arithmetic_bitwise())
@@ -93,6 +100,14 @@ impl RegistryBuilder {
             .register(BoolLiteralMutator)
             .expect("built-in mutator registration must be valid")
             .register(ConditionalNotMutator)
+            .expect("built-in mutator registration must be valid")
+            .register(ControlFlowMutator::loop_break())
+            .expect("built-in mutator registration must be valid")
+            .register(ControlFlowMutator::loop_condition())
+            .expect("built-in mutator registration must be valid")
+            .register(ControlFlowMutator::loop_range_break())
+            .expect("built-in mutator registration must be valid")
+            .register(ControlFlowMutator::statement_remove())
             .expect("built-in mutator registration must be valid")
     }
 

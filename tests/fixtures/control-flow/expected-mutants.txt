@@ -1,0 +1,14 @@
+branch/case :: return 3; ::  :: Killed
+branch/else :: return 2; ::  :: Killed
+branch/if :: return 1; ::  :: Killed
+branch/if :: continue; ::  :: Killed
+branch/if :: target.push(3); ::  :: Killed
+loop/break :: break :: continue :: Killed
+loop/break :: continue :: break :: Killed
+loop/condition :: values.pop().is_some() :: false :: Killed
+loop/range_break ::  ::  break; :: Killed
+loop/range_break ::  ::  break; :: Killed
+statement/remove :: seen += 1; ::  :: Killed
+statement/remove :: *value = 3; ::  :: Killed
+statement/remove :: target.push(1); ::  :: Killed
+statement/remove :: marker!(target); ::  :: Killed
