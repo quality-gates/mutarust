@@ -8,8 +8,8 @@ List the available mutation operators:
 mutarust --list-mutators
 ```
 
-The first built-in mutator, `conditional/bool-literal`, changes each Rust
-Boolean literal token between `true` and `false`, including macro input.
+The built-in mutators use stable Mutago names and Rust expression rules. See
+the [mutator reference](mutators.md) for all names, changes, and exclusions.
 Run mutation testing for selected production source:
 
 ```text
@@ -90,7 +90,7 @@ format that is compatible with Mutago:
   "version": 1,
   "mutants": [
     {
-      "id": "a4afb3df07ad704a7e118ca1f9c8ce1e",
+      "id": "4582b234c128077507b7558eb62c337e",
       "file": "checked/src/lib.rs",
       "mutator": "conditional/bool-literal",
       "line": 1

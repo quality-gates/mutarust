@@ -1,6 +1,86 @@
 #[cfg(any(unix, windows))]
 use std::sync::atomic::{AtomicBool, Ordering};
 
+struct InvalidEdit;
+
+impl mutarust::Mutator for InvalidEdit {
+    fn name(&self) -> &str {
+        "custom/invalid-edit"
+    }
+
+    fn mutations(&self, source: &str) -> Vec<mutarust::Mutation> {
+        let mut mutations = (0..=source.len())
+            .map(|offset| mutarust::Mutation::new(offset..offset, "}"))
+            .collect::<Vec<_>>();
+        let reversed_start = source.len().min(2);
+        let reversed_end = reversed_start.saturating_sub(1);
+        mutations.extend([
+            mutarust::Mutation::new(0..1, ""),
+            mutarust::Mutation::new(reversed_start..reversed_end, ""),
+            mutarust::Mutation::new(source.len() + 1..source.len() + 1, ""),
+            mutarust::Mutation::new(0..source.len(), "fn broken("),
+        ]);
+        mutations
+    }
+}
+
+struct FixtureRoot(std::path::PathBuf);
+
+impl Drop for FixtureRoot {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+#[test]
+fn invalid_diff_fuzz_corpus_does_not_become_mutation_results() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system time must follow the Unix epoch")
+        .as_nanos();
+    let root = FixtureRoot(std::env::temp_dir().join(format!(
+        "mutarust-invalid-edit-{}-{unique}",
+        std::process::id()
+    )));
+    let source = root.0.join("src").join("lib.rs");
+    std::fs::create_dir_all(source.parent().expect("source must have a parent"))
+        .expect("fixture source directory must be created");
+    std::fs::write(
+        root.0.join("Cargo.toml"),
+        "[package]\nname = \"invalid-edit-fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .expect("fixture manifest must be written");
+    std::fs::write(&source, "pub fn café() -> i32 { 1 }\n")
+        .expect("fixture source must be written");
+
+    let registry = mutarust::RegistryBuilder::new()
+        .register(InvalidEdit)
+        .expect("custom mutator must register")
+        .build();
+    let names = registry.names().map(str::to_owned).collect::<Vec<_>>();
+    let filters = mutarust::SourceFilters::new(&[], &[], None, &names)
+        .expect("source filters must accept the custom mutator");
+    let controls = mutarust::ExecutionControls {
+        dry_run: true,
+        ..mutarust::ExecutionControls::default()
+    };
+    let run = mutarust::run_mutation_tests_with_controls(
+        &[source.to_string_lossy().into_owned()],
+        &registry,
+        std::time::Duration::from_secs(1),
+        None,
+        &filters,
+        &mutarust::TestExecution::cargo(),
+        &controls,
+    )
+    .expect("invalid edits must not fail the run");
+
+    assert!(
+        run.results().is_empty(),
+        "the invalid diff fuzz corpus must not become results"
+    );
+}
+
 #[cfg(any(unix, windows))]
 static HOST_INTERRUPT_SEEN: AtomicBool = AtomicBool::new(false);
 

@@ -101,8 +101,98 @@ fn installed_command_lists_builtin_mutators() {
         String::from_utf8(output.stdout)
             .expect("mutator list must be UTF-8")
             .trim(),
-        "conditional/bool-literal",
+        "arithmetic/assign_invert\narithmetic/assignment\narithmetic/base\narithmetic/bitwise\narithmetic/negate\nconditional/bool-literal\nconditional/negated\nconditional/not\nexpression/comparison\nexpression/logical\nexpression/string-literal\nnumbers/decrementer\nnumbers/float-negate\nnumbers/incrementer",
         "the built-in mutator list must be stable and sorted"
+    );
+}
+
+#[test]
+fn installed_command_classifies_expression_fixture_mutants() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_expression_fixture(&root);
+    let source = fixture.join("src").join("lib.rs");
+    let source_before = fs::read(&source).expect("expression fixture source must be readable");
+
+    let output = Command::new(command_path(&install))
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start for the expression fixture");
+
+    assert!(
+        output.status.success(),
+        "expression fixture run must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("expression output must be UTF-8");
+    assert!(
+        stdout.contains("Killed: 16")
+            && stdout.contains("Escaped: 1")
+            && stdout.contains("Errored: 0")
+            && stdout.contains("Total: 17")
+            && stdout.contains("conditional/negated | 2 | 0 | 0 | 2")
+            && stdout.contains("expression/comparison | 0 | 1 | 0 | 1")
+            && stdout.contains("numbers/decrementer | 2 | 0 | 0 | 2")
+            && stdout.contains("numbers/incrementer | 2 | 0 | 0 | 2"),
+        "the fixture must classify every valid expression mutant: {stdout}"
+    );
+    let expected = fs::read_to_string(fixture.join("expected-mutants.txt"))
+        .expect("expected expression mutants must be readable");
+    let states = stdout
+        .lines()
+        .filter_map(|line| {
+            ["killed", "escaped", "errored", "not covered", "skipped"]
+                .into_iter()
+                .find_map(|state| {
+                    line.strip_prefix(state).and_then(|rest| {
+                        rest.split_whitespace()
+                            .last()
+                            .map(|mutator| (state, mutator))
+                    })
+                })
+        })
+        .collect::<Vec<_>>();
+    let source_text =
+        String::from_utf8(source_before.clone()).expect("expression fixture source must be UTF-8");
+    let registry = mutarust::Registry::builtins();
+    let mut state_index = 0;
+    let mut actual = Vec::new();
+    for name in registry.names() {
+        for mutation in registry
+            .get(name)
+            .expect("the built-in mutator must exist")
+            .mutations(&source_text)
+        {
+            let (range, replacement) = mutation.identity();
+            let original = source_text
+                .get(range)
+                .expect("a fixture mutation range must be valid");
+            let (state, result_name) = states
+                .get(state_index)
+                .expect("each generated mutation must have a result");
+            assert_eq!(*result_name, name, "result order must match plan order");
+            let state = match *state {
+                "killed" => "Killed",
+                "escaped" => "Escaped",
+                "errored" => "Errored",
+                "not covered" => "NotCovered",
+                "skipped" => "Skipped",
+                _ => unreachable!("the state filter accepts known states only"),
+            };
+            actual.push(format!("{name} :: {original} :: {replacement} :: {state}"));
+            state_index += 1;
+        }
+    }
+    assert_eq!(state_index, states.len());
+    assert_eq!(actual.join("\n") + "\n", expected);
+    assert_eq!(
+        fs::read(&source).expect("expression fixture source must remain readable"),
+        source_before
+    );
+    assert!(
+        !fixture.join("target").exists(),
+        "the expression fixture must not get a Cargo target directory"
     );
 }
 
@@ -200,7 +290,7 @@ fn installed_command_filters_mutator_and_source_candidates() {
         .expect("excluded source must be written");
     fs::write(
         &source,
-        "pub fn checked() -> bool { true }\npub fn ignored_by_line() -> bool { true }\n",
+        "pub fn checked() -> bool { let value = true; value }\npub fn ignored_by_line() -> bool { let value = true; value }\n",
     )
     .expect("source filtering fixture must be written");
     let configuration = fixture.join("filter.yml");
@@ -281,7 +371,7 @@ fn installed_command_filters_mutator_and_source_candidates() {
     let nested = fixture.join("checked").join("src").join("nested.rs");
     fs::write(
         &nested,
-        "pub fn outer() -> bool {\n    fn inner() -> bool { true }\n    true\n}\n",
+        "pub fn outer() -> bool {\n    fn inner() -> bool { let value = true; value }\n    let value = true;\n    value\n}\n",
     )
     .expect("nested function source must be written");
     let nested_match = Command::new(command_path(&install))
@@ -337,7 +427,7 @@ fn installed_command_filters_mutator_and_source_candidates() {
     let annotations = fixture.join("checked").join("src").join("annotations.rs");
     fs::write(
         &annotations,
-        "pub fn allowed() -> bool { true }\n\n// mutator-disable-func\npub fn function_all() -> bool { true }\n\n// mutator-disable-func conditional/bool-literal\n#[inline]\npub fn function_selected() -> bool { true }\n\n// mutator-disable-next-line\npub fn next_line_all() -> bool { true }\n\n// mutator-disable-next-line conditional/bool-literal\npub fn next_line_selected() -> bool { true }\n\n// mutator-disable-regexp regexp_all\npub fn regexp_all() -> bool { true }\n\n// mutator-disable-regexp regexp_selected conditional/bool-literal\npub fn regexp_selected() -> bool { true }\n",
+        "pub fn allowed() -> bool { let value = true; value }\n\n// mutator-disable-func\npub fn function_all() -> bool { let value = true; value }\n\n// mutator-disable-func conditional/bool-literal\n#[inline]\npub fn function_selected() -> bool { let value = true; value }\n\n// mutator-disable-next-line\npub fn next_line_all() -> bool { let value = true; value }\n\n// mutator-disable-next-line conditional/bool-literal\npub fn next_line_selected() -> bool { let value = true; value }\n\n// mutator-disable-regexp regexp_all\npub fn regexp_all() -> bool { let value = true; value }\n\n// mutator-disable-regexp regexp_selected conditional/bool-literal\npub fn regexp_selected() -> bool { let value = true; value }\n",
     )
     .expect("annotation fixture must be written");
     let annotations_elsewhere = fixture
@@ -346,7 +436,7 @@ fn installed_command_filters_mutator_and_source_candidates() {
         .join("annotations_elsewhere.rs");
     fs::write(
         &annotations_elsewhere,
-        "pub fn regexp_all_elsewhere() -> bool { true }\n",
+        "pub fn regexp_all_elsewhere() -> bool { let value = true; value }\n",
     )
     .expect("second annotation fixture must be written");
     let annotated = Command::new(command_path(&install))
@@ -570,7 +660,7 @@ fn installed_command_classifies_killed_and_escaped_mutants() {
     );
     assert_eq!(
         fs::read_to_string(source).expect("fixture source must remain readable"),
-        "pub fn checked() -> bool { true }\npub fn unchecked() -> bool { true }\n",
+        "pub fn checked() -> bool { let value = true; value }\npub fn unchecked() -> bool { let value = true; value }\n",
         "the mutation run must not change user source"
     );
     assert!(
@@ -666,8 +756,8 @@ fn installed_command_reports_stable_evidence_and_enforces_total_score() {
     assert_eq!(
         ids,
         vec![
-            "a4afb3df07ad704a7e118ca1f9c8ce1e".to_owned(),
-            "7e44f5b6649ca4de087acb260e75a287".to_owned(),
+            "4582b234c128077507b7558eb62c337e".to_owned(),
+            "c2b28e81b2cc0af0ff4a6a1225106223".to_owned(),
         ],
         "each mutant must have the Mutago-compatible stable ID: {stdout}"
     );
@@ -675,8 +765,8 @@ fn installed_command_reports_stable_evidence_and_enforces_total_score() {
         stdout.contains("--- checked/src/lib.rs")
             && stdout.contains("+++ checked/src/lib.rs")
             && stdout.contains("@@ -")
-            && stdout.contains("-pub fn unchecked() -> bool { true }")
-            && stdout.contains("+pub fn unchecked() -> bool { false }"),
+            && stdout.contains("-pub fn unchecked() -> bool { let value = true; value }")
+            && stdout.contains("+pub fn unchecked() -> bool { let value = false; value }"),
         "an escaped mutant must show a readable source diff: {stdout}"
     );
     assert!(
@@ -810,8 +900,8 @@ fn installed_command_manages_baselines_blacklists_and_one_mutant_ids() {
     let baseline_text = fs::read_to_string(&baseline).expect("baseline must be written");
     assert!(
         baseline_text.contains("\"version\": 1")
-            && baseline_text.contains("\"id\": \"a4afb3df07ad704a7e118ca1f9c8ce1e\"")
-            && baseline_text.contains("\"id\": \"7e44f5b6649ca4de087acb260e75a287\"")
+            && baseline_text.contains("\"id\": \"4582b234c128077507b7558eb62c337e\"")
+            && baseline_text.contains("\"id\": \"c2b28e81b2cc0af0ff4a6a1225106223\"")
             && baseline_text.contains("\"file\": \"checked/src/lib.rs\"")
             && baseline_text.contains("\"mutator\": \"conditional/bool-literal\"")
             && baseline_text.contains("\"line\": 1"),
@@ -862,7 +952,9 @@ fn installed_command_manages_baselines_blacklists_and_one_mutant_ids() {
 
     fs::write(
         &source,
-        format!("// unrelated source edit\n{original}pub fn new_escape() -> bool {{ true }}\n"),
+        format!(
+            "// unrelated source edit\n{original}pub fn new_escape() -> bool {{ let value = true; value }}\n"
+        ),
     )
     .expect("new escaping source must be written");
     let new_escape = Command::new(command_path(&install))
@@ -886,7 +978,7 @@ fn installed_command_manages_baselines_blacklists_and_one_mutant_ids() {
 
     fs::write(&source, &original).expect("fixture source must be restored");
     let blacklist = fixture.join("mutarust-blacklist.txt");
-    fs::write(&blacklist, "6f5d761468aaee678adf2d965e897fb7\n").expect("blacklist must be written");
+    fs::write(&blacklist, "c056b4a14386291b011db5e4053d8e58\n").expect("blacklist must be written");
     let blacklisted = Command::new(command_path(&install))
         .args([
             "--exec",
@@ -908,7 +1000,7 @@ fn installed_command_manages_baselines_blacklists_and_one_mutant_ids() {
             &String::from_utf8(blacklisted.stdout)
                 .expect("blacklisted mutation output must be UTF-8")
         ),
-        vec!["7e44f5b6649ca4de087acb260e75a287".to_owned()],
+        vec!["c2b28e81b2cc0af0ff4a6a1225106223".to_owned()],
         "the changed-line checksum must remove its accepted mutant"
     );
 
@@ -935,7 +1027,7 @@ fn installed_command_manages_baselines_blacklists_and_one_mutant_ids() {
             &String::from_utf8(blacklisted_after_edit.stdout)
                 .expect("edited blacklist mutation output must be UTF-8")
         ),
-        vec!["7e44f5b6649ca4de087acb260e75a287".to_owned()],
+        vec!["c2b28e81b2cc0af0ff4a6a1225106223".to_owned()],
         "the blacklist checksum must use only changed source lines"
     );
 
@@ -976,9 +1068,9 @@ fn installed_command_manages_baselines_blacklists_and_one_mutant_ids() {
     let duplicate = Command::new(command_path(&install))
         .args([
             "--run-mutant-id",
-            "a4afb3df07ad704a7e118ca1f9c8ce1e",
+            "4582b234c128077507b7558eb62c337e",
             "--run-mutant-id",
-            "7e44f5b6649ca4de087acb260e75a287",
+            "c2b28e81b2cc0af0ff4a6a1225106223",
         ])
         .arg(&source)
         .current_dir(&fixture)
@@ -1014,7 +1106,7 @@ fn installed_command_manages_baselines_blacklists_and_one_mutant_ids() {
     let duplicate_baseline = fixture.join("duplicate-baseline.json");
     fs::write(
         &duplicate_baseline,
-        "{\"version\":1,\"mutants\":[{\"id\":\"a4afb3df07ad704a7e118ca1f9c8ce1e\",\"file\":\"checked/src/lib.rs\",\"mutator\":\"conditional/bool-literal\",\"line\":1},{\"id\":\"a4afb3df07ad704a7e118ca1f9c8ce1e\",\"file\":\"checked/src/lib.rs\",\"mutator\":\"conditional/bool-literal\",\"line\":1}]}\n",
+        "{\"version\":1,\"mutants\":[{\"id\":\"4582b234c128077507b7558eb62c337e\",\"file\":\"checked/src/lib.rs\",\"mutator\":\"conditional/bool-literal\",\"line\":1},{\"id\":\"4582b234c128077507b7558eb62c337e\",\"file\":\"checked/src/lib.rs\",\"mutator\":\"conditional/bool-literal\",\"line\":1}]}\n",
     )
     .expect("duplicate baseline must be written");
     let duplicate_baseline_output = Command::new(command_path(&install))
@@ -1149,12 +1241,12 @@ fn installed_command_skips_mutants_that_do_not_compile() {
     let source = fixture.join("checked").join("src").join("lib.rs");
     fs::write(
         &source,
-        "pub struct Marker<const ENABLED: bool>;\npub fn marker() -> Marker<true> { Marker::<true> }\n",
+        "pub fn first() -> String { \"a\".to_owned() + \"b\" }\npub fn second() -> String { \"c\".to_owned() + \"d\" }\n",
     )
     .expect("compile rejection source must be written");
     fs::write(
         fixture.join("checked").join("tests").join("mutation.rs"),
-        "use mutation_checked::{marker, Marker};\n\n#[test]\nfn marker_is_enabled() {\n    let _: Marker<true> = marker();\n}\n",
+        "use mutation_checked::{first, second};\n\n#[test]\nfn strings_join() {\n    assert_eq!(first(), \"ab\");\n    assert_eq!(second(), \"cd\");\n}\n",
     )
     .expect("compile rejection test must be written");
 
@@ -1192,8 +1284,11 @@ fn installed_command_reports_a_failed_test_command_as_errored() {
     let install = install_command(&root);
     let fixture = write_mutation_fixture(&root);
     let source = fixture.join("checked").join("src").join("lib.rs");
-    fs::write(&source, "pub fn checked() -> bool { true }\n")
-        .expect("single-mutant source must be written");
+    fs::write(
+        &source,
+        "pub fn checked() -> bool { let value = true; value }\n",
+    )
+    .expect("single-mutant source must be written");
     let fake_cargo = root.join("vanishing-cargo");
     fs::write(
         &fake_cargo,
@@ -1241,7 +1336,7 @@ fn installed_command_preserves_existing_user_changes() {
     run_git(&fixture, &["commit", "-m", "fixture"]);
     fs::write(
         &source,
-        "pub fn checked() -> bool { true }\npub fn unchecked() -> bool { true }\n// tracked local source change\n",
+        "pub fn checked() -> bool { let value = true; value }\npub fn unchecked() -> bool { let value = true; value }\n// tracked local source change\n",
     )
     .expect("tracked source change must be written");
     fs::write(
@@ -1306,7 +1401,7 @@ fn installed_command_runs_external_source_with_local_dependency_and_configuratio
     );
     assert_eq!(
         fs::read_to_string(source).expect("external source must remain readable"),
-        "pub fn checked() -> bool { true }\npub fn unchecked() -> bool { true }\npub fn configured() -> bool { cfg!(config_check) }\npub fn local_value() -> u8 { local_support::value() }\n",
+        "pub fn checked() -> bool { let value = true; value }\npub fn unchecked() -> bool { let value = true; value }\npub fn configured() -> bool { cfg!(config_check) }\npub fn local_value() -> u8 { local_support::value() }\n",
         "the mutation run must not change the external user source"
     );
 }
@@ -1593,8 +1688,11 @@ fn installed_command_review_copies_a_source_directory_named_target() {
     )
     .expect("target module root must be written");
     let source = target_module.join("mod.rs");
-    fs::write(&source, "pub fn checked() -> bool { true }\n")
-        .expect("target module source must be written");
+    fs::write(
+        &source,
+        "pub fn checked() -> bool { let value = true; value }\n",
+    )
+    .expect("target module source must be written");
     let fake_cargo = root.join("cargo-target-module-check");
     fs::write(
         &fake_cargo,
@@ -1794,7 +1892,7 @@ fn installed_command_tests_one_mutation_per_temporary_workspace() {
     let record = root.join("mutant-tests");
     fs::write(
         &fake_cargo,
-        "#!/bin/sh\nif [ \"$1\" = \"metadata\" ]; then\n  exec \"$MUTARUST_REAL_CARGO\" \"$@\"\nfi\ncase \" $* \" in\n  *\" --no-run \"*) exec \"$MUTARUST_REAL_CARGO\" \"$@\" ;;\nesac\nif grep -q false checked/src/lib.rs 2>/dev/null; then\n  checked=true\n  unchecked=true\n  grep -q 'pub fn checked() -> bool { false }' checked/src/lib.rs && checked=false\n  grep -q 'pub fn unchecked() -> bool { false }' checked/src/lib.rs && unchecked=false\n  mode=$(stat -c %a \"$PWD\" 2>/dev/null || stat -f %Lp \"$PWD\")\n  printf '%s|%s|%s|%s\\n' \"$PWD\" \"$checked\" \"$unchecked\" \"$mode\" >> \"$MUTARUST_TEST_RECORD\"\nfi\nexec \"$MUTARUST_REAL_CARGO\" \"$@\"\n",
+        "#!/bin/sh\nif [ \"$1\" = \"metadata\" ]; then\n  exec \"$MUTARUST_REAL_CARGO\" \"$@\"\nfi\ncase \" $* \" in\n  *\" --no-run \"*) exec \"$MUTARUST_REAL_CARGO\" \"$@\" ;;\nesac\nif grep -q false checked/src/lib.rs 2>/dev/null; then\n  checked=true\n  unchecked=true\n  grep -q 'pub fn checked() -> bool { let value = false; value }' checked/src/lib.rs && checked=false\n  grep -q 'pub fn unchecked() -> bool { let value = false; value }' checked/src/lib.rs && unchecked=false\n  mode=$(stat -c %a \"$PWD\" 2>/dev/null || stat -f %Lp \"$PWD\")\n  printf '%s|%s|%s|%s\\n' \"$PWD\" \"$checked\" \"$unchecked\" \"$mode\" >> \"$MUTARUST_TEST_RECORD\"\nfi\nexec \"$MUTARUST_REAL_CARGO\" \"$@\"\n",
     )
     .expect("recording Cargo command must be written");
     fs::set_permissions(&fake_cargo, fs::Permissions::from_mode(0o755))
@@ -2202,7 +2300,7 @@ fn installed_command_collects_coverage_and_selects_covering_tests() {
     fs::create_dir(&temporary_root).expect("coverage temporary root must be created");
     fs::write(
         &fake_cargo,
-        "#!/bin/sh\nif [ \"$1\" = \"metadata\" ]; then\n  exec \"$MUTARUST_REAL_CARGO\" \"$@\"\nfi\nif [ \"$1\" = \"llvm-cov\" ]; then\n  output=\n  while [ \"$#\" -gt 0 ]; do\n    if [ \"$1\" = \"--output-path\" ]; then\n      output=$2\n      break\n    fi\n    shift\n  done\n  if [ \"$MUTARUST_COVERAGE_MODE\" = \"missing\" ]; then\n    exit 0\n  fi\n  if [ \"$MUTARUST_COVERAGE_MODE\" = \"invalid\" ]; then\n    printf 'SF:%s\\nDA:zero,one\\nend_of_record\\n' \"$MUTARUST_COVERAGE_SOURCE\" > \"$output\"\n    exit 0\n  fi\n  case \" $* \" in\n    *\" --exact detects_detected \"*) data='DA:1,1' ;;\n    *\" --exact detects_escaped \"*) data='DA:2,1' ;;\n    *) data='DA:1,1\\nDA:2,1\\nDA:3,0' ;;\n  esac\n  printf 'SF:%s\\n%b\\nend_of_record\\n' \"$MUTARUST_COVERAGE_SOURCE\" \"$data\" > \"$output\"\n  exit 0\nfi\ncase \" $* \" in\n  *\" --list \"*) printf 'detects_detected: test\\ndetects_escaped: test\\n'; exit 0 ;;\nesac\nif ! grep -q false checked/src/lib.rs 2>/dev/null; then\n  exit 0\nfi\nif grep -q 'pub fn detected() -> bool { false }' checked/src/lib.rs; then\n  mutant=detected\nelif grep -q 'pub fn escaped() -> bool { false }' checked/src/lib.rs; then\n  mutant=escaped\nelif grep -q 'pub fn uncovered() -> bool { false }' checked/src/lib.rs; then\n  mutant=uncovered\nelse\n  exit 94\nfi\nprintf '%s|%s\\n' \"$mutant\" \"$*\" >> \"$MUTARUST_COVERAGE_RECORD\"\ncase \" $* \" in\n  *\" --no-run \"*) exit 0 ;;\n  *\" --exact detects_detected \"*) exit 1 ;;\n  *\" --exact detects_escaped \"*) exit 0 ;;\n  *) exit 93 ;;\nesac\n",
+        "#!/bin/sh\nif [ \"$1\" = \"metadata\" ]; then\n  exec \"$MUTARUST_REAL_CARGO\" \"$@\"\nfi\nif [ \"$1\" = \"llvm-cov\" ]; then\n  output=\n  while [ \"$#\" -gt 0 ]; do\n    if [ \"$1\" = \"--output-path\" ]; then\n      output=$2\n      break\n    fi\n    shift\n  done\n  if [ \"$MUTARUST_COVERAGE_MODE\" = \"missing\" ]; then\n    exit 0\n  fi\n  if [ \"$MUTARUST_COVERAGE_MODE\" = \"invalid\" ]; then\n    printf 'SF:%s\\nDA:zero,one\\nend_of_record\\n' \"$MUTARUST_COVERAGE_SOURCE\" > \"$output\"\n    exit 0\n  fi\n  case \" $* \" in\n    *\" --exact detects_detected \"*) data='DA:1,1' ;;\n    *\" --exact detects_escaped \"*) data='DA:2,1' ;;\n    *) data='DA:1,1\\nDA:2,1\\nDA:3,0' ;;\n  esac\n  printf 'SF:%s\\n%b\\nend_of_record\\n' \"$MUTARUST_COVERAGE_SOURCE\" \"$data\" > \"$output\"\n  exit 0\nfi\ncase \" $* \" in\n  *\" --list \"*) printf 'detects_detected: test\\ndetects_escaped: test\\n'; exit 0 ;;\nesac\nif ! grep -q false checked/src/lib.rs 2>/dev/null; then\n  exit 0\nfi\nif grep -q 'pub fn detected() -> bool { let value = false; value }' checked/src/lib.rs; then\n  mutant=detected\nelif grep -q 'pub fn escaped() -> bool { let value = false; value }' checked/src/lib.rs; then\n  mutant=escaped\nelif grep -q 'pub fn uncovered() -> bool { let value = false; value }' checked/src/lib.rs; then\n  mutant=uncovered\nelse\n  exit 94\nfi\nprintf '%s|%s\\n' \"$mutant\" \"$*\" >> \"$MUTARUST_COVERAGE_RECORD\"\ncase \" $* \" in\n  *\" --no-run \"*) exit 0 ;;\n  *\" --exact detects_detected \"*) exit 1 ;;\n  *\" --exact detects_escaped \"*) exit 0 ;;\n  *) exit 93 ;;\nesac\n",
     )
     .expect("coverage Cargo command must be written");
     fs::set_permissions(&fake_cargo, fs::Permissions::from_mode(0o755))
@@ -2327,15 +2425,15 @@ fn installed_command_isolates_full_and_per_test_coverage() {
     fs::create_dir(&temporary_root).expect("shared coverage temporary root must be created");
     fs::write(
         &fake_cargo,
-        "#!/bin/sh\nif [ \"$1\" = \"metadata\" ]; then\n  exec \"$MUTARUST_REAL_CARGO\" \"$@\"\nfi\nall=\"$*\"\nif [ \"$1\" = \"llvm-cov\" ]; then\n  case \" $all \" in\n    *\" --exact \"*) [ \"$2\" = test ] || exit 95 ;;\n  esac\n  output=\n  while [ \"$#\" -gt 0 ]; do\n    if [ \"$1\" = \"--output-path\" ]; then\n      output=$2\n      break\n    fi\n    shift\n  done\n  touch Cargo.lock\n  case \" $all \" in\n    *\" --test left \"*\" --exact shared \"*) data='DA:1,1' ;;\n    *\" --test right \"*\" --exact shared \"*) data='DA:2,1' ;;\n    *\" --exact detects_left \"*) data='DA:3,1' ;;\n    *\" --exact detects_right \"*) data='DA:3,1' ;;\n    *) data='DA:1,1\\nDA:2,1\\nDA:3,1' ;;\n  esac\n  printf 'SF:%s\\n%b\\nend_of_record\\n' \"$MUTARUST_COVERAGE_SOURCE\" \"$data\" > \"$output\"\n  exit 0\nfi\ncase \" $all \" in\n  *\" --test left \"*\" --list \"*) printf 'shared: test\\ndetects_left: test\\n'; exit 0 ;;\n  *\" --test right \"*\" --list \"*) printf 'shared: test\\ndetects_right: test\\n'; exit 0 ;;\n  *\" --list \"*) exit 0 ;;\nesac\ncase \" $all \" in\n  *\" --no-run \"*) exit 0 ;;\nesac\nif grep -q 'pub fn first() -> bool { false }' checked/src/lib.rs; then\n  mutant=first\nelif grep -q 'pub fn second() -> bool { false }' checked/src/lib.rs; then\n  mutant=second\nelif grep -q 'pub fn shared() -> bool { false }' checked/src/lib.rs; then\n  mutant=shared\nelse\n  exit 94\nfi\nprintf '%s|%s\\n' \"$mutant\" \"$all\" >> \"$MUTARUST_COVERAGE_RECORD\"\ncase \"$mutant|$all\" in\n  first*\" --test left \"*\" --exact shared \"*) exit 1 ;;\n  second*\" --test right \"*\" --exact shared \"*) exit 1 ;;\n  shared*\" --exact detects_left \"*) exit 0 ;;\n  shared*\" --exact detects_right \"*) exit 0 ;;\n  *) exit 93 ;;\nesac\n",
+        "#!/bin/sh\nif [ \"$1\" = \"metadata\" ]; then\n  exec \"$MUTARUST_REAL_CARGO\" \"$@\"\nfi\nall=\"$*\"\nif [ \"$1\" = \"llvm-cov\" ]; then\n  case \" $all \" in\n    *\" --exact \"*) [ \"$2\" = test ] || exit 95 ;;\n  esac\n  output=\n  while [ \"$#\" -gt 0 ]; do\n    if [ \"$1\" = \"--output-path\" ]; then\n      output=$2\n      break\n    fi\n    shift\n  done\n  touch Cargo.lock\n  case \" $all \" in\n    *\" --test left \"*\" --exact shared \"*) data='DA:1,1' ;;\n    *\" --test right \"*\" --exact shared \"*) data='DA:2,1' ;;\n    *\" --exact detects_left \"*) data='DA:3,1' ;;\n    *\" --exact detects_right \"*) data='DA:3,1' ;;\n    *) data='DA:1,1\\nDA:2,1\\nDA:3,1' ;;\n  esac\n  printf 'SF:%s\\n%b\\nend_of_record\\n' \"$MUTARUST_COVERAGE_SOURCE\" \"$data\" > \"$output\"\n  exit 0\nfi\ncase \" $all \" in\n  *\" --test left \"*\" --list \"*) printf 'shared: test\\ndetects_left: test\\n'; exit 0 ;;\n  *\" --test right \"*\" --list \"*) printf 'shared: test\\ndetects_right: test\\n'; exit 0 ;;\n  *\" --list \"*) exit 0 ;;\nesac\ncase \" $all \" in\n  *\" --no-run \"*) exit 0 ;;\nesac\nif grep -q 'pub fn first() -> bool { let value = false; value }' checked/src/lib.rs; then\n  mutant=first\nelif grep -q 'pub fn second() -> bool { let value = false; value }' checked/src/lib.rs; then\n  mutant=second\nelif grep -q 'pub fn shared() -> bool { let value = false; value }' checked/src/lib.rs; then\n  mutant=shared\nelse\n  exit 94\nfi\nprintf '%s|%s\\n' \"$mutant\" \"$all\" >> \"$MUTARUST_COVERAGE_RECORD\"\ncase \"$mutant|$all\" in\n  first*\" --test left \"*\" --exact shared \"*) exit 1 ;;\n  second*\" --test right \"*\" --exact shared \"*) exit 1 ;;\n  shared*\" --exact detects_left \"*) exit 0 ;;\n  shared*\" --exact detects_right \"*) exit 0 ;;\n  *) exit 93 ;;\nesac\n",
     )
     .expect("shared coverage Cargo command must be written");
     let fake_cargo_script =
         fs::read_to_string(&fake_cargo).expect("shared coverage Cargo command must be readable");
     let fake_cargo_script = fake_cargo_script
         .replacen(
-            "if grep -q 'pub fn first() -> bool { false }' checked/src/lib.rs; then",
-            "case \" $all \" in\n  *\" --exact \"*) ;;\n  *) exit 0 ;;\nesac\nif grep -q 'pub fn first() -> bool { false }' checked/src/lib.rs; then",
+            "if grep -q 'pub fn first() -> bool { let value = false; value }' checked/src/lib.rs; then",
+            "case \" $all \" in\n  *\" --exact \"*) ;;\n  *) exit 0 ;;\nesac\nif grep -q 'pub fn first() -> bool { let value = false; value }' checked/src/lib.rs; then",
             1,
         )
         .replace(
@@ -2789,7 +2887,7 @@ fn installed_command_stops_test_at_interrupt() {
     run_git(&fixture, &["commit", "-m", "fixture"]);
     fs::write(
         &source,
-        "pub fn checked() -> bool { true }\npub fn unchecked() -> bool { true }\n// interrupted source change\n",
+        "pub fn checked() -> bool { let value = true; value }\npub fn unchecked() -> bool { let value = true; value }\n// interrupted source change\n",
     )
     .expect("interrupted source change must be written");
     fs::write(
@@ -2888,8 +2986,11 @@ fn installed_command_stops_test_at_interrupt() {
     let source = fixture.join("checked").join("src").join("lib.rs");
     let test = fixture.join("checked").join("tests").join("mutation.rs");
     let marker = root.join("windows-interrupt-workspace");
-    fs::write(&source, "pub fn checked() -> bool { true }\n")
-        .expect("interrupt source must be written");
+    fs::write(
+        &source,
+        "pub fn checked() -> bool { let value = true; value }\n",
+    )
+    .expect("interrupt source must be written");
     fs::write(
         &test,
         "#[test]\nfn blocks_on_the_mutant() {\n    if !mutation_checked::checked() {\n        std::fs::write(std::env::var_os(\"MUTARUST_INTERRUPT_MARKER\").unwrap(), env!(\"CARGO_MANIFEST_DIR\")).unwrap();\n        std::thread::sleep(std::time::Duration::from_secs(30));\n    }\n}\n",
@@ -2956,7 +3057,7 @@ fn packaged_library_builds_a_custom_mutator() {
     .expect("downstream manifest must be written");
     fs::write(
         downstream.join("src").join("main.rs"),
-        "use mutarust::{Mutation, Mutator, Registry, RegistryBuilder};\n\nstruct Custom;\nstruct Invalid;\n\nimpl Mutator for Custom {\n    fn name(&self) -> &str { \"custom/no-op\" }\n\n    fn mutations(&self, _source: &str) -> Vec<Mutation> { Vec::new() }\n}\n\nimpl Mutator for Invalid {\n    fn name(&self) -> &str { \"Custom\" }\n\n    fn mutations(&self, _source: &str) -> Vec<Mutation> { Vec::new() }\n}\n\nfn mutate(registry: &Registry, source: &str) -> String {\n    let mutation = registry.get(\"conditional/bool-literal\").expect(\"built-in mutator must exist\").mutations(source).pop().expect(\"boolean must mutate\");\n    mutation.apply(source).expect(\"mutation must apply\")\n}\n\nfn main() {\n    let registry = RegistryBuilder::with_builtins().register(Custom).expect(\"custom mutator must register\").build();\n    assert_eq!(registry.names().collect::<Vec<_>>(), vec![\"conditional/bool-literal\", \"custom/no-op\"]);\n    let duplicate = RegistryBuilder::new().register(Custom).expect(\"first custom mutator must register\").register(Custom).err().expect(\"duplicate must fail\");\n    assert_eq!(duplicate.to_string(), \"duplicate mutator name: custom/no-op\");\n    let invalid = RegistryBuilder::new().register(Invalid).err().expect(\"invalid name must fail\");\n    assert_eq!(invalid.to_string(), \"invalid mutator name: Custom\");\n    assert_eq!(mutate(&registry, \"fn enabled() -> bool { true }\"), \"fn enabled() -> bool { false }\");\n    assert_eq!(mutate(&registry, \"fn enabled() -> bool { let label = \\\"é\\\"; true }\"), \"fn enabled() -> bool { let label = \\\"é\\\"; false }\");\n    assert_eq!(mutate(&registry, \"fn check() { assert!(true); }\"), \"fn check() { assert!(false); }\");\n    println!(\"custom mutator works\");\n}\n",
+        "use mutarust::{Mutation, Mutator, Registry, RegistryBuilder};\n\nstruct Custom;\nstruct Invalid;\n\nimpl Mutator for Custom {\n    fn name(&self) -> &str { \"custom/no-op\" }\n\n    fn mutations(&self, _source: &str) -> Vec<Mutation> { Vec::new() }\n}\n\nimpl Mutator for Invalid {\n    fn name(&self) -> &str { \"Custom\" }\n\n    fn mutations(&self, _source: &str) -> Vec<Mutation> { Vec::new() }\n}\n\nfn mutate(registry: &Registry, source: &str) -> String {\n    let mutation = registry.get(\"conditional/bool-literal\").expect(\"built-in mutator must exist\").mutations(source).pop().expect(\"boolean must mutate\");\n    mutation.apply(source).expect(\"mutation must apply\")\n}\n\nfn main() {\n    let registry = RegistryBuilder::with_builtins().register(Custom).expect(\"custom mutator must register\").build();\n    assert_eq!(registry.names().collect::<Vec<_>>(), vec![\"arithmetic/assign_invert\", \"arithmetic/assignment\", \"arithmetic/base\", \"arithmetic/bitwise\", \"arithmetic/negate\", \"conditional/bool-literal\", \"conditional/negated\", \"conditional/not\", \"custom/no-op\", \"expression/comparison\", \"expression/logical\", \"expression/string-literal\", \"numbers/decrementer\", \"numbers/float-negate\", \"numbers/incrementer\"]);\n    let duplicate = RegistryBuilder::new().register(Custom).expect(\"first custom mutator must register\").register(Custom).err().expect(\"duplicate must fail\");\n    assert_eq!(duplicate.to_string(), \"duplicate mutator name: custom/no-op\");\n    let invalid = RegistryBuilder::new().register(Invalid).err().expect(\"invalid name must fail\");\n    assert_eq!(invalid.to_string(), \"invalid mutator name: Custom\");\n    assert_eq!(mutate(&registry, \"fn enabled() -> bool { let enabled = true; enabled }\"), \"fn enabled() -> bool { let enabled = false; enabled }\");\n    assert_eq!(mutate(&registry, \"fn enabled() -> bool { let label = \\\"é\\\"; let enabled = true; enabled }\"), \"fn enabled() -> bool { let label = \\\"é\\\"; let enabled = false; enabled }\");\n    assert!(registry.get(\"conditional/bool-literal\").unwrap().mutations(\"fn check() { assert!(true); }\").is_empty());\n    println!(\"custom mutator works\");\n}\n",
     )
     .expect("downstream source must be written");
 
@@ -3600,23 +3701,55 @@ fn installed_command_selects_git_merge_base_and_uncommitted_changes() {
     let root = smoke_root();
     let install = install_command(&root);
     let fixture = git_mutation_fixture(&root, "merge-base", "main");
-    let a = write_git_source(&fixture, "src/a.rs", "pub fn a() -> bool { true }\n");
-    let b = write_git_source(&fixture, "src/b.rs", "pub fn b() -> bool { true }\n");
-    let c = write_git_source(&fixture, "src/c.rs", "pub fn c() -> bool { true }\n");
-    let d = write_git_source(&fixture, "src/d.rs", "pub fn d() -> bool { true }\n");
+    let a = write_git_source(
+        &fixture,
+        "src/a.rs",
+        "pub fn a() -> bool { let value = true; value }\n",
+    );
+    let b = write_git_source(
+        &fixture,
+        "src/b.rs",
+        "pub fn b() -> bool { let value = true; value }\n",
+    );
+    let c = write_git_source(
+        &fixture,
+        "src/c.rs",
+        "pub fn c() -> bool { let value = true; value }\n",
+    );
+    let d = write_git_source(
+        &fixture,
+        "src/d.rs",
+        "pub fn d() -> bool { let value = true; value }\n",
+    );
     commit_all(&fixture, "base");
     run_git(&fixture, &["switch", "-c", "feature"]);
 
     run_git(&fixture, &["switch", "main"]);
-    write_git_source(&fixture, "src/b.rs", "pub fn b() -> bool { false }\n");
+    write_git_source(
+        &fixture,
+        "src/b.rs",
+        "pub fn b() -> bool { let value = false; value }\n",
+    );
     commit_all(&fixture, "base moves ahead");
     run_git(&fixture, &["switch", "feature"]);
 
-    write_git_source(&fixture, "src/c.rs", "pub fn c() -> bool { false }\n");
+    write_git_source(
+        &fixture,
+        "src/c.rs",
+        "pub fn c() -> bool { let value = false; value }\n",
+    );
     commit_all(&fixture, "feature commit");
-    write_git_source(&fixture, "src/d.rs", "pub fn d() -> bool { false }\n");
+    write_git_source(
+        &fixture,
+        "src/d.rs",
+        "pub fn d() -> bool { let value = false; value }\n",
+    );
     run_git(&fixture, &["add", "src/d.rs"]);
-    write_git_source(&fixture, "src/a.rs", "pub fn a() -> bool { false }\n");
+    write_git_source(
+        &fixture,
+        "src/a.rs",
+        "pub fn a() -> bool { let value = false; value }\n",
+    );
 
     for source in [&a, &c, &d] {
         assert_dry_run_total(&git_dry_run(&install, &fixture, Some("main"), source), 1);
@@ -3636,7 +3769,11 @@ fn installed_command_uses_git_remote_default_and_master_fallback() {
     );
 
     let seed = git_mutation_fixture(&root, "remote-seed", "trunk");
-    write_git_source(&seed, "src/lib.rs", "pub fn value() -> bool { true }\n");
+    write_git_source(
+        &seed,
+        "src/lib.rs",
+        "pub fn value() -> bool { let value = true; value }\n",
+    );
     commit_all(&seed, "seed");
     run_git(&seed, &["remote", "add", "origin", remote_text]);
     run_git(&seed, &["push", "--set-upstream", "origin", "trunk"]);
@@ -3645,19 +3782,25 @@ fn installed_command_uses_git_remote_default_and_master_fallback() {
     let clone_text = clone.to_str().expect("clone path must be UTF-8");
     run_git(&root, &["clone", remote_text, clone_text]);
     run_git(&clone, &["switch", "-c", "feature"]);
-    let remote_source =
-        write_git_source(&clone, "src/lib.rs", "pub fn value() -> bool { false }\n");
+    let remote_source = write_git_source(
+        &clone,
+        "src/lib.rs",
+        "pub fn value() -> bool { let value = false; value }\n",
+    );
     assert_dry_run_total(&git_dry_run(&install, &clone, None, &remote_source), 1);
 
     let fallback = git_mutation_fixture(&root, "master-fallback", "master");
-    let fallback_source =
-        write_git_source(&fallback, "src/lib.rs", "pub fn value() -> bool { true }\n");
+    let fallback_source = write_git_source(
+        &fallback,
+        "src/lib.rs",
+        "pub fn value() -> bool { let value = true; value }\n",
+    );
     commit_all(&fallback, "base");
     run_git(&fallback, &["switch", "-c", "feature"]);
     write_git_source(
         &fallback,
         "src/lib.rs",
-        "pub fn value() -> bool { false }\n",
+        "pub fn value() -> bool { let value = false; value }\n",
     );
     assert_dry_run_total(&git_dry_run(&install, &fallback, None, &fallback_source), 1);
 }
@@ -3668,11 +3811,18 @@ fn installed_command_selects_added_and_renamed_git_source_files() {
     let install = install_command(&root);
 
     let added = git_mutation_fixture(&root, "added", "main");
-    write_git_source(&added, "src/lib.rs", "pub fn base() -> bool { true }\n");
+    write_git_source(
+        &added,
+        "src/lib.rs",
+        "pub fn base() -> bool { let value = true; value }\n",
+    );
     commit_all(&added, "base");
     run_git(&added, &["switch", "-c", "feature"]);
-    let added_source =
-        write_git_source(&added, "src/added.rs", "pub fn added() -> bool { true }\n");
+    let added_source = write_git_source(
+        &added,
+        "src/added.rs",
+        "pub fn added() -> bool { let value = true; value }\n",
+    );
     run_git(&added, &["add", "src/added.rs"]);
     assert_dry_run_total(
         &git_dry_run(&install, &added, Some("main"), &added_source),
@@ -3683,7 +3833,7 @@ fn installed_command_selects_added_and_renamed_git_source_files() {
     let old = write_git_source(
         &renamed,
         "src/old.rs",
-        "pub fn changed() -> bool { true }\npub fn one() -> bool { true }\npub fn two() -> bool { true }\npub fn three() -> bool { true }\npub fn four() -> bool { true }\n",
+        "pub fn changed() -> bool { let value = true; value }\npub fn one() -> bool { let value = true; value }\npub fn two() -> bool { let value = true; value }\npub fn three() -> bool { let value = true; value }\npub fn four() -> bool { let value = true; value }\n",
     );
     commit_all(&renamed, "base");
     run_git(&renamed, &["switch", "-c", "feature"]);
@@ -3702,7 +3852,7 @@ fn installed_command_selects_added_and_renamed_git_source_files() {
     assert_dry_run_total(&git_dry_run(&install, &renamed, Some("main"), &new), 0);
     fs::write(
         &new,
-        "pub fn changed() -> bool { false }\npub fn one() -> bool { true }\npub fn two() -> bool { true }\npub fn three() -> bool { true }\npub fn four() -> bool { true }\n",
+        "pub fn changed() -> bool { let value = false; value }\npub fn one() -> bool { let value = true; value }\npub fn two() -> bool { let value = true; value }\npub fn three() -> bool { let value = true; value }\npub fn four() -> bool { let value = true; value }\n",
     )
     .expect("renamed Git source must be written");
     run_git(&renamed, &["add", "src/new.rs"]);
@@ -3718,14 +3868,14 @@ fn installed_command_ignores_deleted_git_lines_and_selects_multiple_hunks() {
     let deleted_source = write_git_source(
         &deleted,
         "src/lib.rs",
-        "pub fn deleted() -> bool { true }\npub fn retained() -> bool { true }\n",
+        "pub fn deleted() -> bool { let value = true; value }\npub fn retained() -> bool { let value = true; value }\n",
     );
     commit_all(&deleted, "base");
     run_git(&deleted, &["switch", "-c", "feature"]);
     write_git_source(
         &deleted,
         "src/lib.rs",
-        "pub fn retained() -> bool { true }\n",
+        "pub fn retained() -> bool { let value = true; value }\n",
     );
     run_git(&deleted, &["add", "src/lib.rs"]);
     assert_dry_run_total(
@@ -3737,14 +3887,14 @@ fn installed_command_ignores_deleted_git_lines_and_selects_multiple_hunks() {
     let hunk_source = write_git_source(
         &hunks,
         "src/lib.rs",
-        "pub fn first() -> bool { true }\npub fn keep_one() -> bool { true }\npub fn keep_two() -> bool { true }\npub fn keep_three() -> bool { true }\npub fn second() -> bool { true }\n",
+        "pub fn first() -> bool { let value = true; value }\npub fn keep_one() -> bool { let value = true; value }\npub fn keep_two() -> bool { let value = true; value }\npub fn keep_three() -> bool { let value = true; value }\npub fn second() -> bool { let value = true; value }\n",
     );
     commit_all(&hunks, "base");
     run_git(&hunks, &["switch", "-c", "feature"]);
     write_git_source(
         &hunks,
         "src/lib.rs",
-        "pub fn first() -> bool { false }\npub fn keep_one() -> bool { true }\npub fn keep_two() -> bool { true }\npub fn keep_three() -> bool { true }\npub fn second() -> bool { false }\n",
+        "pub fn first() -> bool { let value = false; value }\npub fn keep_one() -> bool { let value = true; value }\npub fn keep_two() -> bool { let value = true; value }\npub fn keep_three() -> bool { let value = true; value }\npub fn second() -> bool { let value = false; value }\n",
     );
     assert_dry_run_total(
         &git_dry_run(&install, &hunks, Some("main"), &hunk_source),
@@ -3757,7 +3907,11 @@ fn installed_command_succeeds_when_git_diff_has_no_mutable_lines() {
     let root = smoke_root();
     let install = install_command(&root);
     let fixture = git_mutation_fixture(&root, "no-mutants", "main");
-    let source = write_git_source(&fixture, "src/lib.rs", "pub fn value() -> bool { true }\n");
+    let source = write_git_source(
+        &fixture,
+        "src/lib.rs",
+        "pub fn value() -> bool { let value = true; value }\n",
+    );
     commit_all(&fixture, "base");
     run_git(&fixture, &["switch", "-c", "feature"]);
     fs::write(fixture.join("README.md"), "Changed documentation.\n")
@@ -4036,7 +4190,7 @@ fn write_mutation_fixture(root: &Path) -> PathBuf {
     .expect("checked mutation fixture manifest must be written");
     fs::write(
         fixture.join("checked").join("src").join("lib.rs"),
-        "pub fn checked() -> bool { true }\npub fn unchecked() -> bool { true }\n",
+        "pub fn checked() -> bool { let value = true; value }\npub fn unchecked() -> bool { let value = true; value }\n",
     )
     .expect("mutation fixture source must be written");
     fs::write(
@@ -4062,6 +4216,35 @@ fn write_mutation_fixture(root: &Path) -> PathBuf {
     fixture
 }
 
+fn write_expression_fixture(root: &Path) -> PathBuf {
+    let fixture = root.join("expression-fixture");
+    fs::create_dir_all(fixture.join("src"))
+        .expect("expression fixture source directory must be created");
+    fs::create_dir_all(fixture.join("tests"))
+        .expect("expression fixture test directory must be created");
+    fs::write(
+        fixture.join("Cargo.toml"),
+        include_str!("fixtures/expression/Cargo.toml"),
+    )
+    .expect("expression fixture manifest must be written");
+    fs::write(
+        fixture.join("src").join("lib.rs"),
+        include_str!("fixtures/expression/src/lib.rs"),
+    )
+    .expect("expression fixture source must be written");
+    fs::write(
+        fixture.join("tests").join("expression.rs"),
+        include_str!("fixtures/expression/tests/expression.rs"),
+    )
+    .expect("expression fixture tests must be written");
+    fs::write(
+        fixture.join("expected-mutants.txt"),
+        include_str!("fixtures/expression/expected-mutants.txt"),
+    )
+    .expect("expected expression mutants must be written");
+    fixture
+}
+
 fn write_coverage_fixture(root: &Path) -> PathBuf {
     let fixture = root.join("coverage-fixture");
     let package = fixture.join("checked");
@@ -4079,7 +4262,7 @@ fn write_coverage_fixture(root: &Path) -> PathBuf {
     .expect("coverage fixture package manifest must be written");
     fs::write(
         package.join("src").join("lib.rs"),
-        "pub fn detected() -> bool { true }\npub fn escaped() -> bool { true }\npub fn uncovered() -> bool { true }\n",
+        "pub fn detected() -> bool { let value = true; value }\npub fn escaped() -> bool { let value = true; value }\npub fn uncovered() -> bool { let value = true; value }\n",
     )
     .expect("coverage fixture source must be written");
     fixture
@@ -4104,7 +4287,7 @@ fn write_shared_coverage_fixture(root: &Path) -> PathBuf {
     .expect("shared coverage fixture package manifest must be written");
     fs::write(
         package.join("src").join("lib.rs"),
-        "pub fn first() -> bool { true }\npub fn second() -> bool { true }\npub fn shared() -> bool { true }\n",
+        "pub fn first() -> bool { let value = true; value }\npub fn second() -> bool { let value = true; value }\npub fn shared() -> bool { let value = true; value }\n",
     )
     .expect("shared coverage fixture source must be written");
     fs::write(
@@ -4143,7 +4326,7 @@ fn write_external_mutation_fixture(root: &Path) -> PathBuf {
     .expect("external fixture package manifest must be written");
     fs::write(
         external.join("lib.rs"),
-        "pub fn checked() -> bool { true }\npub fn unchecked() -> bool { true }\npub fn configured() -> bool { cfg!(config_check) }\npub fn local_value() -> u8 { local_support::value() }\n",
+        "pub fn checked() -> bool { let value = true; value }\npub fn unchecked() -> bool { let value = true; value }\npub fn configured() -> bool { cfg!(config_check) }\npub fn local_value() -> u8 { local_support::value() }\n",
     )
     .expect("external fixture source must be written");
     fs::write(

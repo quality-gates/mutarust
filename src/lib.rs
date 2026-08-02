@@ -7,6 +7,7 @@ mod coverage;
 mod discovery;
 mod evidence;
 mod execution;
+mod expression;
 mod filter;
 mod git;
 mod mutator;
