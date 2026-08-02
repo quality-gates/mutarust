@@ -69,6 +69,13 @@ fn concurrency_accepts_root_paths_but_rejects_ambiguous_thread_imports() {
 }
 
 #[test]
+fn concurrency_rejects_root_paths_rebound_by_crate_root_aliases() {
+    let source = "extern crate fake_std as std; extern crate fake_tokio as tokio; mod nested { fn work() {} async fn future() {} fn run() { ::std::thread::spawn(work); } async fn async_run() { ::tokio::spawn(future()); { ::tokio::task::spawn(future()); } } }";
+
+    assert!(changed_sources("concurrency/goroutine-remove", source).is_empty());
+}
+
+#[test]
 fn concurrency_rejects_spawn_results_methods_and_unsupported_runtimes() {
     let source = "fn work() {} async fn future() {} fn run() -> std::thread::JoinHandle<()> { let _handle = std::thread::spawn(work); std::thread::Builder::new().spawn(work).unwrap(); rayon::spawn(work); std::thread::spawn(work) } async fn async_run() { let _handle = tokio::spawn(future()); tokio::task::spawn_blocking(work); async_std::task::spawn(future()); }";
 
@@ -229,12 +236,20 @@ fn selection_accepts_a_root_qualified_tokio_macro_through_a_shadow() {
 }
 
 #[test]
+fn selection_rejects_a_root_path_rebound_by_a_crate_root_alias() {
+    let source = "extern crate fake_tokio as tokio; mod nested { async fn run() { { ::tokio::select! { _ = first() => one(), _ = second() => two(), } } } }";
+
+    assert!(changed_sources("select/case-remove", source).is_empty());
+    assert!(changed_sources("select/default-remove", source).is_empty());
+}
+
+#[test]
 fn concurrency_selection_fixture_candidate_oracle_is_current() {
     let source = include_str!("fixtures/concurrency-selection/src/lib.rs");
     let expected = include_str!("fixtures/concurrency-selection/expected-mutants.txt");
     let states = [
-        "Killed", "Killed", "Escaped", "Killed", "Killed", "Killed", "Killed", "Escaped", "Killed",
-        "Killed", "Killed", "Killed", "Killed",
+        "Killed", "Killed", "Escaped", "Killed", "Killed", "Killed", "Killed", "Killed", "Killed",
+        "Escaped", "Killed", "Killed", "Killed", "Killed", "Killed",
     ];
     let registry = mutarust::Registry::builtins();
     let mut state_index = 0;

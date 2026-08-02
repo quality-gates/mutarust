@@ -8,7 +8,7 @@ fn detects_standard_thread_mutations() {
 async fn detects_task_and_selection_mutations() {
     assert_eq!(
         concurrency_selection_mutator_fixture::task_spawns_use_new_tasks().await,
-        [false; 4]
+        [false; 6]
     );
     assert_eq!(
         concurrency_selection_mutator_fixture::select_value(0).await,

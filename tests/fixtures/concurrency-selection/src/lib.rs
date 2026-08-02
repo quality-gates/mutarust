@@ -37,7 +37,7 @@ pub fn standard_spawns_use_new_threads() -> [bool; 3] {
     ]
 }
 
-pub async fn task_spawns_use_new_tasks() -> [bool; 4] {
+pub async fn task_spawns_use_new_tasks() -> [bool; 6] {
     TASK_MARKER
         .scope((), async {
             let (direct_send, direct_receive) = tokio::sync::oneshot::channel();
@@ -60,11 +60,31 @@ pub async fn task_spawns_use_new_tasks() -> [bool; 4] {
                 root_task_send.send(TASK_MARKER.try_with(|_| true).unwrap_or(false)).unwrap();
             });
 
+            let from_closure = (async || {
+                let (send, receive) = tokio::sync::oneshot::channel();
+                tokio::spawn(async move {
+                    send.send(TASK_MARKER.try_with(|_| true).unwrap_or(false)).unwrap();
+                });
+                receive.await.unwrap()
+            })()
+            .await;
+
+            let from_block = async {
+                let (send, receive) = tokio::sync::oneshot::channel();
+                tokio::task::spawn(async move {
+                    send.send(TASK_MARKER.try_with(|_| true).unwrap_or(false)).unwrap();
+                });
+                receive.await.unwrap()
+            }
+            .await;
+
             [
                 direct_receive.await.unwrap(),
                 root_receive.await.unwrap(),
                 task_receive.await.unwrap(),
                 root_task_receive.await.unwrap(),
+                from_closure,
+                from_block,
             ]
         })
         .await

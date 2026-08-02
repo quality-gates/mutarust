@@ -173,6 +173,7 @@ fn assert_control_flow_oracle(fixture: &Path, source: &[u8], stdout: &str) {
     ];
     let mut actual = Vec::new();
     let mut changed_sources = BTreeSet::new();
+    let mut duplicate_count = 0;
     let mut state_index = 0;
     for name in names {
         for mutation in registry.get(name).unwrap().mutations(&source) {
@@ -180,6 +181,7 @@ fn assert_control_flow_oracle(fixture: &Path, source: &[u8], stdout: &str) {
                 .apply(&source)
                 .expect("control-flow mutation range must be valid");
             if !changed_sources.insert(changed_source) {
+                duplicate_count += 1;
                 continue;
             }
             let (range, replacement) = mutation.identity();
@@ -194,6 +196,10 @@ fn assert_control_flow_oracle(fixture: &Path, source: &[u8], stdout: &str) {
             state_index += 1;
         }
     }
+    assert_eq!(
+        duplicate_count, 1,
+        "the installed command fixture must contain one cross-mutator duplicate"
+    );
     assert_eq!(state_index, results.len());
     assert_eq!(actual.join("\n") + "\n", expected);
 }
@@ -405,12 +411,12 @@ fn installed_command_classifies_concurrency_and_selection_fixture_mutants() {
     );
     let stdout = String::from_utf8(output.stdout).expect("concurrency output must be UTF-8");
     assert!(
-        stdout.contains("Killed: 11")
+        stdout.contains("Killed: 13")
             && stdout.contains("Escaped: 2")
             && stdout.contains("Errored: 0")
             && stdout.contains("Skipped: 0")
-            && stdout.contains("Total: 13")
-            && stdout.contains("concurrency/goroutine-remove | 6 | 1 | 0 | 7")
+            && stdout.contains("Total: 15")
+            && stdout.contains("concurrency/goroutine-remove | 8 | 1 | 0 | 9")
             && stdout.contains("select/case-remove | 3 | 1 | 0 | 4")
             && stdout.contains("select/default-remove | 2 | 0 | 0 | 2"),
         "the fixture must classify each concurrency and selection mutant: {stdout}"
@@ -425,6 +431,8 @@ fn installed_command_classifies_concurrency_and_selection_fixture_mutants() {
             "7e46fea7c893afcf1266055160731272",
             "008c257b53da2c9e02eb85fe124aa440",
             "b271fa942ec99f38515ffb2cb31737f9",
+            "7d5c591835ce42b8f19aefa5b517c69e",
+            "dfbc1564e0bfd5bc7436fea6a9c7c520",
             "025ae38052f5cdfc073e9d11368f082d",
             "a5002ed7f2f8e877fa36a1bec33278a6",
             "0370f0994b87087371d98c5fa2653b27",
