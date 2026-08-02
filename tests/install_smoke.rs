@@ -108,6 +108,311 @@ fn installed_command_lists_builtin_mutators() {
 }
 
 #[test]
+fn installed_command_prints_help_with_no_arguments() {
+    let root = smoke_root();
+    let install = install_command(&root);
+
+    let output = Command::new(command_path(&install))
+        .output()
+        .expect("installed mutarust must start");
+
+    assert!(output.status.success(), "no-argument help must succeed");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Mutation testing for Rust"),
+        "no-argument help must identify the command purpose"
+    );
+    assert!(
+        stdout.contains("--print-ast"),
+        "help must document syntax-tree mode"
+    );
+}
+
+#[test]
+fn installed_command_prints_parsed_syntax_trees() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = root.join("print-ast");
+    fs::create_dir_all(fixture.join("src")).expect("print-ast fixture must be created");
+    fs::write(
+        fixture.join("Cargo.toml"),
+        "[package]\nname = \"print_ast\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .expect("print-ast manifest must be written");
+    let source = fixture.join("src").join("lib.rs");
+    fs::write(&source, "pub fn ready() -> bool { true }\n")
+        .expect("print-ast source must be written");
+    let source_before = fs::read(&source).expect("print-ast source must be readable");
+
+    let output = Command::new(command_path(&install))
+        .arg("--print-ast")
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start for --print-ast");
+
+    assert!(
+        output.status.success(),
+        "--print-ast must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("print-ast output must be UTF-8");
+    let absolute = source
+        .canonicalize()
+        .unwrap_or(source.clone())
+        .display()
+        .to_string();
+    assert!(
+        stdout.starts_with(&format!("{absolute}\n")),
+        "print-ast must identify the source path first"
+    );
+    assert!(
+        stdout.contains("Item::Fn") && stdout.contains("sym: ready"),
+        "print-ast must show the parsed Rust syntax"
+    );
+    assert!(
+        stdout.ends_with("\n\n") || stdout.contains("\n\n"),
+        "print-ast must separate each source with a blank line"
+    );
+    assert_eq!(
+        fs::read(&source).expect("print-ast source must remain readable"),
+        source_before,
+        "print-ast must not change the user working tree"
+    );
+    assert!(
+        output.stderr.is_empty(),
+        "print-ast must not run tests or print command errors"
+    );
+}
+
+#[test]
+fn installed_command_prints_bash_completion_for_documented_options() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let command = command_path(&install);
+
+    let all = Command::new(&command)
+        .env("GO_FLAGS_COMPLETION", "1")
+        .output()
+        .expect("completion with no arguments must start");
+    assert_eq!(
+        all.status.code(),
+        Some(2),
+        "bash completion must use the mutago completion exit value"
+    );
+    let all_stdout = String::from_utf8(all.stdout).expect("completion output must be UTF-8");
+    let help = Command::new(&command)
+        .arg("--help")
+        .output()
+        .expect("help for completion parity must start");
+    assert!(
+        help.status.success(),
+        "help must succeed for completion parity"
+    );
+    let help_stdout = String::from_utf8(help.stdout).expect("help output must be UTF-8");
+    for option in all_stdout.lines().filter(|line| line.starts_with('-')) {
+        assert!(
+            help_stdout.contains(option),
+            "completion option {option} must appear in documented help"
+        );
+    }
+    assert!(
+        all_stdout.lines().any(|line| line == "[TARGET]..."),
+        "completion must advertise target arguments"
+    );
+    for option in [
+        "--help",
+        "--list-files",
+        "--print-ast",
+        "--list-mutators",
+        "--config",
+        "--dry-run",
+        "--git-diff-base",
+    ] {
+        assert!(
+            all_stdout.lines().any(|line| line == option),
+            "completion must include documented option {option}: {all_stdout}"
+        );
+    }
+
+    let prefix = Command::new(&command)
+        .env("GO_FLAGS_COMPLETION", "1")
+        .arg("--li")
+        .output()
+        .expect("prefixed completion must start");
+    assert_eq!(prefix.status.code(), Some(2));
+    let prefix_stdout =
+        String::from_utf8(prefix.stdout).expect("prefixed completion output must be UTF-8");
+    assert_eq!(
+        prefix_stdout.lines().collect::<Vec<_>>(),
+        vec!["--list-files", "--list-mutators"],
+        "prefix completion must match documented list options only"
+    );
+}
+
+#[test]
+fn installed_command_information_modes_match_on_terminal_and_pipe() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = root.join("info-modes");
+    fs::create_dir_all(fixture.join("src")).expect("info-mode fixture must be created");
+    fs::write(
+        fixture.join("Cargo.toml"),
+        "[package]\nname = \"info_modes\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .expect("info-mode manifest must be written");
+    let source = fixture.join("src").join("lib.rs");
+    fs::write(&source, "pub fn ready() -> bool { true }\n")
+        .expect("info-mode source must be written");
+    let source_before = fs::read(&source).expect("info-mode source must be readable");
+    let command = command_path(&install);
+
+    struct InformationMode<'a> {
+        args: &'a [&'a str],
+        env: Option<(&'a str, &'a str)>,
+    }
+
+    let modes = [
+        InformationMode {
+            args: &[],
+            env: None,
+        },
+        InformationMode {
+            args: &["--help"],
+            env: None,
+        },
+        InformationMode {
+            args: &["--list-mutators"],
+            env: None,
+        },
+        InformationMode {
+            args: &["--list-files", "src/lib.rs"],
+            env: None,
+        },
+        InformationMode {
+            args: &["--print-ast", "src/lib.rs"],
+            env: None,
+        },
+        InformationMode {
+            args: &[],
+            env: Some(("GO_FLAGS_COMPLETION", "1")),
+        },
+    ];
+
+    for mode in &modes {
+        let piped = run_information_mode(&command, &fixture, mode.args, mode.env, false);
+        let terminal = run_information_mode(&command, &fixture, mode.args, mode.env, true);
+        assert_eq!(
+            piped.status_code, terminal.status_code,
+            "mode {:?} must keep the same exit value on a pipe and a terminal",
+            mode.args
+        );
+        if mode.env.is_some() {
+            assert_eq!(piped.status_code, Some(2), "completion must exit 2");
+        } else {
+            assert_eq!(
+                piped.status_code,
+                Some(0),
+                "information mode {:?} must succeed",
+                mode.args
+            );
+        }
+        assert_eq!(
+            normalize_info_output(&piped.stdout),
+            normalize_info_output(&terminal.stdout),
+            "mode {:?} must print the same text on a pipe and a terminal",
+            mode.args
+        );
+        assert!(
+            !normalize_info_output(&piped.stdout).is_empty(),
+            "mode {:?} must print information output",
+            mode.args
+        );
+    }
+
+    assert_eq!(
+        fs::read(&source).expect("info-mode source must remain readable"),
+        source_before,
+        "information modes must not change the user working tree"
+    );
+}
+
+struct InformationModeOutput {
+    status_code: Option<i32>,
+    stdout: String,
+}
+
+fn run_information_mode(
+    command: &Path,
+    cwd: &Path,
+    args: &[&str],
+    env: Option<(&str, &str)>,
+    terminal: bool,
+) -> InformationModeOutput {
+    let output = if terminal {
+        run_on_terminal(command, cwd, args, env)
+    } else {
+        let mut process = Command::new(command);
+        process.args(args).current_dir(cwd);
+        if let Some((key, value)) = env {
+            process.env(key, value);
+        }
+        process.output().expect("information mode must start")
+    };
+    InformationModeOutput {
+        status_code: output.status.code(),
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+    }
+}
+
+fn run_on_terminal(
+    command: &Path,
+    cwd: &Path,
+    args: &[&str],
+    env: Option<(&str, &str)>,
+) -> std::process::Output {
+    let mut process = if cfg!(target_os = "linux") {
+        let mut command_line = shell_quote(&command.display().to_string());
+        for arg in args {
+            command_line.push(' ');
+            command_line.push_str(&shell_quote(arg));
+        }
+        let mut process = Command::new("script");
+        process.args(["-q", "-c", &command_line, "/dev/null"]);
+        process
+    } else {
+        let mut process = Command::new("script");
+        process.arg("-q").arg("/dev/null").arg(command).args(args);
+        process
+    };
+    process.current_dir(cwd);
+    if let Some((key, value)) = env {
+        process.env(key, value);
+    }
+    process
+        .output()
+        .expect("terminal information mode must start")
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+fn normalize_info_output(text: &str) -> String {
+    let mut output = String::new();
+    for character in text.replace("\r\n", "\n").replace('\r', "\n").chars() {
+        match character {
+            '\u{08}' => {
+                output.pop();
+            }
+            '\u{04}' => {}
+            other => output.push(other),
+        }
+    }
+    output
+}
+
+#[test]
 fn installed_command_classifies_control_flow_fixture_mutants() {
     let root = smoke_root();
     let install = install_command(&root);

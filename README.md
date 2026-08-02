@@ -15,6 +15,12 @@ List Rust production source files before mutation testing:
 mutarust --list-files .
 ```
 
+Print the parsed Rust syntax for a selected source:
+
+```text
+mutarust --print-ast src/lib.rs
+```
+
 See the [command guide](docs/cli.md) for target rules, the
 [mutator reference](docs/mutators.md) for the stable Rust operators, and the
 [configuration guide](docs/config.md) for YAML mutation policy.
