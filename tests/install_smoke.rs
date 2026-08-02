@@ -65,6 +65,11 @@ fn installed_command_prints_help() {
         String::from_utf8_lossy(&output.stdout).contains("Mutation testing for Rust"),
         "help must identify the command purpose"
     );
+    assert!(
+        String::from_utf8_lossy(&output.stdout)
+            .contains("--git-diff-base REF  Set Git base; default origin/HEAD, then master"),
+        "help must document the Git default and fallback"
+    );
 
     let version = Command::new(command_path(&install))
         .arg("--version")
@@ -3320,6 +3325,246 @@ fn installed_command_lists_production_sources() {
     );
 }
 
+#[test]
+fn installed_command_selects_git_merge_base_and_uncommitted_changes() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = git_mutation_fixture(&root, "merge-base", "main");
+    let a = write_git_source(&fixture, "src/a.rs", "pub fn a() -> bool { true }\n");
+    let b = write_git_source(&fixture, "src/b.rs", "pub fn b() -> bool { true }\n");
+    let c = write_git_source(&fixture, "src/c.rs", "pub fn c() -> bool { true }\n");
+    let d = write_git_source(&fixture, "src/d.rs", "pub fn d() -> bool { true }\n");
+    commit_all(&fixture, "base");
+    run_git(&fixture, &["switch", "-c", "feature"]);
+
+    run_git(&fixture, &["switch", "main"]);
+    write_git_source(&fixture, "src/b.rs", "pub fn b() -> bool { false }\n");
+    commit_all(&fixture, "base moves ahead");
+    run_git(&fixture, &["switch", "feature"]);
+
+    write_git_source(&fixture, "src/c.rs", "pub fn c() -> bool { false }\n");
+    commit_all(&fixture, "feature commit");
+    write_git_source(&fixture, "src/d.rs", "pub fn d() -> bool { false }\n");
+    run_git(&fixture, &["add", "src/d.rs"]);
+    write_git_source(&fixture, "src/a.rs", "pub fn a() -> bool { false }\n");
+
+    for source in [&a, &c, &d] {
+        assert_dry_run_total(&git_dry_run(&install, &fixture, Some("main"), source), 1);
+    }
+    assert_dry_run_total(&git_dry_run(&install, &fixture, Some("main"), &b), 0);
+}
+
+#[test]
+fn installed_command_uses_git_remote_default_and_master_fallback() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let remote = root.join("remote.git");
+    let remote_text = remote.to_str().expect("remote path must be UTF-8");
+    run_git(
+        &root,
+        &["init", "--bare", "--initial-branch=trunk", remote_text],
+    );
+
+    let seed = git_mutation_fixture(&root, "remote-seed", "trunk");
+    write_git_source(&seed, "src/lib.rs", "pub fn value() -> bool { true }\n");
+    commit_all(&seed, "seed");
+    run_git(&seed, &["remote", "add", "origin", remote_text]);
+    run_git(&seed, &["push", "--set-upstream", "origin", "trunk"]);
+
+    let clone = root.join("remote-clone");
+    let clone_text = clone.to_str().expect("clone path must be UTF-8");
+    run_git(&root, &["clone", remote_text, clone_text]);
+    run_git(&clone, &["switch", "-c", "feature"]);
+    let remote_source =
+        write_git_source(&clone, "src/lib.rs", "pub fn value() -> bool { false }\n");
+    assert_dry_run_total(&git_dry_run(&install, &clone, None, &remote_source), 1);
+
+    let fallback = git_mutation_fixture(&root, "master-fallback", "master");
+    let fallback_source =
+        write_git_source(&fallback, "src/lib.rs", "pub fn value() -> bool { true }\n");
+    commit_all(&fallback, "base");
+    run_git(&fallback, &["switch", "-c", "feature"]);
+    write_git_source(
+        &fallback,
+        "src/lib.rs",
+        "pub fn value() -> bool { false }\n",
+    );
+    assert_dry_run_total(&git_dry_run(&install, &fallback, None, &fallback_source), 1);
+}
+
+#[test]
+fn installed_command_selects_added_and_renamed_git_source_files() {
+    let root = smoke_root();
+    let install = install_command(&root);
+
+    let added = git_mutation_fixture(&root, "added", "main");
+    write_git_source(&added, "src/lib.rs", "pub fn base() -> bool { true }\n");
+    commit_all(&added, "base");
+    run_git(&added, &["switch", "-c", "feature"]);
+    let added_source =
+        write_git_source(&added, "src/added.rs", "pub fn added() -> bool { true }\n");
+    run_git(&added, &["add", "src/added.rs"]);
+    assert_dry_run_total(
+        &git_dry_run(&install, &added, Some("main"), &added_source),
+        1,
+    );
+
+    let renamed = git_mutation_fixture(&root, "renamed", "main");
+    let old = write_git_source(
+        &renamed,
+        "src/old.rs",
+        "pub fn changed() -> bool { true }\npub fn one() -> bool { true }\npub fn two() -> bool { true }\npub fn three() -> bool { true }\npub fn four() -> bool { true }\n",
+    );
+    commit_all(&renamed, "base");
+    run_git(&renamed, &["switch", "-c", "feature"]);
+    let new = renamed.join("src/new.rs");
+    run_git(
+        &renamed,
+        &[
+            "mv",
+            old.strip_prefix(&renamed)
+                .expect("renamed source must be below the repository")
+                .to_str()
+                .expect("renamed source path must be UTF-8"),
+            "src/new.rs",
+        ],
+    );
+    assert_dry_run_total(&git_dry_run(&install, &renamed, Some("main"), &new), 0);
+    fs::write(
+        &new,
+        "pub fn changed() -> bool { false }\npub fn one() -> bool { true }\npub fn two() -> bool { true }\npub fn three() -> bool { true }\npub fn four() -> bool { true }\n",
+    )
+    .expect("renamed Git source must be written");
+    run_git(&renamed, &["add", "src/new.rs"]);
+    assert_dry_run_total(&git_dry_run(&install, &renamed, Some("main"), &new), 1);
+}
+
+#[test]
+fn installed_command_ignores_deleted_git_lines_and_selects_multiple_hunks() {
+    let root = smoke_root();
+    let install = install_command(&root);
+
+    let deleted = git_mutation_fixture(&root, "deleted", "main");
+    let deleted_source = write_git_source(
+        &deleted,
+        "src/lib.rs",
+        "pub fn deleted() -> bool { true }\npub fn retained() -> bool { true }\n",
+    );
+    commit_all(&deleted, "base");
+    run_git(&deleted, &["switch", "-c", "feature"]);
+    write_git_source(
+        &deleted,
+        "src/lib.rs",
+        "pub fn retained() -> bool { true }\n",
+    );
+    run_git(&deleted, &["add", "src/lib.rs"]);
+    assert_dry_run_total(
+        &git_dry_run(&install, &deleted, Some("main"), &deleted_source),
+        0,
+    );
+
+    let hunks = git_mutation_fixture(&root, "hunks", "main");
+    let hunk_source = write_git_source(
+        &hunks,
+        "src/lib.rs",
+        "pub fn first() -> bool { true }\npub fn keep_one() -> bool { true }\npub fn keep_two() -> bool { true }\npub fn keep_three() -> bool { true }\npub fn second() -> bool { true }\n",
+    );
+    commit_all(&hunks, "base");
+    run_git(&hunks, &["switch", "-c", "feature"]);
+    write_git_source(
+        &hunks,
+        "src/lib.rs",
+        "pub fn first() -> bool { false }\npub fn keep_one() -> bool { true }\npub fn keep_two() -> bool { true }\npub fn keep_three() -> bool { true }\npub fn second() -> bool { false }\n",
+    );
+    assert_dry_run_total(
+        &git_dry_run(&install, &hunks, Some("main"), &hunk_source),
+        2,
+    );
+}
+
+#[test]
+fn installed_command_succeeds_when_git_diff_has_no_mutable_lines() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = git_mutation_fixture(&root, "no-mutants", "main");
+    let source = write_git_source(&fixture, "src/lib.rs", "pub fn value() -> bool { true }\n");
+    commit_all(&fixture, "base");
+    run_git(&fixture, &["switch", "-c", "feature"]);
+    fs::write(fixture.join("README.md"), "Changed documentation.\n")
+        .expect("Git fixture README must be written");
+    commit_all(&fixture, "docs only");
+
+    let output = git_dry_run(&install, &fixture, Some("main"), &source);
+    assert_dry_run_total(&output, 0);
+    assert_eq!(
+        String::from_utf8(output.stdout)
+            .expect("zero-mutant output must be UTF-8")
+            .trim(),
+        "Total: 0 mutation(s) would be generated. No files written, no tests run."
+    );
+}
+
+#[test]
+fn installed_command_rejects_invalid_git_scope() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let non_git = root.join("non-git");
+    let non_git_source = non_git.join("src/lib.rs");
+    fs::create_dir_all(
+        non_git_source
+            .parent()
+            .expect("non-Git source must have a parent"),
+    )
+    .expect("non-Git source directory must be created");
+    fs::write(
+        non_git.join("Cargo.toml"),
+        "[package]\nname = \"non-git\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .expect("non-Git manifest must be written");
+    fs::write(&non_git_source, "pub fn value() -> bool { true }\n")
+        .expect("non-Git source must be written");
+    assert_git_scope_error(
+        git_dry_run(&install, &non_git, None, &non_git_source),
+        "could not find a Git repository",
+    );
+
+    let fixture = git_mutation_fixture(&root, "bad-base", "main");
+    let source = write_git_source(&fixture, "src/lib.rs", "pub fn value() -> bool { true }\n");
+    commit_all(&fixture, "base");
+    assert_git_scope_error(
+        git_dry_run(&install, &fixture, Some("does-not-exist"), &source),
+        "does-not-exist",
+    );
+
+    let external = git_mutation_fixture(&root, "external-git", "main");
+    let external_source =
+        write_git_source(&external, "src/lib.rs", "pub fn value() -> bool { true }\n");
+    commit_all(&external, "base");
+    run_git(&external, &["switch", "-c", "feature"]);
+    write_git_source(
+        &external,
+        "src/lib.rs",
+        "pub fn value() -> bool { false }\n",
+    );
+    assert_git_scope_error(
+        git_dry_run(&install, &fixture, Some("main"), &external_source),
+        "outside Git repository",
+    );
+
+    let output = Command::new(command_path(&install))
+        .args(["--git-diff-base", "main", "--dry-run"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must reject a base without changed-line selection");
+    assert_eq!(output.status.code(), Some(3));
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("--git-diff-base requires --git-diff-lines"),
+        "invalid Git controls must explain the required selector"
+    );
+}
+
 fn install_command(_root: &Path) -> PathBuf {
     INSTALL_CLEANUP_REGISTERED.get_or_init(|| {
         let registered = unsafe { libc::atexit(clean_installed_command) };
@@ -3366,6 +3611,84 @@ fn run_git(directory: &Path, arguments: &[&str]) {
         output.status.success(),
         "Git command failed: {}",
         String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn git_mutation_fixture(root: &Path, name: &str, branch: &str) -> PathBuf {
+    let fixture = root.join(name);
+    fs::create_dir_all(fixture.join("src")).expect("Git fixture source directory must be created");
+    fs::write(fixture.join("src/lib.rs"), "").expect("Git fixture library source must be written");
+    fs::write(
+        fixture.join("Cargo.toml"),
+        format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n"),
+    )
+    .expect("Git fixture manifest must be written");
+    run_git(&fixture, &["init", "--initial-branch", branch]);
+    run_git(
+        &fixture,
+        &["config", "user.email", "mutarust@example.invalid"],
+    );
+    run_git(&fixture, &["config", "user.name", "Mutarust Test"]);
+    fixture
+}
+
+fn write_git_source(repository: &Path, relative: &str, text: &str) -> PathBuf {
+    let source = repository.join(relative);
+    fs::create_dir_all(source.parent().expect("Git source must have a parent"))
+        .expect("Git source directory must be created");
+    fs::write(&source, text).expect("Git source must be written");
+    source
+}
+
+fn commit_all(repository: &Path, message: &str) {
+    run_git(repository, &["add", "."]);
+    run_git(repository, &["commit", "--message", message]);
+}
+
+fn git_dry_run(
+    install: &Path,
+    repository: &Path,
+    base: Option<&str>,
+    source: &Path,
+) -> std::process::Output {
+    let mut command = Command::new(command_path(install));
+    command.args(["--git-diff-lines", "--dry-run"]);
+    if let Some(base) = base {
+        command.args(["--git-diff-base", base]);
+    }
+    command
+        .arg(source)
+        .current_dir(repository)
+        .output()
+        .expect("installed mutarust must select changed Git lines")
+}
+
+fn assert_dry_run_total(output: &std::process::Output, expected: usize) {
+    assert!(
+        output.status.success(),
+        "changed-line selection must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains(&format!("Total: {expected} mutation(s) would be generated")),
+        "changed-line selection must report {expected} mutants: {stdout}"
+    );
+}
+
+fn assert_git_scope_error(output: std::process::Output, required_text: &str) {
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "Git scope errors must return exit value 3"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains(required_text),
+        "Git scope error must identify {required_text}"
+    );
+    assert!(
+        !String::from_utf8_lossy(&output.stdout).contains("Total:"),
+        "Git scope errors must not select an unfiltered source scope"
     );
 }
 
