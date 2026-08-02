@@ -21,7 +21,10 @@ changes macro token input only for the documented Tokio selection forms.
 | `conditional/not` | Remove direct unary `!` from a condition or logical operand |
 | `expression/comparison` | `<` to `<=`, `<=` to `<`, `>` to `>=`, and `>=` to `>` |
 | `expression/context-nil` | Replace a direct `Some(value)` argument with `::core::option::Option::None` |
+| `expression/error-guard` | Replace a direct `Result::is_err` guard with `false`, or a direct `Result::is_ok` guard with `true` |
+| `expression/errorf-wrap` | Replace a supported standard error source link with `::core::option::Option::None` |
 | `expression/logical` | `&&` to `||`, and `||` to `&&` |
+| `expression/recover-clear` | Make a supported standard panic catch resume the panic |
 | `expression/string-literal` | Change a direct, nonempty string operand of `==` or `!=` to `""` |
 | `loop/break` | Change `break` to `continue`, or `continue` to `break` |
 | `loop/condition` | Replace a `while` or `while let` condition with `false` |
@@ -31,6 +34,7 @@ changes macro token input only for the documented Tokio selection forms.
 | `numbers/incrementer` | Add one to a decimal integer or float literal |
 | `select/case-remove` | Remove one complete nonfallback branch from a supported Tokio selection that has another clause |
 | `select/default-remove` | Remove one complete Tokio `else` branch when a normal branch remains |
+| `statement/defer-remove` | Remove a supported explicit `drop` statement so cleanup moves to the end of its scope |
 | `statement/remove` | Remove a semicolon assignment, compound assignment, call, method call, or macro statement |
 | `statement/remove-self-assign` | Remove a semicolon assignment when both sides are the same safe place |
 | `statement/return` | Replace an explicit return value with a valid default for its declared return type |
@@ -86,6 +90,46 @@ reference, an unconstrained type parameter, or a general borrowed value.
 Cargo checks replacements that need type proof before it runs tests. Mutarust
 skips these replacements before a custom test command because that command
 selects its own compiler.
+
+`expression/error-guard` accepts a direct `if value.is_err()` or
+`if value.is_ok()` condition. The receiver must be one identifier. A function
+parameter or an earlier local declaration in the same scope must give it the
+exact type `::core::result::Result<...>` or
+`::std::result::Result<...>`. The mutator does not change a nested condition,
+an inferred type, another method with the same name, or a standard path that a
+crate-root alias replaces.
+
+`expression/errorf-wrap` accepts the tail expression of a `source` method in
+an exact `impl ::core::error::Error` or `impl ::std::error::Error` block. The
+tail expression must be an exact root-qualified
+`::core::option::Option::Some(source)` or
+`::std::option::Option::Some(source)` call. The replacement is
+`::core::option::Option::None`. This removes the source link but keeps the
+error display text. It does not change an inherent method, another trait, an
+explicit `return`, or an aliased standard path.
+
+`expression/recover-clear` accepts an exact root-qualified
+`::std::panic::catch_unwind(callback)` call with one argument. It evaluates
+the catch one time. It returns the same successful value, but it passes a
+caught panic to `::std::panic::resume_unwind`. Cargo checks the replacement
+before tests run. A custom test command marks this candidate `Skipped` because
+the command cannot give Cargo type proof.
+
+`statement/defer-remove` accepts a semicolon statement with one of these
+forms:
+
+```rust
+drop(value);
+::core::mem::drop(value);
+::std::mem::drop(value);
+```
+
+The unqualified form is not a candidate when the file has another `drop`
+binding or a glob import. A root-qualified form is not a candidate when a
+crate-root alias replaces its standard crate name. The mutator removes the
+statement. The value then stays alive until its normal last use or the end of
+its scope. Cargo checks the replacement because a longer guard lifetime can
+make a borrow invalid. A custom test command marks this candidate `Skipped`.
 
 `concurrency/goroutine-remove` supports these standard thread statements:
 

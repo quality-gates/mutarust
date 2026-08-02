@@ -1,0 +1,192 @@
+use mutarust::Registry;
+
+const MUTATOR_NAMES: [&str; 4] = [
+    "expression/error-guard",
+    "expression/errorf-wrap",
+    "expression/recover-clear",
+    "statement/defer-remove",
+];
+
+fn changed_sources(mutator: &str, source: &str) -> Vec<String> {
+    Registry::builtins()
+        .get(mutator)
+        .expect("the built-in mutator must exist")
+        .mutations(source)
+        .into_iter()
+        .map(|mutation| {
+            mutation
+                .apply(source)
+                .expect("a built-in mutation must apply")
+        })
+        .collect()
+}
+
+#[test]
+fn builtin_error_panic_and_cleanup_names_match_mutago() {
+    let registry = Registry::builtins();
+
+    for expected in MUTATOR_NAMES {
+        assert!(
+            registry.names().any(|name| name == expected),
+            "missing built-in {expected}"
+        );
+    }
+}
+
+#[test]
+fn error_guard_clears_direct_checks_on_explicit_result_values() {
+    let source = "fn check(result: ::core::result::Result<(), ()>) { if result.is_err() { failed(); } if result.is_ok() { passed(); } }";
+
+    assert_eq!(
+        changed_sources("expression/error-guard", source),
+        vec![
+            source.replacen("result.is_err()", "false", 1),
+            source.replacen("result.is_ok()", "true", 1),
+        ]
+    );
+}
+
+#[test]
+fn error_guard_rejects_unproved_methods_and_nested_conditions() {
+    let source = "struct Status; impl Status { fn is_err(&self) -> bool { true } } fn check(status: Status, result: ::core::result::Result<(), ()>, ready: bool) { if status.is_err() { failed(); } if result.is_err() && ready { failed(); } { let result = Status; if result.is_err() { failed(); } } }";
+
+    assert!(changed_sources("expression/error-guard", source).is_empty());
+}
+
+#[test]
+fn error_guard_accepts_explicit_result_locals() {
+    let source = "fn check() { let result: ::std::result::Result<(), ()> = Ok(()); if result.is_ok() { passed(); } }";
+
+    assert_eq!(
+        changed_sources("expression/error-guard", source),
+        vec![source.replacen("result.is_ok()", "true", 1)]
+    );
+}
+
+#[test]
+fn error_wrap_removes_standard_error_source_links() {
+    let source = "#[derive(Debug)] struct Cause; impl ::core::fmt::Display for Cause { fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result { f.write_str(\"cause\") } } impl ::std::error::Error for Cause {} #[derive(Debug)] struct Wrapped { cause: Cause } impl ::std::error::Error for Wrapped { fn source(&self) -> ::core::option::Option<&(dyn ::std::error::Error + 'static)> { ::core::option::Option::Some(&self.cause) } } impl ::core::fmt::Display for Wrapped { fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result { f.write_str(\"wrapped\") } }";
+
+    assert_eq!(
+        changed_sources("expression/errorf-wrap", source),
+        vec![source.replacen(
+            "::core::option::Option::Some(&self.cause)",
+            "::core::option::Option::None",
+            1,
+        )]
+    );
+}
+
+#[test]
+fn error_wrap_rejects_source_methods_on_other_traits() {
+    let source = "trait LocalError { fn source(&self) -> Option<&Self>; } struct Failure; impl LocalError for Failure { fn source(&self) -> Option<&Self> { Some(self) } }";
+
+    assert!(changed_sources("expression/errorf-wrap", source).is_empty());
+}
+
+#[test]
+fn error_wrap_accepts_a_standard_error_impl_in_a_module() {
+    let source = "mod nested { #[derive(Debug)] struct Failure; impl ::core::fmt::Display for Failure { fn fmt(&self, formatter: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result { formatter.write_str(\"failure\") } } impl ::std::error::Error for Failure { fn source(&self) -> ::core::option::Option<&(dyn ::std::error::Error + 'static)> { ::std::option::Option::Some(self) } } }";
+
+    assert_eq!(
+        changed_sources("expression/errorf-wrap", source),
+        vec![source.replacen(
+            "::std::option::Option::Some(self)",
+            "::core::option::Option::None",
+            1,
+        )]
+    );
+}
+
+#[test]
+fn recovery_propagates_panics_from_standard_catch_unwind_calls() {
+    let source =
+        "fn caught() -> bool { ::std::panic::catch_unwind(|| panic!(\"failure\")).is_err() }";
+    let call = "::std::panic::catch_unwind(|| panic!(\"failure\"))";
+    let replacement = format!(
+        "match {call} {{ ::core::result::Result::Ok(value) => ::core::result::Result::<_, ::std::boxed::Box<dyn ::core::any::Any + ::core::marker::Send>>::Ok(value), ::core::result::Result::Err(payload) => ::std::panic::resume_unwind(payload), }}"
+    );
+
+    assert_eq!(
+        changed_sources("expression/recover-clear", source),
+        vec![source.replacen(call, &replacement, 1)]
+    );
+}
+
+#[test]
+fn recovery_rejects_shadowed_and_nonstandard_catch_functions() {
+    let source = "mod std { pub mod panic { pub fn catch_unwind<T>(value: T) -> T { value } } } fn catch_unwind<T>(value: T) -> T { value } fn run() { let _ = std::panic::catch_unwind(|| 1); let _ = catch_unwind(|| 2); }";
+
+    assert!(changed_sources("expression/recover-clear", source).is_empty());
+}
+
+#[test]
+fn cleanup_removes_documented_explicit_drop_timing() {
+    let source = "fn cleanup(first: String, second: String, third: String) { drop(first); ::std::mem::drop(second); ::core::mem::drop(third); }";
+
+    assert_eq!(
+        changed_sources("statement/defer-remove", source),
+        vec![
+            source.replacen("drop(first);", "", 1),
+            source.replacen("::std::mem::drop(second);", "", 1),
+            source.replacen("::core::mem::drop(third);", "", 1),
+        ]
+    );
+}
+
+#[test]
+fn cleanup_rejects_shadowed_drop_functions() {
+    let source = "fn drop(_: String) {} fn cleanup(value: String) { drop(value); }";
+
+    assert!(changed_sources("statement/defer-remove", source).is_empty());
+}
+
+#[test]
+fn standard_root_aliases_are_not_candidates() {
+    let core_alias = "extern crate fake_core as core; fn check(result: ::core::result::Result<(), ()>) { if result.is_err() {} }";
+    let std_alias = "extern crate fake_std as std; fn run(value: String) { ::std::mem::drop(value); let _ = ::std::panic::catch_unwind(|| 1); }";
+    let source_alias = "extern crate fake_core as core; #[derive(Debug)] struct Failure; impl ::std::error::Error for Failure { fn source(&self) -> ::core::option::Option<&(dyn ::std::error::Error + 'static)> { ::core::option::Option::Some(self) } }";
+
+    assert!(changed_sources("expression/error-guard", core_alias).is_empty());
+    assert!(changed_sources("expression/errorf-wrap", source_alias).is_empty());
+    assert!(changed_sources("expression/recover-clear", std_alias).is_empty());
+    assert!(changed_sources("statement/defer-remove", std_alias).is_empty());
+}
+
+#[test]
+fn malformed_rust_has_no_error_panic_or_cleanup_candidates() {
+    let source = "fn broken( { ::std::panic::catch_unwind(|| panic!());";
+
+    for name in MUTATOR_NAMES {
+        assert!(changed_sources(name, source).is_empty());
+    }
+}
+
+#[test]
+fn error_panic_cleanup_fixture_candidate_oracle_is_current() {
+    let source = include_str!("fixtures/error-panic-cleanup/src/lib.rs");
+    let expected = include_str!("fixtures/error-panic-cleanup/expected-mutants.txt");
+    let states = [
+        "Killed", "Escaped", "Killed", "Escaped", "Killed", "Escaped", "Killed", "Escaped",
+        "Skipped",
+    ];
+    let registry = Registry::builtins();
+    let mut state_index = 0;
+    let mut actual = Vec::new();
+    for name in MUTATOR_NAMES {
+        for mutation in registry.get(name).unwrap().mutations(source) {
+            let (range, replacement) = mutation.identity();
+            let original = source.get(range).expect("fixture range must be valid");
+            actual.push(format!(
+                "{name} :: {} :: {} :: {}",
+                original.replace('\n', "\\n"),
+                replacement.replace('\n', "\\n"),
+                states[state_index]
+            ));
+            state_index += 1;
+        }
+    }
+
+    assert_eq!(state_index, states.len());
+    assert_eq!(actual.join("\n") + "\n", expected);
+}

@@ -102,7 +102,7 @@ fn installed_command_lists_builtin_mutators() {
         String::from_utf8(output.stdout)
             .expect("mutator list must be UTF-8")
             .trim(),
-        "arithmetic/assign_invert\narithmetic/assignment\narithmetic/base\narithmetic/bitwise\narithmetic/negate\nbranch/case\nbranch/else\nbranch/if\ncomposite/field-clear\nconcurrency/goroutine-remove\nconditional/bool-literal\nconditional/negated\nconditional/not\nexpression/comparison\nexpression/context-nil\nexpression/logical\nexpression/string-literal\nloop/break\nloop/condition\nloop/range_break\nnumbers/decrementer\nnumbers/float-negate\nnumbers/incrementer\nselect/case-remove\nselect/default-remove\nstatement/remove\nstatement/remove-self-assign\nstatement/return",
+        "arithmetic/assign_invert\narithmetic/assignment\narithmetic/base\narithmetic/bitwise\narithmetic/negate\nbranch/case\nbranch/else\nbranch/if\ncomposite/field-clear\nconcurrency/goroutine-remove\nconditional/bool-literal\nconditional/negated\nconditional/not\nexpression/comparison\nexpression/context-nil\nexpression/error-guard\nexpression/errorf-wrap\nexpression/logical\nexpression/recover-clear\nexpression/string-literal\nloop/break\nloop/condition\nloop/range_break\nnumbers/decrementer\nnumbers/float-negate\nnumbers/incrementer\nselect/case-remove\nselect/default-remove\nstatement/defer-remove\nstatement/remove\nstatement/remove-self-assign\nstatement/return",
         "the built-in mutator list must be stable and sorted"
     );
 }
@@ -495,6 +495,120 @@ fn assert_concurrency_selection_oracle(fixture: &Path, source: &[u8], stdout: &s
             let (state, result_name) = results
                 .get(state_index)
                 .expect("each concurrency mutant must have a state");
+            assert_eq!(*result_name, name, "result order must match plan order");
+            actual.push(format!(
+                "{name} :: {} :: {} :: {state}",
+                original.replace('\n', "\\n"),
+                replacement.replace('\n', "\\n")
+            ));
+            state_index += 1;
+        }
+    }
+    assert_eq!(state_index, results.len());
+    assert_eq!(actual.join("\n") + "\n", expected);
+}
+
+#[test]
+fn installed_command_classifies_error_panic_and_cleanup_fixture_mutants() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_error_panic_cleanup_fixture(&root);
+    let source = fixture.join("src").join("lib.rs");
+    let source_before = fs::read(&source).expect("error fixture source must be readable");
+
+    let output = Command::new(command_path(&install))
+        .args([
+            "--workers",
+            "1",
+            "--enable",
+            "expression/error-guard",
+            "--enable",
+            "expression/errorf-wrap",
+            "--enable",
+            "expression/recover-clear",
+            "--enable",
+            "statement/defer-remove",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start for the error fixture");
+
+    assert!(
+        output.status.success(),
+        "error fixture run must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("error output must be UTF-8");
+    assert!(
+        stdout.contains("Killed: 4")
+            && stdout.contains("Escaped: 4")
+            && stdout.contains("Errored: 0")
+            && stdout.contains("Skipped: 1")
+            && stdout.contains("Total: 9")
+            && stdout.contains("expression/error-guard | 1 | 1 | 0 | 2")
+            && stdout.contains("expression/errorf-wrap | 1 | 1 | 0 | 2")
+            && stdout.contains("expression/recover-clear | 1 | 1 | 0 | 2")
+            && stdout.contains("statement/defer-remove | 1 | 1 | 1 | 3"),
+        "the fixture must classify each error, panic, and cleanup mutant: {stdout}"
+    );
+    assert_eq!(
+        stable_mutant_ids(&stdout),
+        vec![
+            "1584ffa1507d9402b5f658c269c5581a",
+            "11e013114a99cacbb82aacbe3e541f15",
+            "ba130386994e969a61fba20bd9efea6e",
+            "e07eaab28c22849c0ac5787dd7e2436f",
+            "2609b2967ac366d27b8373d14d364564",
+            "4e8e6f23d4ebd7340d39c685fe7ef120",
+            "1632a5d983edb4bea3aa4ab94bba802f",
+            "c125416f1e975c22130fd3329ec65797",
+            "0628e52a8c0aca297e73279f220b0588",
+        ],
+        "the error fixture IDs must stay stable: {stdout}"
+    );
+    assert!(
+        stdout.contains("-    if result.is_ok() {")
+            && stdout.contains("+    if true {")
+            && stdout.contains("-        ::std::option::Option::Some(&self.cause)")
+            && stdout.contains("+        ::core::option::Option::None")
+            && stdout.contains("-    ::core::mem::drop(cleanup);"),
+        "the error fixture must show readable diffs: {stdout}"
+    );
+    assert_error_panic_cleanup_oracle(&fixture, &source_before, &stdout);
+    assert_eq!(
+        fs::read(&source).expect("error fixture source must remain readable"),
+        source_before
+    );
+    assert!(
+        !fixture.join("target").exists(),
+        "the error fixture must not get a Cargo target directory"
+    );
+}
+
+fn assert_error_panic_cleanup_oracle(fixture: &Path, source: &[u8], stdout: &str) {
+    let expected = fs::read_to_string(fixture.join("expected-mutants.txt"))
+        .expect("expected error mutants must be readable");
+    let results = mutation_results(stdout);
+    let source = String::from_utf8(source.to_vec()).expect("error source must be UTF-8");
+    let registry = mutarust::Registry::builtins();
+    let names = [
+        "expression/error-guard",
+        "expression/errorf-wrap",
+        "expression/recover-clear",
+        "statement/defer-remove",
+    ];
+    let mut actual = Vec::new();
+    let mut state_index = 0;
+    for name in names {
+        for mutation in registry.get(name).unwrap().mutations(&source) {
+            let (range, replacement) = mutation.identity();
+            let original = source
+                .get(range)
+                .expect("error mutation range must be valid");
+            let (state, result_name) = results
+                .get(state_index)
+                .expect("each error mutant must have a state");
             assert_eq!(*result_name, name, "result order must match plan order");
             actual.push(format!(
                 "{name} :: {} :: {} :: {state}",
@@ -4712,6 +4826,35 @@ fn write_concurrency_selection_fixture(root: &Path) -> PathBuf {
         include_str!("fixtures/concurrency-selection/expected-mutants.txt"),
     )
     .expect("expected concurrency mutants must be written");
+    fixture
+}
+
+fn write_error_panic_cleanup_fixture(root: &Path) -> PathBuf {
+    let fixture = root.join("error-panic-cleanup-fixture");
+    fs::create_dir_all(fixture.join("src"))
+        .expect("error fixture source directory must be created");
+    fs::create_dir_all(fixture.join("tests"))
+        .expect("error fixture test directory must be created");
+    fs::write(
+        fixture.join("Cargo.toml"),
+        include_str!("fixtures/error-panic-cleanup/Cargo.toml"),
+    )
+    .expect("error fixture manifest must be written");
+    fs::write(
+        fixture.join("src").join("lib.rs"),
+        include_str!("fixtures/error-panic-cleanup/src/lib.rs"),
+    )
+    .expect("error fixture source must be written");
+    fs::write(
+        fixture.join("tests").join("error_panic_cleanup.rs"),
+        include_str!("fixtures/error-panic-cleanup/tests/error_panic_cleanup.rs"),
+    )
+    .expect("error fixture tests must be written");
+    fs::write(
+        fixture.join("expected-mutants.txt"),
+        include_str!("fixtures/error-panic-cleanup/expected-mutants.txt"),
+    )
+    .expect("expected error mutants must be written");
     fixture
 }
 

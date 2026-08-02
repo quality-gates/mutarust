@@ -24,6 +24,7 @@ mod configuration;
 mod control_flow;
 mod coverage;
 mod discovery;
+mod error_panic_cleanup;
 mod evidence;
 mod execution;
 mod expression;
