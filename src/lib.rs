@@ -1,8 +1,26 @@
 //! Public support for the `mutarust` command.
 
+macro_rules! skip_non_expression_syntax {
+    () => {
+        fn visit_pat(&mut self, _pattern: &'ast syn::Pat) {}
+
+        fn visit_type(&mut self, _kind: &'ast syn::Type) {}
+
+        fn visit_generic_argument(&mut self, argument: &'ast syn::GenericArgument) {
+            if !matches!(
+                argument,
+                syn::GenericArgument::Const(_) | syn::GenericArgument::AssocConst(_)
+            ) {
+                syn::visit::visit_generic_argument(self, argument);
+            }
+        }
+    };
+}
+
 mod baseline;
 mod blacklist;
 mod configuration;
+mod control_flow;
 mod coverage;
 mod discovery;
 mod evidence;

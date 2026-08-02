@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::env;
 use std::fs;
 use std::ops::Deref;
@@ -101,9 +102,121 @@ fn installed_command_lists_builtin_mutators() {
         String::from_utf8(output.stdout)
             .expect("mutator list must be UTF-8")
             .trim(),
-        "arithmetic/assign_invert\narithmetic/assignment\narithmetic/base\narithmetic/bitwise\narithmetic/negate\nconditional/bool-literal\nconditional/negated\nconditional/not\nexpression/comparison\nexpression/logical\nexpression/string-literal\nnumbers/decrementer\nnumbers/float-negate\nnumbers/incrementer",
+        "arithmetic/assign_invert\narithmetic/assignment\narithmetic/base\narithmetic/bitwise\narithmetic/negate\nbranch/case\nbranch/else\nbranch/if\nconditional/bool-literal\nconditional/negated\nconditional/not\nexpression/comparison\nexpression/logical\nexpression/string-literal\nloop/break\nloop/condition\nloop/range_break\nnumbers/decrementer\nnumbers/float-negate\nnumbers/incrementer\nstatement/remove",
         "the built-in mutator list must be stable and sorted"
     );
+}
+
+#[test]
+fn installed_command_classifies_control_flow_fixture_mutants() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_control_flow_fixture(&root);
+    let source = fixture.join("src").join("lib.rs");
+    let source_before = fs::read(&source).expect("control-flow source must be readable");
+
+    let output = Command::new(command_path(&install))
+        .args([
+            "--enable",
+            "branch/*",
+            "--enable",
+            "loop/*",
+            "--enable",
+            "statement/remove",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start for the control-flow fixture");
+
+    assert!(
+        output.status.success(),
+        "control-flow fixture run must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("control-flow output must be UTF-8");
+    assert!(
+        stdout.contains("Killed: 14")
+            && stdout.contains("Escaped: 0")
+            && stdout.contains("Errored: 0")
+            && stdout.contains("Total: 14")
+            && stdout.contains("branch/if | 3 | 0 | 0 | 3")
+            && stdout.contains("loop/break | 2 | 0 | 0 | 2")
+            && stdout.contains("statement/remove | 4 | 0 | 0 | 4"),
+        "the fixture must classify every control-flow mutant: {stdout}"
+    );
+    assert_control_flow_oracle(&fixture, &source_before, &stdout);
+    assert_eq!(
+        fs::read(&source).expect("control-flow source must remain readable"),
+        source_before
+    );
+    assert!(
+        !fixture.join("target").exists(),
+        "the control-flow fixture must not get a Cargo target directory"
+    );
+}
+
+fn assert_control_flow_oracle(fixture: &Path, source: &[u8], stdout: &str) {
+    let expected = fs::read_to_string(fixture.join("expected-mutants.txt"))
+        .expect("expected control-flow mutants must be readable");
+    let results = mutation_results(stdout);
+    let source = String::from_utf8(source.to_vec()).expect("control-flow source must be UTF-8");
+    let registry = mutarust::Registry::builtins();
+    let names = [
+        "branch/case",
+        "branch/else",
+        "branch/if",
+        "loop/break",
+        "loop/condition",
+        "loop/range_break",
+        "statement/remove",
+    ];
+    let mut actual = Vec::new();
+    let mut changed_sources = BTreeSet::new();
+    let mut state_index = 0;
+    for name in names {
+        for mutation in registry.get(name).unwrap().mutations(&source) {
+            let changed_source = mutation
+                .apply(&source)
+                .expect("control-flow mutation range must be valid");
+            if !changed_sources.insert(changed_source) {
+                continue;
+            }
+            let (range, replacement) = mutation.identity();
+            let original = source.get(range).expect("mutation range must be valid");
+            let (state, result_name) = results
+                .get(state_index)
+                .expect("each mutant must have a state");
+            assert_eq!(*result_name, name, "result order must match plan order");
+            actual.push(format!("{name} :: {original} :: {replacement} :: {state}"));
+            state_index += 1;
+        }
+    }
+    assert_eq!(state_index, results.len());
+    assert_eq!(actual.join("\n") + "\n", expected);
+}
+
+fn mutation_results(stdout: &str) -> Vec<(&'static str, &str)> {
+    stdout
+        .lines()
+        .filter_map(|line| {
+            [
+                ("killed", "Killed"),
+                ("escaped", "Escaped"),
+                ("errored", "Errored"),
+                ("not covered", "NotCovered"),
+                ("skipped", "Skipped"),
+            ]
+            .into_iter()
+            .find_map(|(prefix, state)| {
+                line.strip_prefix(prefix).and_then(|rest| {
+                    rest.split_whitespace()
+                        .last()
+                        .map(|mutator| (state, mutator))
+                })
+            })
+        })
+        .collect()
 }
 
 #[test]
@@ -115,6 +228,16 @@ fn installed_command_classifies_expression_fixture_mutants() {
     let source_before = fs::read(&source).expect("expression fixture source must be readable");
 
     let output = Command::new(command_path(&install))
+        .args([
+            "--enable",
+            "arithmetic/*",
+            "--enable",
+            "conditional/*",
+            "--enable",
+            "expression/*",
+            "--enable",
+            "numbers/*",
+        ])
         .arg(&source)
         .current_dir(&fixture)
         .output()
@@ -158,7 +281,9 @@ fn installed_command_classifies_expression_fixture_mutants() {
     let registry = mutarust::Registry::builtins();
     let mut state_index = 0;
     let mut actual = Vec::new();
-    for name in registry.names() {
+    for name in registry.names().filter(|name| {
+        !name.starts_with("branch/") && !name.starts_with("loop/") && *name != "statement/remove"
+    }) {
         for mutation in registry
             .get(name)
             .expect("the built-in mutator must exist")
@@ -3057,7 +3182,7 @@ fn packaged_library_builds_a_custom_mutator() {
     .expect("downstream manifest must be written");
     fs::write(
         downstream.join("src").join("main.rs"),
-        "use mutarust::{Mutation, Mutator, Registry, RegistryBuilder};\n\nstruct Custom;\nstruct Invalid;\n\nimpl Mutator for Custom {\n    fn name(&self) -> &str { \"custom/no-op\" }\n\n    fn mutations(&self, _source: &str) -> Vec<Mutation> { Vec::new() }\n}\n\nimpl Mutator for Invalid {\n    fn name(&self) -> &str { \"Custom\" }\n\n    fn mutations(&self, _source: &str) -> Vec<Mutation> { Vec::new() }\n}\n\nfn mutate(registry: &Registry, source: &str) -> String {\n    let mutation = registry.get(\"conditional/bool-literal\").expect(\"built-in mutator must exist\").mutations(source).pop().expect(\"boolean must mutate\");\n    mutation.apply(source).expect(\"mutation must apply\")\n}\n\nfn main() {\n    let registry = RegistryBuilder::with_builtins().register(Custom).expect(\"custom mutator must register\").build();\n    assert_eq!(registry.names().collect::<Vec<_>>(), vec![\"arithmetic/assign_invert\", \"arithmetic/assignment\", \"arithmetic/base\", \"arithmetic/bitwise\", \"arithmetic/negate\", \"conditional/bool-literal\", \"conditional/negated\", \"conditional/not\", \"custom/no-op\", \"expression/comparison\", \"expression/logical\", \"expression/string-literal\", \"numbers/decrementer\", \"numbers/float-negate\", \"numbers/incrementer\"]);\n    let duplicate = RegistryBuilder::new().register(Custom).expect(\"first custom mutator must register\").register(Custom).err().expect(\"duplicate must fail\");\n    assert_eq!(duplicate.to_string(), \"duplicate mutator name: custom/no-op\");\n    let invalid = RegistryBuilder::new().register(Invalid).err().expect(\"invalid name must fail\");\n    assert_eq!(invalid.to_string(), \"invalid mutator name: Custom\");\n    assert_eq!(mutate(&registry, \"fn enabled() -> bool { let enabled = true; enabled }\"), \"fn enabled() -> bool { let enabled = false; enabled }\");\n    assert_eq!(mutate(&registry, \"fn enabled() -> bool { let label = \\\"é\\\"; let enabled = true; enabled }\"), \"fn enabled() -> bool { let label = \\\"é\\\"; let enabled = false; enabled }\");\n    assert!(registry.get(\"conditional/bool-literal\").unwrap().mutations(\"fn check() { assert!(true); }\").is_empty());\n    println!(\"custom mutator works\");\n}\n",
+        "use mutarust::{Mutation, Mutator, Registry, RegistryBuilder};\n\nstruct Custom;\nstruct Invalid;\n\nimpl Mutator for Custom {\n    fn name(&self) -> &str { \"custom/no-op\" }\n\n    fn mutations(&self, _source: &str) -> Vec<Mutation> { Vec::new() }\n}\n\nimpl Mutator for Invalid {\n    fn name(&self) -> &str { \"Custom\" }\n\n    fn mutations(&self, _source: &str) -> Vec<Mutation> { Vec::new() }\n}\n\nfn mutate(registry: &Registry, source: &str) -> String {\n    let mutation = registry.get(\"conditional/bool-literal\").expect(\"built-in mutator must exist\").mutations(source).pop().expect(\"boolean must mutate\");\n    mutation.apply(source).expect(\"mutation must apply\")\n}\n\nfn main() {\n    let registry = RegistryBuilder::with_builtins().register(Custom).expect(\"custom mutator must register\").build();\n    assert_eq!(registry.names().collect::<Vec<_>>(), vec![\"arithmetic/assign_invert\", \"arithmetic/assignment\", \"arithmetic/base\", \"arithmetic/bitwise\", \"arithmetic/negate\", \"branch/case\", \"branch/else\", \"branch/if\", \"conditional/bool-literal\", \"conditional/negated\", \"conditional/not\", \"custom/no-op\", \"expression/comparison\", \"expression/logical\", \"expression/string-literal\", \"loop/break\", \"loop/condition\", \"loop/range_break\", \"numbers/decrementer\", \"numbers/float-negate\", \"numbers/incrementer\", \"statement/remove\"]);\n    let duplicate = RegistryBuilder::new().register(Custom).expect(\"first custom mutator must register\").register(Custom).err().expect(\"duplicate must fail\");\n    assert_eq!(duplicate.to_string(), \"duplicate mutator name: custom/no-op\");\n    let invalid = RegistryBuilder::new().register(Invalid).err().expect(\"invalid name must fail\");\n    assert_eq!(invalid.to_string(), \"invalid mutator name: Custom\");\n    assert_eq!(mutate(&registry, \"fn enabled() -> bool { let enabled = true; enabled }\"), \"fn enabled() -> bool { let enabled = false; enabled }\");\n    assert_eq!(mutate(&registry, \"fn enabled() -> bool { let label = \\\"é\\\"; let enabled = true; enabled }\"), \"fn enabled() -> bool { let label = \\\"é\\\"; let enabled = false; enabled }\");\n    assert!(registry.get(\"conditional/bool-literal\").unwrap().mutations(\"fn check() { assert!(true); }\").is_empty());\n    println!(\"custom mutator works\");\n}\n",
     )
     .expect("downstream source must be written");
 
@@ -4242,6 +4367,35 @@ fn write_expression_fixture(root: &Path) -> PathBuf {
         include_str!("fixtures/expression/expected-mutants.txt"),
     )
     .expect("expected expression mutants must be written");
+    fixture
+}
+
+fn write_control_flow_fixture(root: &Path) -> PathBuf {
+    let fixture = root.join("control-flow-fixture");
+    fs::create_dir_all(fixture.join("src"))
+        .expect("control-flow fixture source directory must be created");
+    fs::create_dir_all(fixture.join("tests"))
+        .expect("control-flow fixture test directory must be created");
+    fs::write(
+        fixture.join("Cargo.toml"),
+        include_str!("fixtures/control-flow/Cargo.toml"),
+    )
+    .expect("control-flow fixture manifest must be written");
+    fs::write(
+        fixture.join("src").join("lib.rs"),
+        include_str!("fixtures/control-flow/src/lib.rs"),
+    )
+    .expect("control-flow fixture source must be written");
+    fs::write(
+        fixture.join("tests").join("control_flow.rs"),
+        include_str!("fixtures/control-flow/tests/control_flow.rs"),
+    )
+    .expect("control-flow fixture tests must be written");
+    fs::write(
+        fixture.join("expected-mutants.txt"),
+        include_str!("fixtures/control-flow/expected-mutants.txt"),
+    )
+    .expect("expected control-flow mutants must be written");
     fixture
 }
 

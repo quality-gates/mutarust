@@ -11,23 +11,6 @@ use syn::{
 use crate::mutator::span_range;
 use crate::{Mutation, Mutator};
 
-macro_rules! skip_non_expression_syntax {
-    () => {
-        fn visit_pat(&mut self, _pattern: &'ast syn::Pat) {}
-
-        fn visit_type(&mut self, _kind: &'ast syn::Type) {}
-
-        fn visit_generic_argument(&mut self, argument: &'ast syn::GenericArgument) {
-            if !matches!(
-                argument,
-                syn::GenericArgument::Const(_) | syn::GenericArgument::AssocConst(_)
-            ) {
-                visit::visit_generic_argument(self, argument);
-            }
-        }
-    };
-}
-
 pub(crate) struct BinaryOperatorMutator {
     name: &'static str,
     replacement: fn(&BinOp) -> Option<&'static str>,
