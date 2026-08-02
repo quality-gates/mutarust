@@ -1,12 +1,13 @@
 use std::env;
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
 use mutarust::{
-    Baseline, CommandSettings, Configuration, CoverageControls, ExecutionControls, GitDiffControls,
-    Registry, ReportContext, TestExecution, WorkerLimit, write_compact_summary, write_full_report,
+    Baseline, CommandSettings, Configuration, CoverageControls, DisplayFilter, ExecutionControls,
+    GitDiffControls, Registry, ReportContext, TestExecution, WorkerLimit, write_compact_summary,
+    write_full_report,
 };
 
 fn main() -> ExitCode {
@@ -78,7 +79,7 @@ fn print_help() -> io::Result<()> {
     )?;
     writeln!(
         stdout,
-        "\nOptions:\n  -h, --help           Print help\n  -V, --version        Print version\n      --config FILE     Read mutation policy from a YAML file\n      --list-files      List selected Rust production source files\n      --print-ast       Print the parsed Rust syntax for selected sources\n      --list-mutators   List available mutators\n      --exec COMMAND    Run a custom command for each mutant\n      --exec-timeout    Stop each test command after this many seconds\n      --timeout         Alias for --exec-timeout\n      --timeout-coefficient FACTOR  Set an adaptive Cargo timeout\n      --test-flags FLAGS  Add shell-quoted Cargo test flags\n      --test-recursive  Select all Cargo workspace packages\n      --workers COUNT   Run this many Cargo mutation jobs\n      --dry-run         List mutants without writing files or running tests\n      --no-exec         Write mutants without running tests\n      --do-not-remove-tmp-folder  Keep mutation workspaces\n      --match REGEXP    Mutate only functions with matching names\n      --verbose         Tell a custom command to produce verbose output\n      --debug           Tell a custom command to produce debug output\n      --silent          Hide mutant status output\n      --no-silent       Print mutant status output\n      --no-diffs        Hide escaped-mutant source diffs\n      --logger-summary-json  Write compact scores to mutarust-summary.json\n      --blacklist FILE  Read accepted mutation checksums\n      --baseline FILE   Read escaped-mutant IDs; default mutarust-baseline.json\n      --update-baseline Write current escaped-mutant IDs and exit\n      --fail-on-escaped Fail only for escaped IDs outside the baseline\n      --run-mutant-id ID  Run one mutant without score gates\n      --min-msi         Set the minimum mutation score percentage\n      --min-covered-msi Set the minimum covered-code score percentage\n      --enable NAME     Select a mutator name or group pattern\n      --disable NAME    Disable a mutator name or group pattern"
+        "\nOptions:\n  -h, --help           Print help\n  -V, --version        Print version\n      --config FILE     Read mutation policy from a YAML file\n      --list-files      List selected Rust production source files\n      --print-ast       Print the parsed Rust syntax for selected sources\n      --list-mutators   List available mutators\n      --exec COMMAND    Run a custom command for each mutant\n      --exec-timeout    Stop each test command after this many seconds\n      --timeout         Alias for --exec-timeout\n      --timeout-coefficient FACTOR  Set an adaptive Cargo timeout\n      --test-flags FLAGS  Add shell-quoted Cargo test flags\n      --test-recursive  Select all Cargo workspace packages\n      --workers COUNT   Run this many Cargo mutation jobs\n      --dry-run         List mutants without writing files or running tests\n      --no-exec         Write mutants without running tests\n      --do-not-remove-tmp-folder  Keep mutation workspaces\n      --match REGEXP    Mutate only functions with matching names\n      --verbose         Tell a custom command to produce verbose output\n      --debug           Tell a custom command to produce debug output\n      --silent          Hide mutant status output\n      --no-silent       Print mutant status output\n      --quiet           Show only escaped mutants\n      --output-statuses LETTERS  Show only these states: k e s n x\n      --no-diffs        Hide escaped-mutant source diffs\n      --logger-summary-json  Write compact scores to mutarust-summary.json\n      --blacklist FILE  Read accepted mutation checksums\n      --baseline FILE   Read escaped-mutant IDs; default mutarust-baseline.json\n      --update-baseline Write current escaped-mutant IDs and exit\n      --fail-on-escaped Fail only for escaped IDs outside the baseline\n      --run-mutant-id ID  Run one mutant without score gates\n      --min-msi         Set the minimum mutation score percentage\n      --min-covered-msi Set the minimum covered-code score percentage\n      --enable NAME     Select a mutator name or group pattern\n      --disable NAME    Disable a mutator name or group pattern"
     )?;
     writeln!(
         stdout,
@@ -239,7 +240,22 @@ fn parse_value_option(
         "--git-diff-base" => value().and_then(|value| set_git_diff_base(command, value)),
         "--baseline" => value().and_then(|value| set_baseline_path(command, value)),
         "--blacklist" => value().map(|value| add_blacklist(command, value)),
-        _ => return parse_policy_value_option(command, argument, next),
+        _ => {
+            return parse_display_value_option(command, argument, next)
+                .or_else(|| parse_policy_value_option(command, argument, next));
+        }
+    })
+}
+
+fn parse_display_value_option(
+    command: &mut RunCommand,
+    argument: &str,
+    next: Option<&String>,
+) -> Option<Result<(), String>> {
+    let value = || required_value(next, argument);
+    Some(match argument {
+        "--output-statuses" => value().and_then(|value| set_output_statuses(command, value)),
+        _ => return None,
     })
 }
 
@@ -302,6 +318,10 @@ fn parse_display_switch(command: &mut RunCommand, argument: &str) -> Option<Resu
             Ok(())
         }
         "--logger-summary-json" => set_logger_summary_json(command),
+        "--quiet" => {
+            command.quiet = true;
+            Ok(())
+        }
         _ => return None,
     })
 }
@@ -518,6 +538,21 @@ fn set_silent(command: &mut RunCommand, value: bool) -> Result<(), String> {
     Ok(())
 }
 
+fn set_output_statuses(command: &mut RunCommand, value: String) -> Result<(), String> {
+    if command.output_statuses.is_some() {
+        return Err("--output-statuses can be supplied only once".to_owned());
+    }
+    if value.is_empty() || !value.bytes().all(|letter| b"kesnx".contains(&letter)) {
+        return Err(
+            "--output-statuses requires only these letters: k (killed), e (escaped), \
+             s (skipped), n (not covered), x (errored)"
+                .to_owned(),
+        );
+    }
+    command.output_statuses = Some(value);
+    Ok(())
+}
+
 fn set_score(score: &mut Option<u8>, value: String, option: &str) -> Result<(), String> {
     let value = value
         .parse::<u8>()
@@ -561,7 +596,7 @@ fn start_mutation_run(
         command.run_mutant_id.as_deref(),
         &filters,
         &execution,
-        &execution_controls(command),
+        &execution_controls(command, configuration.silent_mode),
     )
     .map_err(|error| error.to_string())?;
     Ok((configuration, baseline, run))
@@ -579,11 +614,13 @@ fn test_execution(command: &RunCommand) -> Result<TestExecution, String> {
         None => Ok(TestExecution::cargo_with_options(
             command.recursive_tests,
             command.execution.cargo_flags.clone().unwrap_or_default(),
+            command.verbose,
+            command.debug,
         )),
     }
 }
 
-fn execution_controls(command: &RunCommand) -> ExecutionControls {
+fn execution_controls(command: &RunCommand, silent_mode: bool) -> ExecutionControls {
     ExecutionControls {
         dry_run: command.execution.dry_run,
         no_exec: command.execution.no_exec,
@@ -599,7 +636,31 @@ fn execution_controls(command: &RunCommand) -> ExecutionControls {
             base: command.execution.git_diff_base.clone(),
         },
         blacklist_files: command.execution.blacklist_files.clone(),
+        progress: progress_enabled(command, silent_mode),
+        filter: DisplayFilter {
+            silent: silent_mode,
+            quiet: command.quiet,
+            output_statuses: command.output_statuses.clone(),
+        },
     }
+}
+
+/// Decides whether to show a live progress line on standard error.
+///
+/// The progress line needs a real terminal, and it never runs alongside
+/// verbose or debug diagnostics (which share standard output, not standard
+/// error, but redraw at a similar cadence) or modes that print no results.
+fn progress_enabled(command: &RunCommand, silent_mode: bool) -> bool {
+    io::stderr().is_terminal() && progress_allowed(command, silent_mode)
+}
+
+/// The non-terminal conditions for [`progress_enabled`].
+fn progress_allowed(command: &RunCommand, silent_mode: bool) -> bool {
+    !command.verbose
+        && !command.debug
+        && !silent_mode
+        && !command.execution.no_exec
+        && !command.execution.dry_run
 }
 
 fn configured_registry(
@@ -639,7 +700,16 @@ fn finish_mutation_run(
         return Ok(write_reports_or_error(command, configuration, run).unwrap_or(ExitCode::SUCCESS));
     }
     let one_mutant = command.run_mutant_id.is_some();
-    print_mutation_results(run, configuration.silent_mode, command.no_diffs, one_mutant)?;
+    print_mutation_results(
+        run,
+        DisplayFilter {
+            silent: configuration.silent_mode,
+            quiet: command.quiet,
+            output_statuses: command.output_statuses.clone(),
+        },
+        command.no_diffs,
+        one_mutant,
+    )?;
     if let Some(code) = write_reports_or_error(command, configuration, run) {
         return Ok(code);
     }
@@ -735,17 +805,18 @@ fn effective_configuration(
 
 fn print_mutation_results(
     run: &mutarust::MutationRun,
-    silent: bool,
+    filter: DisplayFilter,
     no_diffs: bool,
     one_mutant: bool,
 ) -> io::Result<()> {
     let mut stdout = io::stdout().lock();
-    if !silent {
-        for result in run.results() {
-            print_result_details(&mut stdout, result)?;
-            if result.state == mutarust::MutationState::Escaped && !no_diffs {
-                write!(stdout, "{}", result.diff)?;
-            }
+    for result in run.results() {
+        if !filter.shows(result.state) {
+            continue;
+        }
+        print_result_details(&mut stdout, result)?;
+        if result.state == mutarust::MutationState::Escaped && !no_diffs {
+            write!(stdout, "{}", result.diff)?;
         }
     }
     if one_mutant {
@@ -915,6 +986,8 @@ struct RunCommand {
     configuration: Option<PathBuf>,
     no_diffs: bool,
     logger_summary_json: bool,
+    quiet: bool,
+    output_statuses: Option<String>,
     run_mutant_id: Option<String>,
     baseline: BaselineOptions,
     settings: CommandSettings,
@@ -965,6 +1038,8 @@ impl Default for RunCommand {
             configuration: None,
             no_diffs: false,
             logger_summary_json: false,
+            quiet: false,
+            output_statuses: None,
             run_mutant_id: None,
             baseline: BaselineOptions::default(),
             settings: CommandSettings::default(),
@@ -1127,4 +1202,45 @@ fn baseline_control_error(command: &RunCommand) -> Option<&'static str> {
     ]
     .into_iter()
     .find_map(|(invalid, message)| invalid.then_some(message))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{RunCommand, progress_allowed};
+
+    #[test]
+    fn progress_is_allowed_only_without_diagnostics_or_result_free_modes() {
+        let command = RunCommand::default();
+        assert!(progress_allowed(&command, false));
+        assert!(!progress_allowed(&command, true), "silent must disable it");
+
+        let verbose = RunCommand {
+            verbose: true,
+            ..RunCommand::default()
+        };
+        assert!(
+            !progress_allowed(&verbose, false),
+            "verbose must disable it"
+        );
+
+        let debug = RunCommand {
+            debug: true,
+            ..RunCommand::default()
+        };
+        assert!(!progress_allowed(&debug, false), "debug must disable it");
+
+        let mut no_exec = RunCommand::default();
+        no_exec.execution.no_exec = true;
+        assert!(
+            !progress_allowed(&no_exec, false),
+            "no-exec must disable it"
+        );
+
+        let mut dry_run = RunCommand::default();
+        dry_run.execution.dry_run = true;
+        assert!(
+            !progress_allowed(&dry_run, false),
+            "dry-run must disable it"
+        );
+    }
 }
