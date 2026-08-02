@@ -12,6 +12,10 @@ use mutarust::{
 fn main() -> ExitCode {
     let arguments = env::args().skip(1).collect::<Vec<_>>();
 
+    if env::var_os("GO_FLAGS_COMPLETION").is_some() {
+        return print_bash_completion(&arguments).map_or(ExitCode::FAILURE, |()| ExitCode::from(2));
+    }
+
     run(parse_command(&arguments)).unwrap_or(ExitCode::FAILURE)
 }
 
@@ -21,6 +25,7 @@ fn run(command: Command) -> io::Result<ExitCode> {
         Command::Version => print_version().map(|()| ExitCode::SUCCESS),
         Command::ListMutators => list_mutators(),
         Command::ListFiles(targets) => list_files(&targets),
+        Command::PrintAst(targets) => print_ast(&targets),
         Command::Run(command) => run_mutation_tests(*command),
         Command::Invalid(message) => source_error(&message),
     }
@@ -34,30 +39,105 @@ fn parse_command(arguments: &[String]) -> Command {
     match first.as_str() {
         "--help" | "-h" if arguments.len() == 1 => Command::Help,
         "--version" | "-V" if arguments.len() == 1 => Command::Version,
-        "--list-mutators" if arguments.len() == 1 => Command::ListMutators,
-        "--list-mutators" => Command::Invalid(
-            "the --list-mutators command does not accept configuration or mutation options"
-                .to_owned(),
-        ),
-        "--list-files" => parse_list_files(&arguments[1..]),
+        "--list-mutators" => parse_list_mutators(arguments.len()),
+        "--list-files" => parse_target_mode(&arguments[1..], "--list-files", Command::ListFiles),
+        "--print-ast" => parse_target_mode(&arguments[1..], "--print-ast", Command::PrintAst),
         _ => parse_run(arguments),
     }
+}
+
+fn parse_list_mutators(argument_count: usize) -> Command {
+    if argument_count == 1 {
+        Command::ListMutators
+    } else {
+        Command::Invalid(
+            "the --list-mutators command does not accept configuration or mutation options"
+                .to_owned(),
+        )
+    }
+}
+
+fn parse_target_mode(
+    arguments: &[String],
+    name: &str,
+    build: fn(Vec<String>) -> Command,
+) -> Command {
+    if let Some(option) = arguments.iter().find(|argument| argument.starts_with('-')) {
+        return Command::Invalid(format!(
+            "the {name} command does not accept the {option} option"
+        ));
+    }
+    build(arguments.to_vec())
 }
 
 fn print_help() -> io::Result<()> {
     let mut stdout = io::stdout().lock();
     writeln!(
         stdout,
-        "Mutation testing for Rust\n\nUsage:\n  mutarust [OPTIONS] [TARGET]...\n  mutarust --list-files [TARGET]...\n  mutarust --list-mutators"
+        "Mutation testing for Rust\n\nUsage:\n  mutarust [OPTIONS] [TARGET]...\n  mutarust --list-files [TARGET]...\n  mutarust --print-ast [TARGET]...\n  mutarust --list-mutators"
     )?;
     writeln!(
         stdout,
-        "\nOptions:\n  -h, --help           Print help\n  -V, --version        Print version\n      --config FILE     Read mutation policy from a YAML file\n      --list-files      List selected Rust production source files\n      --list-mutators   List available mutators\n      --exec COMMAND    Run a custom command for each mutant\n      --exec-timeout    Stop each test command after this many seconds\n      --timeout         Alias for --exec-timeout\n      --timeout-coefficient FACTOR  Set an adaptive Cargo timeout\n      --test-flags FLAGS  Add shell-quoted Cargo test flags\n      --test-recursive  Select all Cargo workspace packages\n      --workers COUNT   Run this many Cargo mutation jobs\n      --dry-run         List mutants without writing files or running tests\n      --no-exec         Write mutants without running tests\n      --do-not-remove-tmp-folder  Keep mutation workspaces\n      --match REGEXP    Mutate only functions with matching names\n      --verbose         Tell a custom command to produce verbose output\n      --debug           Tell a custom command to produce debug output\n      --silent          Hide mutant status output\n      --no-silent       Print mutant status output\n      --no-diffs        Hide escaped-mutant source diffs\n      --blacklist FILE  Read accepted mutation checksums\n      --baseline FILE   Read escaped-mutant IDs; default mutarust-baseline.json\n      --update-baseline Write current escaped-mutant IDs and exit\n      --fail-on-escaped Fail only for escaped IDs outside the baseline\n      --run-mutant-id ID  Run one mutant without score gates\n      --min-msi         Set the minimum mutation score percentage\n      --min-covered-msi Set the minimum covered-code score percentage\n      --enable NAME     Select a mutator name or group pattern\n      --disable NAME    Disable a mutator name or group pattern"
+        "\nOptions:\n  -h, --help           Print help\n  -V, --version        Print version\n      --config FILE     Read mutation policy from a YAML file\n      --list-files      List selected Rust production source files\n      --print-ast       Print the parsed Rust syntax for selected sources\n      --list-mutators   List available mutators\n      --exec COMMAND    Run a custom command for each mutant\n      --exec-timeout    Stop each test command after this many seconds\n      --timeout         Alias for --exec-timeout\n      --timeout-coefficient FACTOR  Set an adaptive Cargo timeout\n      --test-flags FLAGS  Add shell-quoted Cargo test flags\n      --test-recursive  Select all Cargo workspace packages\n      --workers COUNT   Run this many Cargo mutation jobs\n      --dry-run         List mutants without writing files or running tests\n      --no-exec         Write mutants without running tests\n      --do-not-remove-tmp-folder  Keep mutation workspaces\n      --match REGEXP    Mutate only functions with matching names\n      --verbose         Tell a custom command to produce verbose output\n      --debug           Tell a custom command to produce debug output\n      --silent          Hide mutant status output\n      --no-silent       Print mutant status output\n      --no-diffs        Hide escaped-mutant source diffs\n      --blacklist FILE  Read accepted mutation checksums\n      --baseline FILE   Read escaped-mutant IDs; default mutarust-baseline.json\n      --update-baseline Write current escaped-mutant IDs and exit\n      --fail-on-escaped Fail only for escaped IDs outside the baseline\n      --run-mutant-id ID  Run one mutant without score gates\n      --min-msi         Set the minimum mutation score percentage\n      --min-covered-msi Set the minimum covered-code score percentage\n      --enable NAME     Select a mutator name or group pattern\n      --disable NAME    Disable a mutator name or group pattern"
     )?;
     writeln!(
         stdout,
         "      --coverage        Collect LLVM line coverage before mutation\n      --per-test        Run mapped tests for each covered mutant\n      --git-diff-lines  Mutate Git changed lines only\n      --git-diff-base REF  Set Git base; default origin/HEAD, then master"
     )
+}
+
+fn print_bash_completion(arguments: &[String]) -> io::Result<()> {
+    let prefix = arguments.last().map(String::as_str).unwrap_or("");
+    let mut stdout = io::stdout().lock();
+    for candidate in bash_completion_candidates() {
+        if candidate.starts_with(prefix) {
+            writeln!(stdout, "{candidate}")?;
+        }
+    }
+    Ok(())
+}
+
+fn bash_completion_candidates() -> &'static [&'static str] {
+    &[
+        "-h",
+        "--help",
+        "-V",
+        "--version",
+        "--config",
+        "--list-files",
+        "--print-ast",
+        "--list-mutators",
+        "--exec",
+        "--exec-timeout",
+        "--timeout",
+        "--timeout-coefficient",
+        "--test-flags",
+        "--test-recursive",
+        "--workers",
+        "--dry-run",
+        "--no-exec",
+        "--do-not-remove-tmp-folder",
+        "--match",
+        "--verbose",
+        "--debug",
+        "--silent",
+        "--no-silent",
+        "--no-diffs",
+        "--blacklist",
+        "--baseline",
+        "--update-baseline",
+        "--fail-on-escaped",
+        "--run-mutant-id",
+        "--min-msi",
+        "--min-covered-msi",
+        "--enable",
+        "--disable",
+        "--coverage",
+        "--per-test",
+        "--git-diff-lines",
+        "--git-diff-base",
+        "[TARGET]...",
+    ]
 }
 
 fn print_version() -> io::Result<()> {
@@ -72,23 +152,42 @@ fn list_mutators() -> io::Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-fn parse_list_files(arguments: &[String]) -> Command {
-    if let Some(option) = arguments.iter().find(|argument| argument.starts_with('-')) {
-        return Command::Invalid(format!(
-            "the --list-files command does not accept the {option} option"
-        ));
-    }
-    Command::ListFiles(arguments.to_vec())
+fn list_files(targets: &[String]) -> io::Result<ExitCode> {
+    with_selected_sources(targets, print_files)
 }
 
-fn list_files(targets: &[String]) -> io::Result<ExitCode> {
+fn print_ast(targets: &[String]) -> io::Result<ExitCode> {
+    with_selected_sources(targets, print_syntax_trees)
+}
+
+fn with_selected_sources(
+    targets: &[String],
+    then: impl FnOnce(&[PathBuf]) -> Result<(), String>,
+) -> io::Result<ExitCode> {
     match mutarust::find_rust_sources(targets) {
         Ok(files) if files.is_empty() => {
             source_error("could not find any suitable Rust source files")
         }
-        Ok(files) => print_files(&files).map(|()| ExitCode::SUCCESS),
+        Ok(files) => match then(&files) {
+            Ok(()) => Ok(ExitCode::SUCCESS),
+            Err(message) => source_error(&message),
+        },
         Err(error) => source_error(&error.to_string()),
     }
+}
+
+fn print_syntax_trees(files: &[PathBuf]) -> Result<(), String> {
+    let mut stdout = io::stdout().lock();
+    for file in files {
+        let text = std::fs::read_to_string(file)
+            .map_err(|error| format!("could not open file {}: {error}", file.display()))?;
+        let syntax = syn::parse_file(&text)
+            .map_err(|error| format!("could not parse file {}: {error}", file.display()))?;
+        writeln!(stdout, "{}", file.display()).map_err(|error| error.to_string())?;
+        writeln!(stdout, "{syntax:#?}").map_err(|error| error.to_string())?;
+        writeln!(stdout).map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }
 
 fn parse_run(arguments: &[String]) -> Command {
@@ -187,9 +286,8 @@ fn parse_switch_option(command: &mut RunCommand, argument: &str) -> Result<(), S
             command.debug = true;
             Ok(())
         }
-        "--help" | "-h" | "--version" | "-V" | "--list-files" | "--list-mutators" => {
-            Err(format!("cannot use {argument} with mutation options"))
-        }
+        "--help" | "-h" | "--version" | "-V" | "--list-files" | "--print-ast"
+        | "--list-mutators" => Err(format!("cannot use {argument} with mutation options")),
         _ => Err(format!("unknown argument: {argument}")),
     }
 }
@@ -737,11 +835,11 @@ fn covered_score_gate(run: &mutarust::MutationRun, minimum: Option<u8>) -> ExitC
     }
 }
 
-fn print_files(files: &[std::path::PathBuf]) -> io::Result<()> {
+fn print_files(files: &[std::path::PathBuf]) -> Result<(), String> {
     let mut stdout = io::stdout().lock();
 
     for file in files {
-        writeln!(stdout, "{}", file.display())?;
+        writeln!(stdout, "{}", file.display()).map_err(|error| error.to_string())?;
     }
 
     Ok(())
@@ -761,6 +859,7 @@ enum Command {
     Version,
     ListMutators,
     ListFiles(Vec<String>),
+    PrintAst(Vec<String>),
     Run(Box<RunCommand>),
     Invalid(String),
 }

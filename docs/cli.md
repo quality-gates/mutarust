@@ -242,3 +242,27 @@ generated source. Broader package, workspace, and directory selection excludes
 these sources by default.
 
 This command lets users confirm the source scope before mutation testing.
+
+## Syntax Trees
+
+Print the parsed Rust syntax for selected production sources:
+
+```text
+mutarust --print-ast [TARGET]...
+```
+
+Mutarust uses the same target rules as `--list-files`. For each selected
+source it prints the absolute path, then the parsed syntax tree, then a blank
+line. This command does not run tests and does not change the user workspace.
+
+## Bash Completion
+
+Enable Bash completion with the helper script:
+
+```text
+source scripts/mutarust-bash_completion.sh
+```
+
+The helper sets `GO_FLAGS_COMPLETION=1` and runs `mutarust` with the current
+words. Mutarust then prints matching documented options and the `[TARGET]...`
+argument marker. The completion exit value is 2.
