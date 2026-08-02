@@ -247,10 +247,7 @@ pub(super) fn kill_hint(mutator: &str) -> Option<&'static str> {
     lookup(KILL_HINTS, mutator)
 }
 
-fn lookup(
-    entries: &'static [(&'static str, &'static str)],
-    mutator: &str,
-) -> Option<&'static str> {
+fn lookup(entries: &'static [(&'static str, &'static str)], mutator: &str) -> Option<&'static str> {
     entries
         .binary_search_by_key(&mutator, |entry| entry.0)
         .ok()
