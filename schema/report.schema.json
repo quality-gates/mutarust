@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Mutarust full JSON report",
+  "description": "Full mutation report written to report.json when json_output is enabled.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "metadata",
+    "stats",
+    "escaped",
+    "killed",
+    "errored"
+  ],
+  "properties": {
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "hasCoverage", "oneMutant"],
+      "properties": {
+        "version": { "type": "string", "minLength": 1 },
+        "hasCoverage": { "type": "boolean" },
+        "oneMutant": { "type": "boolean" }
+      }
+    },
+    "stats": { "$ref": "summary.schema.json" },
+    "mutatorStats": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "killed", "escaped", "skipped", "total"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "killed": { "type": "integer", "minimum": 0 },
+          "escaped": { "type": "integer", "minimum": 0 },
+          "skipped": { "type": "integer", "minimum": 0 },
+          "total": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "escaped": { "type": "array", "items": { "$ref": "#/$defs/mutant" } },
+    "killed": { "type": "array", "items": { "$ref": "#/$defs/mutant" } },
+    "skipped": { "type": "array", "items": { "$ref": "#/$defs/mutant" } },
+    "errored": { "type": "array", "items": { "$ref": "#/$defs/mutant" } },
+    "notCovered": { "type": "array", "items": { "$ref": "#/$defs/mutant" } },
+    "generated": { "type": "array", "items": { "$ref": "#/$defs/mutant" } }
+  },
+  "$defs": {
+    "mutant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "mutator", "diff"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
+        },
+        "mutator": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mutatorName",
+            "originalFilePath",
+            "originalStartLine"
+          ],
+          "properties": {
+            "mutatorName": { "type": "string", "minLength": 1 },
+            "originalFilePath": { "type": "string", "minLength": 1 },
+            "originalStartLine": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "diff": { "type": "string" },
+        "processOutput": { "type": "string" }
+      }
+    }
+  }
+}

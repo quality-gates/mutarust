@@ -78,6 +78,19 @@ Use `--run-mutant-id ID` to run one stable mutant ID. This mode prints only
 the selected mutant evidence. It does not print the normal summary or apply
 score gates.
 
+## JSON Reports
+
+Use `json_output: true` in a configuration file to write the full report to
+`report.json` in the current directory. Use `--logger-summary-json` to write
+the compact score summary to `mutarust-summary.json`. Mutarust writes a report
+only when that command option or configuration field enables it. A baseline
+update does not write these reports.
+
+Score values in both files use ratios from zero to one. Source names are
+repository-relative. See the [JSON report schemas](json-outputs.md) for the
+full and compact document forms, including empty runs, coverage runs, and
+one-mutant runs.
+
 ## Accepted Mutants
 
 Use `--update-baseline` to write the escaped mutants from the current run to

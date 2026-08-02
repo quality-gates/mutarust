@@ -16,7 +16,7 @@
       "default": false
     },
     "json_output": {
-      "description": "Request a JSON report.",
+      "description": "Write the full mutation report to report.json.",
       "type": "boolean",
       "default": false
     },

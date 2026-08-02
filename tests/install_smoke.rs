@@ -1691,6 +1691,312 @@ fn installed_command_reports_stable_evidence_and_enforces_total_score() {
     );
 }
 
+#[test]
+fn installed_command_writes_full_and_compact_json_reports() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_mutation_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    let config = fixture.join("mutarust.yml");
+    fs::write(
+        &config,
+        "json_output: true\nenable_mutators:\n  - conditional/bool-literal\n",
+    )
+    .expect("report configuration must be written");
+    let full_report = fixture.join("report.json");
+    let compact_summary = fixture.join("mutarust-summary.json");
+
+    let without_reports = Command::new(command_path(&install))
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start without report options");
+    assert!(
+        without_reports.status.success(),
+        "a run without report options must succeed: {}",
+        String::from_utf8_lossy(&without_reports.stderr)
+    );
+    assert!(
+        !full_report.exists() && !compact_summary.exists(),
+        "reports must be written only when enabled"
+    );
+
+    let output = Command::new(command_path(&install))
+        .args([
+            "--config",
+            config.to_str().expect("config path must be UTF-8"),
+            "--logger-summary-json",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start with JSON reports");
+    assert!(
+        output.status.success(),
+        "JSON report run must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let full = read_json_object(&full_report);
+    assert_eq!(full["metadata"]["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(full["metadata"]["hasCoverage"], false);
+    assert_eq!(full["metadata"]["oneMutant"], false);
+    assert_eq!(full["stats"]["totalMutantsCount"], 2);
+    assert_eq!(full["stats"]["killedCount"], 1);
+    assert_eq!(full["stats"]["escapedCount"], 1);
+    assert_eq!(full["stats"]["msi"], 0.5);
+    assert_eq!(full["stats"]["coveredCodeMsi"], 0.0);
+    assert!(full["stats"]["msi"].as_f64().expect("msi") <= 1.0);
+    assert_eq!(
+        full["killed"][0]["mutator"]["originalFilePath"],
+        "checked/src/lib.rs"
+    );
+    assert_eq!(full["killed"][0]["mutator"]["originalStartLine"], 1);
+    assert_eq!(
+        full["escaped"][0]["mutator"]["originalFilePath"],
+        "checked/src/lib.rs"
+    );
+    assert_eq!(full["escaped"][0]["mutator"]["originalStartLine"], 2);
+    let ids = [
+        full["killed"][0]["id"]
+            .as_str()
+            .expect("killed id")
+            .to_owned(),
+        full["escaped"][0]["id"]
+            .as_str()
+            .expect("escaped id")
+            .to_owned(),
+    ];
+    assert!(
+        ids.contains(&"4582b234c128077507b7558eb62c337e".to_owned())
+            && ids.contains(&"c2b28e81b2cc0af0ff4a6a1225106223".to_owned()),
+        "full report must include stable mutant IDs: {full}"
+    );
+    assert!(
+        full["escaped"][0]["diff"]
+            .as_str()
+            .expect("escaped diff")
+            .contains("checked/src/lib.rs"),
+        "full report diffs must keep repository-relative paths: {full}"
+    );
+    assert!(
+        full["mutatorStats"]
+            .as_array()
+            .expect("mutatorStats")
+            .iter()
+            .any(|entry| entry["name"] == "conditional/bool-literal"),
+        "full report must include mutator stats: {full}"
+    );
+    validate_full_report_schema(&full);
+    validate_compact_summary_schema(&full["stats"]);
+
+    let summary = read_json_object(&compact_summary);
+    assert_eq!(summary["totalMutantsCount"], 2);
+    assert_eq!(summary["killedCount"], 1);
+    assert_eq!(summary["escapedCount"], 1);
+    assert_eq!(summary["msi"], 0.5);
+    assert_eq!(summary["coveredCodeMsi"], 0.0);
+    validate_compact_summary_schema(&summary);
+
+    let empty_config = fixture.join("empty-report.yml");
+    fs::write(
+        &empty_config,
+        "json_output: true\nenable_mutators:\n  - conditional/bool-literal\nignore_source_lines:\n  - '.*'\n",
+    )
+    .expect("empty-run configuration must be written");
+    let empty_run = Command::new(command_path(&install))
+        .args([
+            "--config",
+            empty_config.to_str().expect("config path must be UTF-8"),
+            "--logger-summary-json",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start for an empty report run");
+    assert!(
+        empty_run.status.success(),
+        "empty report run must succeed: {}",
+        String::from_utf8_lossy(&empty_run.stderr)
+    );
+    let empty = read_json_object(&full_report);
+    assert_eq!(empty["stats"]["totalMutantsCount"], 0);
+    assert_eq!(empty["stats"]["msi"], 0.0);
+    assert!(empty["escaped"].as_array().expect("escaped").is_empty());
+    assert!(empty["killed"].as_array().expect("killed").is_empty());
+    assert!(empty["errored"].as_array().expect("errored").is_empty());
+    assert!(empty.get("notCovered").is_none());
+    assert!(empty.get("generated").is_none());
+    validate_full_report_schema(&empty);
+
+    let selected_id = "4582b234c128077507b7558eb62c337e";
+    let one_mutant = Command::new(command_path(&install))
+        .args([
+            "--config",
+            config.to_str().expect("config path must be UTF-8"),
+            "--logger-summary-json",
+            "--run-mutant-id",
+            selected_id,
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start for one-mutant reports");
+    assert!(
+        one_mutant.status.success(),
+        "one-mutant report run must succeed: {}",
+        String::from_utf8_lossy(&one_mutant.stderr)
+    );
+    let one = read_json_object(&full_report);
+    assert_eq!(one["metadata"]["oneMutant"], true);
+    assert_eq!(one["stats"]["totalMutantsCount"], 1);
+    let one_ids = report_mutant_ids(&one);
+    assert_eq!(one_ids, vec![selected_id.to_owned()]);
+    validate_full_report_schema(&one);
+
+    let baseline = fixture.join("mutarust-baseline.json");
+    let _ = fs::remove_file(&full_report);
+    let _ = fs::remove_file(&compact_summary);
+    let baseline_update = Command::new(command_path(&install))
+        .args([
+            "--config",
+            config.to_str().expect("config path must be UTF-8"),
+            "--logger-summary-json",
+            "--baseline",
+            baseline.to_str().expect("baseline path must be UTF-8"),
+            "--update-baseline",
+            "--exec",
+            "false",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start for baseline report form");
+    assert!(
+        baseline_update.status.success(),
+        "baseline update must succeed: {}",
+        String::from_utf8_lossy(&baseline_update.stderr)
+    );
+    assert!(
+        baseline.exists() && !full_report.exists() && !compact_summary.exists(),
+        "baseline update must write the baseline and must not write JSON reports"
+    );
+}
+
+fn read_json_object(path: &Path) -> serde_json::Value {
+    let text = fs::read_to_string(path)
+        .unwrap_or_else(|error| panic!("{} must be readable: {error}", path.display()));
+    serde_json::from_str(&text)
+        .unwrap_or_else(|error| panic!("{} must be valid JSON: {error}\n{text}", path.display()))
+}
+
+fn report_mutant_ids(report: &serde_json::Value) -> Vec<String> {
+    [
+        "escaped",
+        "killed",
+        "skipped",
+        "errored",
+        "notCovered",
+        "generated",
+    ]
+    .into_iter()
+    .flat_map(|key| {
+        report
+            .get(key)
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|mutant| mutant["id"].as_str().map(str::to_owned))
+    })
+    .collect()
+}
+
+fn validate_compact_summary_schema(summary: &serde_json::Value) {
+    for field in [
+        "totalMutantsCount",
+        "killedCount",
+        "notCoveredCount",
+        "escapedCount",
+        "errorCount",
+        "skippedCount",
+    ] {
+        assert!(
+            summary[field].as_u64().is_some(),
+            "compact summary must include integer {field}: {summary}"
+        );
+    }
+    for field in ["msi", "coveredCodeMsi"] {
+        let score = summary[field]
+            .as_f64()
+            .unwrap_or_else(|| panic!("compact summary must include number {field}: {summary}"));
+        assert!(
+            (0.0..=1.0).contains(&score),
+            "compact summary {field} must be a ratio from zero to one: {summary}"
+        );
+    }
+    assert!(
+        summary.as_object().expect("summary object").len() == 8,
+        "compact summary must match the published field set: {summary}"
+    );
+}
+
+fn validate_full_report_schema(report: &serde_json::Value) {
+    assert!(report["metadata"]["version"].as_str().is_some());
+    assert!(report["metadata"]["hasCoverage"].as_bool().is_some());
+    assert!(report["metadata"]["oneMutant"].as_bool().is_some());
+    validate_compact_summary_schema(&report["stats"]);
+    for key in ["escaped", "killed", "errored"] {
+        let mutants = report[key]
+            .as_array()
+            .unwrap_or_else(|| panic!("full report must include {key}: {report}"));
+        for mutant in mutants {
+            validate_report_mutant(mutant);
+        }
+    }
+    for key in ["skipped", "notCovered", "generated"] {
+        if let Some(mutants) = report.get(key) {
+            for mutant in mutants.as_array().expect("{key} must be an array") {
+                validate_report_mutant(mutant);
+            }
+        }
+    }
+    if let Some(stats) = report.get("mutatorStats") {
+        for entry in stats.as_array().expect("mutatorStats must be an array") {
+            assert!(entry["name"].as_str().is_some());
+            assert!(entry["killed"].as_u64().is_some());
+            assert!(entry["escaped"].as_u64().is_some());
+            assert!(entry["skipped"].as_u64().is_some());
+            assert!(entry["total"].as_u64().is_some());
+        }
+    }
+}
+
+fn validate_report_mutant(mutant: &serde_json::Value) {
+    let id = mutant["id"].as_str().expect("mutant id");
+    assert_eq!(
+        id.len(),
+        32,
+        "stable ID must be 32 hex characters: {mutant}"
+    );
+    assert!(
+        id.bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)),
+        "stable ID must be lower-case hex: {mutant}"
+    );
+    assert!(mutant["mutator"]["mutatorName"].as_str().is_some());
+    let path = mutant["mutator"]["originalFilePath"]
+        .as_str()
+        .expect("originalFilePath");
+    assert!(!path.is_empty() && !path.contains('\\'));
+    assert!(path.chars().next().is_some_and(|c| c != '/'));
+    assert!(
+        mutant["mutator"]["originalStartLine"]
+            .as_u64()
+            .is_some_and(|line| line >= 1)
+    );
+    assert!(mutant["diff"].as_str().is_some());
+}
+
 #[cfg(unix)]
 #[test]
 fn installed_command_manages_baselines_blacklists_and_one_mutant_ids() {
