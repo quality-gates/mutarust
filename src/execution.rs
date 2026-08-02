@@ -1242,7 +1242,46 @@ mod tests {
     use std::path::PathBuf;
     use std::time::Duration;
 
-    use super::{MutationResult, MutationRun, MutationState, adaptive_timeout};
+    use super::{DisplayFilter, MutationResult, MutationRun, MutationState, adaptive_timeout};
+
+    #[test]
+    fn display_filter_honours_silent_quiet_and_every_status_letter() {
+        let silent = DisplayFilter {
+            silent: true,
+            quiet: true,
+            output_statuses: Some("kesnx".to_owned()),
+        };
+        for state in [
+            MutationState::Killed,
+            MutationState::Escaped,
+            MutationState::Skipped,
+            MutationState::NotCovered,
+            MutationState::Errored,
+        ] {
+            assert!(!silent.shows(state), "silent hides {state:?}");
+        }
+
+        let quiet = DisplayFilter {
+            quiet: true,
+            ..DisplayFilter::default()
+        };
+        assert!(quiet.shows(MutationState::Escaped));
+        assert!(!quiet.shows(MutationState::Killed));
+
+        let letters = DisplayFilter {
+            output_statuses: Some("ksnx".to_owned()),
+            quiet: true,
+            ..DisplayFilter::default()
+        };
+        assert!(letters.shows(MutationState::Killed));
+        assert!(letters.shows(MutationState::Skipped));
+        assert!(letters.shows(MutationState::NotCovered));
+        assert!(letters.shows(MutationState::Errored));
+        assert!(
+            !letters.shows(MutationState::Escaped),
+            "output_statuses overrides quiet and can hide escaped"
+        );
+    }
 
     #[test]
     fn mutation_score_uses_the_parity_states() {

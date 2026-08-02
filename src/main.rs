@@ -296,11 +296,11 @@ fn parse_switch_option(command: &mut RunCommand, argument: &str) -> Result<(), S
             Ok(())
         }
         "--verbose" => {
-            command.verbose = true;
+            command.output.verbose = true;
             Ok(())
         }
         "--debug" => {
-            command.debug = true;
+            command.output.debug = true;
             Ok(())
         }
         "--help" | "-h" | "--version" | "-V" | "--list-files" | "--print-ast"
@@ -314,12 +314,12 @@ fn parse_display_switch(command: &mut RunCommand, argument: &str) -> Option<Resu
         "--silent" => set_silent(command, true),
         "--no-silent" => set_silent(command, false),
         "--no-diffs" => {
-            command.no_diffs = true;
+            command.output.no_diffs = true;
             Ok(())
         }
         "--logger-summary-json" => set_logger_summary_json(command),
         "--quiet" => {
-            command.quiet = true;
+            command.output.quiet = true;
             Ok(())
         }
         _ => return None,
@@ -539,7 +539,7 @@ fn set_silent(command: &mut RunCommand, value: bool) -> Result<(), String> {
 }
 
 fn set_output_statuses(command: &mut RunCommand, value: String) -> Result<(), String> {
-    if command.output_statuses.is_some() {
+    if command.output.output_statuses.is_some() {
         return Err("--output-statuses can be supplied only once".to_owned());
     }
     if value.is_empty() || !value.bytes().all(|letter| b"kesnx".contains(&letter)) {
@@ -549,7 +549,7 @@ fn set_output_statuses(command: &mut RunCommand, value: String) -> Result<(), St
                 .to_owned(),
         );
     }
-    command.output_statuses = Some(value);
+    command.output.output_statuses = Some(value);
     Ok(())
 }
 
@@ -607,15 +607,15 @@ fn test_execution(command: &RunCommand) -> Result<TestExecution, String> {
         Some(custom) => TestExecution::custom(
             custom,
             command.recursive_tests,
-            command.verbose,
-            command.debug,
+            command.output.verbose,
+            command.output.debug,
         )
         .map_err(|error| error.to_string()),
         None => Ok(TestExecution::cargo_with_options(
             command.recursive_tests,
             command.execution.cargo_flags.clone().unwrap_or_default(),
-            command.verbose,
-            command.debug,
+            command.output.verbose,
+            command.output.debug,
         )),
     }
 }
@@ -639,8 +639,8 @@ fn execution_controls(command: &RunCommand, silent_mode: bool) -> ExecutionContr
         progress: progress_enabled(command, silent_mode),
         filter: DisplayFilter {
             silent: silent_mode,
-            quiet: command.quiet,
-            output_statuses: command.output_statuses.clone(),
+            quiet: command.output.quiet,
+            output_statuses: command.output.output_statuses.clone(),
         },
     }
 }
@@ -656,8 +656,8 @@ fn progress_enabled(command: &RunCommand, silent_mode: bool) -> bool {
 
 /// The non-terminal conditions for [`progress_enabled`].
 fn progress_allowed(command: &RunCommand, silent_mode: bool) -> bool {
-    !command.verbose
-        && !command.debug
+    !command.output.verbose
+        && !command.output.debug
         && !silent_mode
         && !command.execution.no_exec
         && !command.execution.dry_run
@@ -704,10 +704,10 @@ fn finish_mutation_run(
         run,
         DisplayFilter {
             silent: configuration.silent_mode,
-            quiet: command.quiet,
-            output_statuses: command.output_statuses.clone(),
+            quiet: command.output.quiet,
+            output_statuses: command.output.output_statuses.clone(),
         },
-        command.no_diffs,
+        command.output.no_diffs,
         one_mutant,
     )?;
     if let Some(code) = write_reports_or_error(command, configuration, run) {
@@ -979,18 +979,23 @@ struct RunCommand {
     timeout: Duration,
     custom_command: Option<String>,
     recursive_tests: bool,
-    verbose: bool,
-    debug: bool,
     execution: ExecutionOptions,
+    output: OutputOptions,
     function_match: Option<String>,
     configuration: Option<PathBuf>,
-    no_diffs: bool,
     logger_summary_json: bool,
-    quiet: bool,
-    output_statuses: Option<String>,
     run_mutant_id: Option<String>,
     baseline: BaselineOptions,
     settings: CommandSettings,
+}
+
+#[derive(Default)]
+struct OutputOptions {
+    verbose: bool,
+    debug: bool,
+    quiet: bool,
+    no_diffs: bool,
+    output_statuses: Option<String>,
 }
 
 #[derive(Default)]
@@ -1031,15 +1036,11 @@ impl Default for RunCommand {
             timeout: mutarust::DEFAULT_TEST_TIMEOUT,
             custom_command: None,
             recursive_tests: false,
-            verbose: false,
-            debug: false,
             execution: ExecutionOptions::default(),
+            output: OutputOptions::default(),
             function_match: None,
             configuration: None,
-            no_diffs: false,
             logger_summary_json: false,
-            quiet: false,
-            output_statuses: None,
             run_mutant_id: None,
             baseline: BaselineOptions::default(),
             settings: CommandSettings::default(),
@@ -1214,19 +1215,15 @@ mod tests {
         assert!(progress_allowed(&command, false));
         assert!(!progress_allowed(&command, true), "silent must disable it");
 
-        let verbose = RunCommand {
-            verbose: true,
-            ..RunCommand::default()
-        };
+        let mut verbose = RunCommand::default();
+        verbose.output.verbose = true;
         assert!(
             !progress_allowed(&verbose, false),
             "verbose must disable it"
         );
 
-        let debug = RunCommand {
-            debug: true,
-            ..RunCommand::default()
-        };
+        let mut debug = RunCommand::default();
+        debug.output.debug = true;
         assert!(!progress_allowed(&debug, false), "debug must disable it");
 
         let mut no_exec = RunCommand::default();
