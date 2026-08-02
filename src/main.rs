@@ -5,8 +5,8 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use mutarust::{
-    CommandSettings, Configuration, CoverageControls, ExecutionControls, GitDiffControls, Registry,
-    TestExecution, WorkerLimit,
+    Baseline, CommandSettings, Configuration, CoverageControls, ExecutionControls, GitDiffControls,
+    Registry, TestExecution, WorkerLimit,
 };
 
 fn main() -> ExitCode {
@@ -52,7 +52,7 @@ fn print_help() -> io::Result<()> {
     )?;
     writeln!(
         stdout,
-        "\nOptions:\n  -h, --help           Print help\n  -V, --version        Print version\n      --config FILE     Read mutation policy from a YAML file\n      --list-files      List selected Rust production source files\n      --list-mutators   List available mutators\n      --exec COMMAND    Run a custom command for each mutant\n      --exec-timeout    Stop each test command after this many seconds\n      --timeout         Alias for --exec-timeout\n      --timeout-coefficient FACTOR  Set an adaptive Cargo timeout\n      --test-flags FLAGS  Add shell-quoted Cargo test flags\n      --test-recursive  Select all Cargo workspace packages\n      --workers COUNT   Run this many Cargo mutation jobs\n      --dry-run         List mutants without writing files or running tests\n      --no-exec         Write mutants without running tests\n      --do-not-remove-tmp-folder  Keep mutation workspaces\n      --match REGEXP    Mutate only functions with matching names\n      --verbose         Tell a custom command to produce verbose output\n      --debug           Tell a custom command to produce debug output\n      --silent          Hide mutant status output\n      --no-silent       Print mutant status output\n      --no-diffs        Hide escaped-mutant source diffs\n      --run-mutant-id ID  Run one mutant without score gates\n      --min-msi         Set the minimum mutation score percentage\n      --min-covered-msi Set the minimum covered-code score percentage\n      --enable NAME     Select a mutator name or group pattern\n      --disable NAME    Disable a mutator name or group pattern"
+        "\nOptions:\n  -h, --help           Print help\n  -V, --version        Print version\n      --config FILE     Read mutation policy from a YAML file\n      --list-files      List selected Rust production source files\n      --list-mutators   List available mutators\n      --exec COMMAND    Run a custom command for each mutant\n      --exec-timeout    Stop each test command after this many seconds\n      --timeout         Alias for --exec-timeout\n      --timeout-coefficient FACTOR  Set an adaptive Cargo timeout\n      --test-flags FLAGS  Add shell-quoted Cargo test flags\n      --test-recursive  Select all Cargo workspace packages\n      --workers COUNT   Run this many Cargo mutation jobs\n      --dry-run         List mutants without writing files or running tests\n      --no-exec         Write mutants without running tests\n      --do-not-remove-tmp-folder  Keep mutation workspaces\n      --match REGEXP    Mutate only functions with matching names\n      --verbose         Tell a custom command to produce verbose output\n      --debug           Tell a custom command to produce debug output\n      --silent          Hide mutant status output\n      --no-silent       Print mutant status output\n      --no-diffs        Hide escaped-mutant source diffs\n      --blacklist FILE  Read accepted mutation checksums\n      --baseline FILE   Read escaped-mutant IDs; default mutarust-baseline.json\n      --update-baseline Write current escaped-mutant IDs and exit\n      --fail-on-escaped Fail only for escaped IDs outside the baseline\n      --run-mutant-id ID  Run one mutant without score gates\n      --min-msi         Set the minimum mutation score percentage\n      --min-covered-msi Set the minimum covered-code score percentage\n      --enable NAME     Select a mutator name or group pattern\n      --disable NAME    Disable a mutator name or group pattern"
     )?;
     writeln!(
         stdout,
@@ -137,6 +137,8 @@ fn parse_value_option(
         "--test-flags" => value().and_then(|value| set_test_flags(command, value)),
         "--exec" => value().and_then(|value| set_custom_command(command, value)),
         "--git-diff-base" => value().and_then(|value| set_git_diff_base(command, value)),
+        "--baseline" => value().and_then(|value| set_baseline_path(command, value)),
+        "--blacklist" => value().map(|value| add_blacklist(command, value)),
         _ => return parse_policy_value_option(command, argument, next),
     })
 }
@@ -166,13 +168,13 @@ fn parse_switch_option(command: &mut RunCommand, argument: &str) -> Result<(), S
     if let Some(result) = parse_execution_switch(command, argument) {
         return result;
     }
+    if let Some(result) = parse_baseline_switch(command, argument) {
+        return result;
+    }
+    if let Some(result) = parse_display_switch(command, argument) {
+        return result;
+    }
     match argument {
-        "--silent" => set_silent(command, true),
-        "--no-silent" => set_silent(command, false),
-        "--no-diffs" => {
-            command.no_diffs = true;
-            Ok(())
-        }
         "--test-recursive" => {
             command.recursive_tests = true;
             Ok(())
@@ -190,6 +192,26 @@ fn parse_switch_option(command: &mut RunCommand, argument: &str) -> Result<(), S
         }
         _ => Err(format!("unknown argument: {argument}")),
     }
+}
+
+fn parse_display_switch(command: &mut RunCommand, argument: &str) -> Option<Result<(), String>> {
+    Some(match argument {
+        "--silent" => set_silent(command, true),
+        "--no-silent" => set_silent(command, false),
+        "--no-diffs" => {
+            command.no_diffs = true;
+            Ok(())
+        }
+        _ => return None,
+    })
+}
+
+fn parse_baseline_switch(command: &mut RunCommand, argument: &str) -> Option<Result<(), String>> {
+    Some(match argument {
+        "--update-baseline" => set_update_baseline(command),
+        "--fail-on-escaped" => set_fail_on_escaped(command),
+        _ => return None,
+    })
 }
 
 fn parse_execution_switch(command: &mut RunCommand, argument: &str) -> Option<Result<(), String>> {
@@ -259,6 +281,41 @@ fn set_run_mutant_id(command: &mut RunCommand, value: String) -> Result<(), Stri
     if command.run_mutant_id.replace(value).is_some() {
         Err("--run-mutant-id can be supplied only once".to_owned())
     } else {
+        Ok(())
+    }
+}
+
+fn set_baseline_path(command: &mut RunCommand, value: String) -> Result<(), String> {
+    if command
+        .baseline
+        .path
+        .replace(PathBuf::from(value))
+        .is_some()
+    {
+        Err("--baseline can be supplied only once".to_owned())
+    } else {
+        Ok(())
+    }
+}
+
+fn add_blacklist(command: &mut RunCommand, value: String) {
+    command.execution.blacklist_files.push(PathBuf::from(value));
+}
+
+fn set_update_baseline(command: &mut RunCommand) -> Result<(), String> {
+    if command.baseline.update {
+        Err("--update-baseline can be supplied only once".to_owned())
+    } else {
+        command.baseline.update = true;
+        Ok(())
+    }
+}
+
+fn set_fail_on_escaped(command: &mut RunCommand) -> Result<(), String> {
+    if command.baseline.fail_on_escaped {
+        Err("--fail-on-escaped can be supplied only once".to_owned())
+    } else {
+        command.baseline.fail_on_escaped = true;
         Ok(())
     }
 }
@@ -374,31 +431,31 @@ fn add_enabled(command: &mut RunCommand, value: String) {
 }
 
 fn run_mutation_tests(command: RunCommand) -> io::Result<ExitCode> {
-    let configuration = match effective_configuration(&command) {
-        Ok(configuration) => configuration,
-        Err(error) => return source_error(&error.to_string()),
-    };
-    let (registry, filters) = match configured_registry(&command, &configuration) {
+    let (configuration, baseline, run) = match start_mutation_run(&command) {
         Ok(values) => values,
         Err(error) => return source_error(&error),
     };
-    let execution = match test_execution(&command) {
-        Ok(execution) => execution,
-        Err(error) => return source_error(&error),
-    };
-    let run = match mutarust::run_mutation_tests_with_controls(
+    finish_mutation_run(&command, &configuration, &baseline, &run)
+}
+
+fn start_mutation_run(
+    command: &RunCommand,
+) -> Result<(Configuration, Baseline, mutarust::MutationRun), String> {
+    let baseline = Baseline::load(command.baseline.path())?;
+    let configuration = effective_configuration(command).map_err(|error| error.to_string())?;
+    let (registry, filters) = configured_registry(command, &configuration)?;
+    let execution = test_execution(command)?;
+    let run = mutarust::run_mutation_tests_with_controls(
         &command.targets,
         &registry,
         command.timeout,
         command.run_mutant_id.as_deref(),
         &filters,
         &execution,
-        &execution_controls(&command),
-    ) {
-        Ok(run) => run,
-        Err(error) => return source_error(&error.to_string()),
-    };
-    finish_mutation_run(&command, &configuration, &run)
+        &execution_controls(command),
+    )
+    .map_err(|error| error.to_string())?;
+    Ok((configuration, baseline, run))
 }
 
 fn test_execution(command: &RunCommand) -> Result<TestExecution, String> {
@@ -432,6 +489,7 @@ fn execution_controls(command: &RunCommand) -> ExecutionControls {
             enabled: command.execution.git_diff_lines,
             base: command.execution.git_diff_base.clone(),
         },
+        blacklist_files: command.execution.blacklist_files.clone(),
     }
 }
 
@@ -457,8 +515,12 @@ fn configured_registry(
 fn finish_mutation_run(
     command: &RunCommand,
     configuration: &Configuration,
+    baseline: &Baseline,
     run: &mutarust::MutationRun,
 ) -> io::Result<ExitCode> {
+    if command.baseline.update {
+        return write_baseline(command.baseline.path(), run);
+    }
     if command.execution.dry_run {
         return print_dry_run(run);
     }
@@ -470,8 +532,28 @@ fn finish_mutation_run(
     Ok(if one_mutant {
         ExitCode::SUCCESS
     } else {
-        score_gates(run, configuration)
+        score_gates(
+            run,
+            configuration,
+            baseline,
+            command.baseline.fail_on_escaped,
+        )
     })
+}
+
+fn write_baseline(path: &std::path::Path, run: &mutarust::MutationRun) -> io::Result<ExitCode> {
+    match Baseline::write(path, run) {
+        Ok(count) => {
+            writeln!(
+                io::stdout().lock(),
+                "Baseline written to \"{}\" ({} escaped mutant(s))",
+                path.display(),
+                count
+            )?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Err(error) => source_error(&error),
+    }
 }
 
 fn print_dry_run(run: &mutarust::MutationRun) -> io::Result<ExitCode> {
@@ -596,12 +678,40 @@ fn total_score_gate(run: &mutarust::MutationRun, minimum: Option<u8>) -> ExitCod
     }
 }
 
-fn score_gates(run: &mutarust::MutationRun, configuration: &Configuration) -> ExitCode {
+fn score_gates(
+    run: &mutarust::MutationRun,
+    configuration: &Configuration,
+    baseline: &Baseline,
+    fail_on_escaped: bool,
+) -> ExitCode {
     let total = total_score_gate(run, configuration.min_msi);
     if total != ExitCode::SUCCESS {
         return total;
     }
-    covered_score_gate(run, configuration.min_covered_msi)
+    let covered = covered_score_gate(run, configuration.min_covered_msi);
+    if covered != ExitCode::SUCCESS {
+        return covered;
+    }
+    escaped_mutant_gate(run, baseline, fail_on_escaped)
+}
+
+fn escaped_mutant_gate(
+    run: &mutarust::MutationRun,
+    baseline: &Baseline,
+    fail_on_escaped: bool,
+) -> ExitCode {
+    if !fail_on_escaped {
+        return ExitCode::SUCCESS;
+    }
+    let count = baseline.new_escaped_count(run);
+    if count == 0 {
+        ExitCode::SUCCESS
+    } else {
+        write_error(&format!(
+            "{count} new mutant(s) escaped — kill them or run --update-baseline to accept"
+        ));
+        ExitCode::from(4)
+    }
 }
 
 fn covered_score_gate(run: &mutarust::MutationRun, minimum: Option<u8>) -> ExitCode {
@@ -667,7 +777,23 @@ struct RunCommand {
     configuration: Option<PathBuf>,
     no_diffs: bool,
     run_mutant_id: Option<String>,
+    baseline: BaselineOptions,
     settings: CommandSettings,
+}
+
+#[derive(Default)]
+struct BaselineOptions {
+    path: Option<PathBuf>,
+    update: bool,
+    fail_on_escaped: bool,
+}
+
+impl BaselineOptions {
+    fn path(&self) -> &std::path::Path {
+        self.path
+            .as_deref()
+            .unwrap_or_else(|| std::path::Path::new("mutarust-baseline.json"))
+    }
 }
 
 #[derive(Default)]
@@ -683,6 +809,7 @@ struct ExecutionOptions {
     per_test_coverage: bool,
     git_diff_lines: bool,
     git_diff_base: Option<String>,
+    blacklist_files: Vec<PathBuf>,
 }
 
 impl Default for RunCommand {
@@ -699,6 +826,7 @@ impl Default for RunCommand {
             configuration: None,
             no_diffs: false,
             run_mutant_id: None,
+            baseline: BaselineOptions::default(),
             settings: CommandSettings::default(),
         }
     }

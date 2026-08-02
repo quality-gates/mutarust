@@ -1,5 +1,6 @@
 //! Public support for the `mutarust` command.
 
+mod baseline;
 mod configuration;
 mod coverage;
 mod discovery;
@@ -9,6 +10,7 @@ mod filter;
 mod git;
 mod mutator;
 
+pub use baseline::Baseline;
 pub use configuration::{CommandSettings, Configuration, ConfigurationError};
 pub use discovery::{SourceError, find_rust_sources};
 pub use execution::{
