@@ -2209,7 +2209,7 @@ fn installed_command_reports_verbose_and_debug_diagnostics_without_secrets() {
             "--workers",
             "1",
             "--test-flags",
-            "--features required",
+            "--package mutation-checked",
         ])
         .arg(&source)
         .current_dir(&fixture)
@@ -2226,7 +2226,7 @@ fn installed_command_reports_verbose_and_debug_diagnostics_without_secrets() {
         debug_stdout.contains("Mutate ")
             && debug_stdout.contains("Running with 1 parallel worker(s)")
             && debug_stdout.contains("Mutator conditional/bool-literal")
-            && debug_stdout.contains("Run cargo test --features required")
+            && debug_stdout.contains("Run cargo test --package mutation-checked")
             && debug_stdout.contains("Result "),
         "--debug must show the documented mutation, mutator, command, and result details: {debug_stdout}"
     );
