@@ -304,8 +304,8 @@ fn installed_command_information_modes_match_on_terminal_and_pipe() {
         let terminal = run_information_mode(&command, &fixture, mode.args, mode.env, true);
         assert_eq!(
             piped.status_code, terminal.status_code,
-            "mode {:?} must keep the same exit value on a pipe and a terminal",
-            mode.args
+            "mode {:?} env {:?} must keep the same exit value on a pipe and a terminal",
+            mode.args, mode.env
         );
         if mode.env.is_some() {
             assert_eq!(piped.status_code, Some(2), "completion must exit 2");
@@ -354,9 +354,7 @@ fn run_information_mode(
     } else {
         let mut process = Command::new(command);
         process.args(args).current_dir(cwd);
-        if let Some((key, value)) = env {
-            process.env(key, value);
-        }
+        apply_information_mode_env(&mut process, env);
         process.output().expect("information mode must start")
     };
     InformationModeOutput {
@@ -378,7 +376,8 @@ fn run_on_terminal(
             command_line.push_str(&shell_quote(arg));
         }
         let mut process = Command::new("script");
-        process.args(["-q", "-c", &command_line, "/dev/null"]);
+        // `-e` returns the child exit value. Without it, Linux `script` exits 0.
+        process.args(["-q", "-e", "-c", &command_line, "/dev/null"]);
         process
     } else {
         let mut process = Command::new("script");
@@ -386,12 +385,18 @@ fn run_on_terminal(
         process
     };
     process.current_dir(cwd);
-    if let Some((key, value)) = env {
-        process.env(key, value);
-    }
+    apply_information_mode_env(&mut process, env);
     process
         .output()
         .expect("terminal information mode must start")
+}
+
+fn apply_information_mode_env(process: &mut Command, env: Option<(&str, &str)>) {
+    // Isolate completion from the host so a pipe and a terminal start equal.
+    process.env_remove("GO_FLAGS_COMPLETION");
+    if let Some((key, value)) = env {
+        process.env(key, value);
+    }
 }
 
 fn shell_quote(value: &str) -> String {
