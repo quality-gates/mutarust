@@ -1,0 +1,13 @@
+concurrency/goroutine-remove :: std::thread::spawn(move || {\n        direct_send\n            .send(thread::current().id() == direct_caller)\n            .unwrap();\n    }) :: (move || {\n        direct_send\n            .send(thread::current().id() == direct_caller)\n            .unwrap();\n    })() :: Killed
+concurrency/goroutine-remove :: ::std::thread::spawn(move || {\n        root_send\n            .send(thread::current().id() == root_caller)\n            .unwrap();\n    }) :: (move || {\n        root_send\n            .send(thread::current().id() == root_caller)\n            .unwrap();\n    })() :: Killed
+concurrency/goroutine-remove :: thread::spawn(move || {\n        imported_send\n            .send(thread::current().id() == imported_caller)\n            .unwrap();\n    }) :: (move || {\n        imported_send\n            .send(thread::current().id() == imported_caller)\n            .unwrap();\n    })() :: Escaped
+concurrency/goroutine-remove :: tokio::spawn(async move {\n                direct_send.send(TASK_MARKER.try_with(|_| true).unwrap_or(false)).unwrap();\n            }) :: (async move {\n                direct_send.send(TASK_MARKER.try_with(|_| true).unwrap_or(false)).unwrap();\n            }).await :: Killed
+concurrency/goroutine-remove :: ::tokio::spawn(async move {\n                root_send.send(TASK_MARKER.try_with(|_| true).unwrap_or(false)).unwrap();\n            }) :: (async move {\n                root_send.send(TASK_MARKER.try_with(|_| true).unwrap_or(false)).unwrap();\n            }).await :: Killed
+concurrency/goroutine-remove :: tokio::task::spawn(async move {\n                task_send.send(TASK_MARKER.try_with(|_| true).unwrap_or(false)).unwrap();\n            }) :: (async move {\n                task_send.send(TASK_MARKER.try_with(|_| true).unwrap_or(false)).unwrap();\n            }).await :: Killed
+concurrency/goroutine-remove :: ::tokio::task::spawn(async move {\n                root_task_send.send(TASK_MARKER.try_with(|_| true).unwrap_or(false)).unwrap();\n            }) :: (async move {\n                root_task_send.send(TASK_MARKER.try_with(|_| true).unwrap_or(false)).unwrap();\n            }).await :: Killed
+select/case-remove :: value = async { "outer-first" }, if mode == 1 => value, ::  :: Escaped
+select/case-remove :: _ = async {}, if mode >= 2 => nested_select_value(mode).await, ::  :: Killed
+select/case-remove :: value = async { "inner-first" }, if mode == 2 => value, ::  :: Killed
+select/case-remove :: value = async { "inner-second" }, if mode == 3 => value, ::  :: Killed
+select/default-remove :: else => "outer-fallback", ::  :: Killed
+select/default-remove :: else => "inner-fallback", ::  :: Killed

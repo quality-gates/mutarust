@@ -102,7 +102,7 @@ fn installed_command_lists_builtin_mutators() {
         String::from_utf8(output.stdout)
             .expect("mutator list must be UTF-8")
             .trim(),
-        "arithmetic/assign_invert\narithmetic/assignment\narithmetic/base\narithmetic/bitwise\narithmetic/negate\nbranch/case\nbranch/else\nbranch/if\ncomposite/field-clear\nconditional/bool-literal\nconditional/negated\nconditional/not\nexpression/comparison\nexpression/context-nil\nexpression/logical\nexpression/string-literal\nloop/break\nloop/condition\nloop/range_break\nnumbers/decrementer\nnumbers/float-negate\nnumbers/incrementer\nstatement/remove\nstatement/remove-self-assign\nstatement/return",
+        "arithmetic/assign_invert\narithmetic/assignment\narithmetic/base\narithmetic/bitwise\narithmetic/negate\nbranch/case\nbranch/else\nbranch/if\ncomposite/field-clear\nconcurrency/goroutine-remove\nconditional/bool-literal\nconditional/negated\nconditional/not\nexpression/comparison\nexpression/context-nil\nexpression/logical\nexpression/string-literal\nloop/break\nloop/condition\nloop/range_break\nnumbers/decrementer\nnumbers/float-negate\nnumbers/incrementer\nselect/case-remove\nselect/default-remove\nstatement/remove\nstatement/remove-self-assign\nstatement/return",
         "the built-in mutator list must be stable and sorted"
     );
 }
@@ -374,6 +374,130 @@ fn installed_command_classifies_value_fixture_mutants() {
         !fixture.join("target").exists(),
         "the value fixture must not get a Cargo target directory"
     );
+}
+
+#[test]
+fn installed_command_classifies_concurrency_and_selection_fixture_mutants() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_concurrency_selection_fixture(&root);
+    let source = fixture.join("src").join("lib.rs");
+    let source_before = fs::read(&source).expect("concurrency source must be readable");
+
+    let output = Command::new(command_path(&install))
+        .args([
+            "--workers",
+            "1",
+            "--enable",
+            "concurrency/*",
+            "--enable",
+            "select/*",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start for the concurrency fixture");
+
+    assert!(
+        output.status.success(),
+        "concurrency fixture run must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("concurrency output must be UTF-8");
+    assert!(
+        stdout.contains("Killed: 11")
+            && stdout.contains("Escaped: 2")
+            && stdout.contains("Errored: 0")
+            && stdout.contains("Skipped: 0")
+            && stdout.contains("Total: 13")
+            && stdout.contains("concurrency/goroutine-remove | 6 | 1 | 0 | 7")
+            && stdout.contains("select/case-remove | 3 | 1 | 0 | 4")
+            && stdout.contains("select/default-remove | 2 | 0 | 0 | 2"),
+        "the fixture must classify each concurrency and selection mutant: {stdout}"
+    );
+    assert_eq!(
+        stable_mutant_ids(&stdout),
+        vec![
+            "da7a72038a6e705f827b374dcfa1f021",
+            "dfb5cb6454dbd48ba9e3be2ef434f7f1",
+            "9ab9229d93c295e47b2af77c55c8b947",
+            "24f6ecba07d1a73e84581275625af761",
+            "7e46fea7c893afcf1266055160731272",
+            "008c257b53da2c9e02eb85fe124aa440",
+            "b271fa942ec99f38515ffb2cb31737f9",
+            "025ae38052f5cdfc073e9d11368f082d",
+            "a5002ed7f2f8e877fa36a1bec33278a6",
+            "0370f0994b87087371d98c5fa2653b27",
+            "cc042cd55cd347f0e8d078c984329142",
+            "fdc0bda58143f2580479b12df42e7e77",
+            "25ee32fe7b8ee9f7e088093a311d6692",
+        ],
+        "the concurrency fixture IDs must stay stable: {stdout}"
+    );
+    assert!(
+        stdout.contains("--- src/lib.rs")
+            && stdout.contains("-    thread::spawn(move || {")
+            && stdout.contains("+    (move || {")
+            && stdout
+                .contains("-        value = async { \"outer-first\" }, if mode == 1 => value,"),
+        "the concurrency fixture must show readable diffs: {stdout}"
+    );
+    assert_concurrency_selection_oracle(&fixture, &source_before, &stdout);
+
+    let custom = Command::new(command_path(&install))
+        .args(["--enable", "select/*", "--exec", "true"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start with a custom command");
+    assert!(custom.status.success(), "selection custom run must succeed");
+    let custom_stdout =
+        String::from_utf8(custom.stdout).expect("selection custom output must be UTF-8");
+    assert!(
+        custom_stdout.contains("Skipped: 6") && custom_stdout.contains("Total: 6"),
+        "selection candidates without Cargo proof must be skipped: {custom_stdout}"
+    );
+    assert_eq!(
+        fs::read(&source).expect("concurrency source must remain readable"),
+        source_before
+    );
+    assert!(
+        !fixture.join("target").exists(),
+        "the concurrency fixture must not get a Cargo target directory"
+    );
+}
+
+fn assert_concurrency_selection_oracle(fixture: &Path, source: &[u8], stdout: &str) {
+    let expected = fs::read_to_string(fixture.join("expected-mutants.txt"))
+        .expect("expected concurrency mutants must be readable");
+    let results = mutation_results(stdout);
+    let source = String::from_utf8(source.to_vec()).expect("concurrency source must be UTF-8");
+    let registry = mutarust::Registry::builtins();
+    let names = [
+        "concurrency/goroutine-remove",
+        "select/case-remove",
+        "select/default-remove",
+    ];
+    let mut actual = Vec::new();
+    let mut state_index = 0;
+    for name in names {
+        for mutation in registry.get(name).unwrap().mutations(&source) {
+            let (range, replacement) = mutation.identity();
+            let original = source.get(range).expect("mutation range must be valid");
+            let (state, result_name) = results
+                .get(state_index)
+                .expect("each concurrency mutant must have a state");
+            assert_eq!(*result_name, name, "result order must match plan order");
+            actual.push(format!(
+                "{name} :: {} :: {} :: {state}",
+                original.replace('\n', "\\n"),
+                replacement.replace('\n', "\\n")
+            ));
+            state_index += 1;
+        }
+    }
+    assert_eq!(state_index, results.len());
+    assert_eq!(actual.join("\n") + "\n", expected);
 }
 
 #[cfg(unix)]
@@ -3333,7 +3457,7 @@ fn packaged_library_builds_a_custom_mutator() {
     .expect("downstream manifest must be written");
     fs::write(
         downstream.join("src").join("main.rs"),
-        "use mutarust::{Mutation, Mutator, Registry, RegistryBuilder};\n\nstruct Custom;\nstruct Invalid;\n\nimpl Mutator for Custom {\n    fn name(&self) -> &str { \"custom/no-op\" }\n\n    fn mutations(&self, _source: &str) -> Vec<Mutation> { Vec::new() }\n}\n\nimpl Mutator for Invalid {\n    fn name(&self) -> &str { \"Custom\" }\n\n    fn mutations(&self, _source: &str) -> Vec<Mutation> { Vec::new() }\n}\n\nfn mutate(registry: &Registry, source: &str) -> String {\n    let mutation = registry.get(\"conditional/bool-literal\").expect(\"built-in mutator must exist\").mutations(source).pop().expect(\"boolean must mutate\");\n    mutation.apply(source).expect(\"mutation must apply\")\n}\n\nfn main() {\n    let registry = RegistryBuilder::with_builtins().register(Custom).expect(\"custom mutator must register\").build();\n    assert_eq!(registry.names().collect::<Vec<_>>(), vec![\"arithmetic/assign_invert\", \"arithmetic/assignment\", \"arithmetic/base\", \"arithmetic/bitwise\", \"arithmetic/negate\", \"branch/case\", \"branch/else\", \"branch/if\", \"composite/field-clear\", \"conditional/bool-literal\", \"conditional/negated\", \"conditional/not\", \"custom/no-op\", \"expression/comparison\", \"expression/context-nil\", \"expression/logical\", \"expression/string-literal\", \"loop/break\", \"loop/condition\", \"loop/range_break\", \"numbers/decrementer\", \"numbers/float-negate\", \"numbers/incrementer\", \"statement/remove\", \"statement/remove-self-assign\", \"statement/return\"]);\n    let duplicate = RegistryBuilder::new().register(Custom).expect(\"first custom mutator must register\").register(Custom).err().expect(\"duplicate must fail\");\n    assert_eq!(duplicate.to_string(), \"duplicate mutator name: custom/no-op\");\n    let invalid = RegistryBuilder::new().register(Invalid).err().expect(\"invalid name must fail\");\n    assert_eq!(invalid.to_string(), \"invalid mutator name: Custom\");\n    assert_eq!(mutate(&registry, \"fn enabled() -> bool { let enabled = true; enabled }\"), \"fn enabled() -> bool { let enabled = false; enabled }\");\n    assert_eq!(mutate(&registry, \"fn enabled() -> bool { let label = \\\"é\\\"; let enabled = true; enabled }\"), \"fn enabled() -> bool { let label = \\\"é\\\"; let enabled = false; enabled }\");\n    assert!(registry.get(\"conditional/bool-literal\").unwrap().mutations(\"fn check() { assert!(true); }\").is_empty());\n    println!(\"custom mutator works\");\n}\n",
+        "use mutarust::{Mutation, Mutator, Registry, RegistryBuilder};\n\nstruct Custom;\nstruct Invalid;\n\nimpl Mutator for Custom {\n    fn name(&self) -> &str { \"custom/no-op\" }\n\n    fn mutations(&self, _source: &str) -> Vec<Mutation> { Vec::new() }\n}\n\nimpl Mutator for Invalid {\n    fn name(&self) -> &str { \"Custom\" }\n\n    fn mutations(&self, _source: &str) -> Vec<Mutation> { Vec::new() }\n}\n\nfn mutate(registry: &Registry, source: &str) -> String {\n    let mutation = registry.get(\"conditional/bool-literal\").expect(\"built-in mutator must exist\").mutations(source).pop().expect(\"boolean must mutate\");\n    mutation.apply(source).expect(\"mutation must apply\")\n}\n\nfn main() {\n    let registry = RegistryBuilder::with_builtins().register(Custom).expect(\"custom mutator must register\").build();\n    assert_eq!(registry.names().collect::<Vec<_>>(), vec![\"arithmetic/assign_invert\", \"arithmetic/assignment\", \"arithmetic/base\", \"arithmetic/bitwise\", \"arithmetic/negate\", \"branch/case\", \"branch/else\", \"branch/if\", \"composite/field-clear\", \"concurrency/goroutine-remove\", \"conditional/bool-literal\", \"conditional/negated\", \"conditional/not\", \"custom/no-op\", \"expression/comparison\", \"expression/context-nil\", \"expression/logical\", \"expression/string-literal\", \"loop/break\", \"loop/condition\", \"loop/range_break\", \"numbers/decrementer\", \"numbers/float-negate\", \"numbers/incrementer\", \"select/case-remove\", \"select/default-remove\", \"statement/remove\", \"statement/remove-self-assign\", \"statement/return\"]);\n    let duplicate = RegistryBuilder::new().register(Custom).expect(\"first custom mutator must register\").register(Custom).err().expect(\"duplicate must fail\");\n    assert_eq!(duplicate.to_string(), \"duplicate mutator name: custom/no-op\");\n    let invalid = RegistryBuilder::new().register(Invalid).err().expect(\"invalid name must fail\");\n    assert_eq!(invalid.to_string(), \"invalid mutator name: Custom\");\n    assert_eq!(mutate(&registry, \"fn enabled() -> bool { let enabled = true; enabled }\"), \"fn enabled() -> bool { let enabled = false; enabled }\");\n    assert_eq!(mutate(&registry, \"fn enabled() -> bool { let label = \\\"é\\\"; let enabled = true; enabled }\"), \"fn enabled() -> bool { let label = \\\"é\\\"; let enabled = false; enabled }\");\n    assert!(registry.get(\"conditional/bool-literal\").unwrap().mutations(\"fn check() { assert!(true); }\").is_empty());\n    println!(\"custom mutator works\");\n}\n",
     )
     .expect("downstream source must be written");
 
@@ -3363,6 +3487,10 @@ fn packaged_library_runs_one_duplicate_custom_mutation() {
     let downstream = root.join("downstream");
     fs::create_dir_all(downstream.join("src"))
         .expect("downstream source directory must be created");
+    fs::write(downstream.join("src").join("one.rs"), "pub fn one() {}\n")
+        .expect("first duplicate source must be written");
+    fs::write(downstream.join("src").join("two.rs"), "pub fn two() {}\n")
+        .expect("second duplicate source must be written");
     fs::write(
         downstream.join("Cargo.toml"),
         format!(
@@ -3373,7 +3501,7 @@ fn packaged_library_runs_one_duplicate_custom_mutation() {
     .expect("downstream manifest must be written");
     fs::write(
         downstream.join("src").join("main.rs"),
-        "use mutarust::{Mutation, Mutator, RegistryBuilder};\n\nstruct Duplicate;\n\nimpl Mutator for Duplicate {\n    fn name(&self) -> &str { \"custom/duplicate\" }\n\n    fn mutations(&self, _source: &str) -> Vec<Mutation> {\n        vec![Mutation::new(0..0, \"\"), Mutation::new(0..0, \"\")]\n    }\n}\n\nfn main() {\n    let source = concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/src/main.rs\").to_owned();\n    let registry = RegistryBuilder::new().register(Duplicate).expect(\"mutator must register\").build();\n    let run = mutarust::run_mutation_tests(&[source], &registry).expect(\"mutation run must work\");\n    assert_eq!(run.results().len(), 1);\n    println!(\"duplicate mutation runs once\");\n}\n",
+        "use mutarust::{Mutation, Mutator, RegistryBuilder};\n\nmod one;\nmod two;\n\nstruct Duplicate;\nstruct Twin;\n\nimpl Mutator for Duplicate {\n    fn name(&self) -> &str { \"custom/duplicate\" }\n\n    fn mutations(&self, _source: &str) -> Vec<Mutation> {\n        vec![Mutation::new(0..0, \"\"), Mutation::new(0..0, \"\")]\n    }\n}\n\nimpl Mutator for Twin {\n    fn name(&self) -> &str { \"custom/twin\" }\n\n    fn mutations(&self, _source: &str) -> Vec<Mutation> {\n        vec![Mutation::new(0..0, \"\")]\n    }\n}\n\nfn main() {\n    let root = env!(\"CARGO_MANIFEST_DIR\");\n    let sources = vec![format!(\"{root}/src/one.rs\"), format!(\"{root}/src/two.rs\")];\n    let registry = RegistryBuilder::new().register(Duplicate).expect(\"first mutator must register\").register(Twin).expect(\"second mutator must register\").build();\n    let run = mutarust::run_mutation_tests(&sources, &registry).expect(\"mutation run must work\");\n    assert_eq!(run.results().len(), 2);\n    assert!(run.results().iter().all(|result| result.mutator == \"custom/duplicate\"));\n    println!(\"duplicate mutations use source identity\");\n}\n",
     )
     .expect("downstream source must be written");
 
@@ -3392,7 +3520,7 @@ fn packaged_library_runs_one_duplicate_custom_mutation() {
         String::from_utf8(output.stdout)
             .expect("downstream output must be UTF-8")
             .trim(),
-        "duplicate mutation runs once"
+        "duplicate mutations use source identity"
     );
 }
 
@@ -4547,6 +4675,35 @@ fn write_value_fixture(root: &Path) -> PathBuf {
         include_str!("fixtures/value/expected-mutants.txt"),
     )
     .expect("expected value mutants must be written");
+    fixture
+}
+
+fn write_concurrency_selection_fixture(root: &Path) -> PathBuf {
+    let fixture = root.join("concurrency-selection-fixture");
+    fs::create_dir_all(fixture.join("src"))
+        .expect("concurrency fixture source directory must be created");
+    fs::create_dir_all(fixture.join("tests"))
+        .expect("concurrency fixture test directory must be created");
+    fs::write(
+        fixture.join("Cargo.toml"),
+        include_str!("fixtures/concurrency-selection/Cargo.toml"),
+    )
+    .expect("concurrency fixture manifest must be written");
+    fs::write(
+        fixture.join("src").join("lib.rs"),
+        include_str!("fixtures/concurrency-selection/src/lib.rs"),
+    )
+    .expect("concurrency fixture source must be written");
+    fs::write(
+        fixture.join("tests").join("concurrency_selection.rs"),
+        include_str!("fixtures/concurrency-selection/tests/concurrency_selection.rs"),
+    )
+    .expect("concurrency fixture tests must be written");
+    fs::write(
+        fixture.join("expected-mutants.txt"),
+        include_str!("fixtures/concurrency-selection/expected-mutants.txt"),
+    )
+    .expect("expected concurrency mutants must be written");
     fixture
 }
 

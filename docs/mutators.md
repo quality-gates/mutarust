@@ -1,8 +1,8 @@
 # Built-in Mutators
 
 Mutarust has the same stable mutator names as Mutago. The changes below apply
-to Rust source syntax. Mutarust does not change type syntax, patterns, or macro
-token input.
+to Rust source syntax. Mutarust does not change type syntax or patterns. It
+changes macro token input only for the documented Tokio selection forms.
 
 | Stable name | Rust source change |
 | --- | --- |
@@ -15,6 +15,7 @@ token input.
 | `branch/else` | Remove all statements from a nonempty direct `else` block |
 | `branch/if` | Remove all statements from a nonempty `if` or `else if` body |
 | `composite/field-clear` | Remove one nondefault named struct field before a local derived `Default` rest, or replace one explicit field value with a known Rust default |
+| `concurrency/goroutine-remove` | Run one supported discarded thread closure immediately, or await one supported discarded Tokio task immediately |
 | `conditional/bool-literal` | Change `true` to `false`, or `false` to `true` |
 | `conditional/negated` | `>` to `<=`, `<` to `>=`, `>=` to `<`, `<=` to `>`, `==` to `!=`, and `!=` to `==` |
 | `conditional/not` | Remove direct unary `!` from a condition or logical operand |
@@ -28,6 +29,8 @@ token input.
 | `numbers/decrementer` | Subtract one from a decimal integer or float literal |
 | `numbers/float-negate` | Change a nonzero float literal to `0.0` |
 | `numbers/incrementer` | Add one to a decimal integer or float literal |
+| `select/case-remove` | Remove one complete nonfallback branch from a supported Tokio selection that has another clause |
+| `select/default-remove` | Remove one complete Tokio `else` branch when a normal branch remains |
 | `statement/remove` | Remove a semicolon assignment, compound assignment, call, method call, or macro statement |
 | `statement/remove-self-assign` | Remove a semicolon assignment when both sides are the same safe place |
 | `statement/return` | Replace an explicit return value with a valid default for its declared return type |
@@ -83,6 +86,49 @@ reference, an unconstrained type parameter, or a general borrowed value.
 Cargo checks replacements that need type proof before it runs tests. Mutarust
 skips these replacements before a custom test command because that command
 selects its own compiler.
+
+`concurrency/goroutine-remove` supports these standard thread statements:
+
+```rust
+std::thread::spawn(work);
+::std::thread::spawn(work);
+thread::spawn(work); // After an exact `use std::thread;` in this scope.
+```
+
+The replacement is `(work)();`. It supports these Tokio task statements in
+an async function, async closure, or async block:
+
+```rust
+tokio::spawn(future);
+::tokio::spawn(future);
+tokio::task::spawn(future);
+::tokio::task::spawn(future);
+```
+
+The replacement is `(future).await;`. Each spawn call must be a discarded
+semicolon statement with one argument. The mutator keeps a `move` closure or
+an `async move` block and evaluates it one time. It does not change a used
+join handle, a builder or method spawn, `spawn_blocking`, `spawn_local`,
+scoped threads, Rayon, async-std, Smol, an alias, or a local path that shadows
+`std`, `thread`, or `tokio`.
+
+The two `select` mutators support `tokio::select!` and
+`::tokio::select!`. They support normal branches, branch guards, an optional
+`biased;` prefix, an optional `else` branch, and nested supported selections.
+`select/case-remove` removes the pattern, future, guard, arrow, handler, and
+comma of one normal branch. It does this only when another normal or fallback
+clause remains. `select/default-remove` removes the full `else` clause only
+when a normal branch remains.
+
+These mutators do not change an imported or renamed selection macro, a local
+macro, `futures::select!`, Crossbeam selection, or invalid Tokio input. They
+do not search inside unrelated macro input. Cargo checks each selection
+replacement before tests run. A custom test command cannot give this Cargo
+proof, so Mutarust marks these candidates `Skipped`.
+
+Mutago v2.7.7 prose says that the selection mutators empty a clause body. Its
+source code and tests remove the full clause. Mutarust follows the source code
+and tests, and removes the full clause.
 
 `conditional/bool-literal` changes direct local initializers, assignment
 right-hand sides, function arguments, and method arguments. It does not change
