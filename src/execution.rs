@@ -1417,7 +1417,6 @@ fn deduplicate_candidates(candidates: &mut Vec<MutationCandidate>) {
         let (range, replacement) = candidate.mutation.identity();
         seen.insert((
             candidate.source.clone(),
-            candidate.mutator.clone(),
             range.start,
             range.end,
             replacement.to_owned(),
@@ -2135,7 +2134,7 @@ fn add_mutator_candidates(
         {
             continue;
         }
-        if blacklist.contains_or_insert(&evidence.blacklist_checksum) {
+        if blacklist.contains(&evidence.blacklist_checksum) {
             continue;
         }
         candidates.push(MutationCandidate {

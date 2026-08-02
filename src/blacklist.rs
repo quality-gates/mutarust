@@ -15,8 +15,8 @@ impl Blacklist {
         Ok(Self { checksums })
     }
 
-    pub(crate) fn contains_or_insert(&mut self, checksum: &MutationChecksum) -> bool {
-        !self.checksums.insert(checksum.clone())
+    pub(crate) fn contains(&self, checksum: &MutationChecksum) -> bool {
+        self.checksums.contains(checksum)
     }
 }
 

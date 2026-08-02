@@ -19,6 +19,7 @@ macro_rules! skip_non_expression_syntax {
 
 mod baseline;
 mod blacklist;
+mod concurrency_selection;
 mod configuration;
 mod control_flow;
 mod coverage;

@@ -4,6 +4,7 @@ use std::ops::Range;
 
 use proc_macro2::Span;
 
+use crate::concurrency_selection::{ConcurrencyMutator, SelectionMutator};
 use crate::control_flow::ControlFlowMutator;
 use crate::expression::{
     ArithmeticNegate, BinaryOperatorMutator, BoolLiteralMutator, ConditionalNotMutator,
@@ -136,6 +137,12 @@ impl RegistryBuilder {
             .register(ValueMutator::remove_self_assign())
             .expect("built-in mutator registration must be valid")
             .register(ReturnValueMutator)
+            .expect("built-in mutator registration must be valid")
+            .register(ConcurrencyMutator)
+            .expect("built-in mutator registration must be valid")
+            .register(SelectionMutator::case_remove())
+            .expect("built-in mutator registration must be valid")
+            .register(SelectionMutator::default_remove())
             .expect("built-in mutator registration must be valid")
     }
 
