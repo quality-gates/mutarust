@@ -37,15 +37,22 @@ impl<'ast> Visit<'ast> for RecoveryVisitor<'_> {
     skip_non_expression_syntax!();
 
     fn visit_expr_call(&mut self, call: &'ast syn::ExprCall) {
-        if catch_unwind_call(call)
-            && let Some(range) = span_range(self.source, call.span())
-            && let Some(original) = self.source.get(range.clone())
-        {
-            let replacement = propagate_panics(original);
-            self.mutations
-                .push(Mutation::new(range, replacement).requiring_compile_validation());
-        }
+        self.record_catch_unwind(call);
         visit::visit_expr_call(self, call);
+    }
+}
+
+impl RecoveryVisitor<'_> {
+    fn record_catch_unwind(&mut self, call: &syn::ExprCall) -> Option<()> {
+        if !catch_unwind_call(call) {
+            return None;
+        }
+        let range = span_range(self.source, call.span())?;
+        let original = self.source.get(range.clone())?;
+        let replacement = propagate_panics(original);
+        self.mutations
+            .push(Mutation::new(range, replacement).requiring_compile_validation());
+        Some(())
     }
 }
 

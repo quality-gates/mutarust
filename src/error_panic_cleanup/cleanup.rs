@@ -169,10 +169,11 @@ impl<'ast> Visit<'ast> for CleanupVisitor<'_> {
         for (index, statement) in block.stmts.iter().enumerate() {
             if has_later_runtime_statement(&block.stmts, index)
                 && self.is_cleanup_statement(statement)
-                && let Some(range) = span_range(self.source, statement.span())
             {
-                self.mutations
-                    .push(Mutation::new(range, "").requiring_compile_validation());
+                if let Some(range) = span_range(self.source, statement.span()) {
+                    self.mutations
+                        .push(Mutation::new(range, "").requiring_compile_validation());
+                }
             }
             visit::visit_stmt(self, statement);
             if let Stmt::Local(local) = statement {
@@ -329,15 +330,16 @@ impl DropTypeVisitor {
 
 impl<'ast> Visit<'ast> for DropTypeVisitor {
     fn visit_item_impl(&mut self, item: &'ast syn::ItemImpl) {
-        if item
+        let is_local_drop_impl = item
             .trait_
             .as_ref()
             .is_some_and(|(_, path, _)| exact_drop_trait(path, self.crates))
-            && drop_impl_has_work(item)
-            && let Some(name) = local_impl_type_name(&item.self_ty)
-        {
-            self.names
-                .insert(LocalDropType::new(&self.module_path, name));
+            && drop_impl_has_work(item);
+        if is_local_drop_impl {
+            if let Some(name) = local_impl_type_name(&item.self_ty) {
+                self.names
+                    .insert(LocalDropType::new(&self.module_path, name));
+            }
         }
         visit::visit_item_impl(self, item);
     }
