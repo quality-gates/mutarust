@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use mutarust::{
     Baseline, CommandSettings, Configuration, CoverageControls, ExecutionControls, GitDiffControls,
-    Registry, TestExecution, WorkerLimit,
+    Registry, ReportContext, TestExecution, WorkerLimit, write_compact_summary, write_full_report,
 };
 
 fn main() -> ExitCode {
@@ -78,7 +78,7 @@ fn print_help() -> io::Result<()> {
     )?;
     writeln!(
         stdout,
-        "\nOptions:\n  -h, --help           Print help\n  -V, --version        Print version\n      --config FILE     Read mutation policy from a YAML file\n      --list-files      List selected Rust production source files\n      --print-ast       Print the parsed Rust syntax for selected sources\n      --list-mutators   List available mutators\n      --exec COMMAND    Run a custom command for each mutant\n      --exec-timeout    Stop each test command after this many seconds\n      --timeout         Alias for --exec-timeout\n      --timeout-coefficient FACTOR  Set an adaptive Cargo timeout\n      --test-flags FLAGS  Add shell-quoted Cargo test flags\n      --test-recursive  Select all Cargo workspace packages\n      --workers COUNT   Run this many Cargo mutation jobs\n      --dry-run         List mutants without writing files or running tests\n      --no-exec         Write mutants without running tests\n      --do-not-remove-tmp-folder  Keep mutation workspaces\n      --match REGEXP    Mutate only functions with matching names\n      --verbose         Tell a custom command to produce verbose output\n      --debug           Tell a custom command to produce debug output\n      --silent          Hide mutant status output\n      --no-silent       Print mutant status output\n      --no-diffs        Hide escaped-mutant source diffs\n      --blacklist FILE  Read accepted mutation checksums\n      --baseline FILE   Read escaped-mutant IDs; default mutarust-baseline.json\n      --update-baseline Write current escaped-mutant IDs and exit\n      --fail-on-escaped Fail only for escaped IDs outside the baseline\n      --run-mutant-id ID  Run one mutant without score gates\n      --min-msi         Set the minimum mutation score percentage\n      --min-covered-msi Set the minimum covered-code score percentage\n      --enable NAME     Select a mutator name or group pattern\n      --disable NAME    Disable a mutator name or group pattern"
+        "\nOptions:\n  -h, --help           Print help\n  -V, --version        Print version\n      --config FILE     Read mutation policy from a YAML file\n      --list-files      List selected Rust production source files\n      --print-ast       Print the parsed Rust syntax for selected sources\n      --list-mutators   List available mutators\n      --exec COMMAND    Run a custom command for each mutant\n      --exec-timeout    Stop each test command after this many seconds\n      --timeout         Alias for --exec-timeout\n      --timeout-coefficient FACTOR  Set an adaptive Cargo timeout\n      --test-flags FLAGS  Add shell-quoted Cargo test flags\n      --test-recursive  Select all Cargo workspace packages\n      --workers COUNT   Run this many Cargo mutation jobs\n      --dry-run         List mutants without writing files or running tests\n      --no-exec         Write mutants without running tests\n      --do-not-remove-tmp-folder  Keep mutation workspaces\n      --match REGEXP    Mutate only functions with matching names\n      --verbose         Tell a custom command to produce verbose output\n      --debug           Tell a custom command to produce debug output\n      --silent          Hide mutant status output\n      --no-silent       Print mutant status output\n      --no-diffs        Hide escaped-mutant source diffs\n      --logger-summary-json  Write compact scores to mutarust-summary.json\n      --blacklist FILE  Read accepted mutation checksums\n      --baseline FILE   Read escaped-mutant IDs; default mutarust-baseline.json\n      --update-baseline Write current escaped-mutant IDs and exit\n      --fail-on-escaped Fail only for escaped IDs outside the baseline\n      --run-mutant-id ID  Run one mutant without score gates\n      --min-msi         Set the minimum mutation score percentage\n      --min-covered-msi Set the minimum covered-code score percentage\n      --enable NAME     Select a mutator name or group pattern\n      --disable NAME    Disable a mutator name or group pattern"
     )?;
     writeln!(
         stdout,
@@ -123,6 +123,7 @@ fn bash_completion_candidates() -> &'static [&'static str] {
         "--silent",
         "--no-silent",
         "--no-diffs",
+        "--logger-summary-json",
         "--blacklist",
         "--baseline",
         "--update-baseline",
@@ -300,8 +301,18 @@ fn parse_display_switch(command: &mut RunCommand, argument: &str) -> Option<Resu
             command.no_diffs = true;
             Ok(())
         }
+        "--logger-summary-json" => set_logger_summary_json(command),
         _ => return None,
     })
+}
+
+fn set_logger_summary_json(command: &mut RunCommand) -> Result<(), String> {
+    if command.logger_summary_json {
+        Err("--logger-summary-json can be supplied only once".to_owned())
+    } else {
+        command.logger_summary_json = true;
+        Ok(())
+    }
 }
 
 fn parse_baseline_switch(command: &mut RunCommand, argument: &str) -> Option<Result<(), String>> {
@@ -620,13 +631,18 @@ fn finish_mutation_run(
         return write_baseline(command.baseline.path(), run);
     }
     if command.execution.dry_run {
-        return print_dry_run(run);
+        print_dry_run(run)?;
+        return Ok(write_reports_or_error(command, configuration, run).unwrap_or(ExitCode::SUCCESS));
     }
     if command.execution.no_exec {
-        return print_generated_mutants(run);
+        print_generated_mutants(run)?;
+        return Ok(write_reports_or_error(command, configuration, run).unwrap_or(ExitCode::SUCCESS));
     }
     let one_mutant = command.run_mutant_id.is_some();
     print_mutation_results(run, configuration.silent_mode, command.no_diffs, one_mutant)?;
+    if let Some(code) = write_reports_or_error(command, configuration, run) {
+        return Ok(code);
+    }
     Ok(if one_mutant {
         ExitCode::SUCCESS
     } else {
@@ -637,6 +653,29 @@ fn finish_mutation_run(
             command.baseline.fail_on_escaped,
         )
     })
+}
+
+fn write_reports_or_error(
+    command: &RunCommand,
+    configuration: &Configuration,
+    run: &mutarust::MutationRun,
+) -> Option<ExitCode> {
+    let context = ReportContext {
+        one_mutant: command.run_mutant_id.is_some(),
+    };
+    if configuration.json_output {
+        if let Err(error) = write_full_report(run, &context) {
+            write_error(&error);
+            return Some(ExitCode::from(3));
+        }
+    }
+    if command.logger_summary_json {
+        if let Err(error) = write_compact_summary(run) {
+            write_error(&error);
+            return Some(ExitCode::from(3));
+        }
+    }
+    None
 }
 
 fn write_baseline(path: &std::path::Path, run: &mutarust::MutationRun) -> io::Result<ExitCode> {
@@ -875,6 +914,7 @@ struct RunCommand {
     function_match: Option<String>,
     configuration: Option<PathBuf>,
     no_diffs: bool,
+    logger_summary_json: bool,
     run_mutant_id: Option<String>,
     baseline: BaselineOptions,
     settings: CommandSettings,
@@ -924,6 +964,7 @@ impl Default for RunCommand {
             function_match: None,
             configuration: None,
             no_diffs: false,
+            logger_summary_json: false,
             run_mutant_id: None,
             baseline: BaselineOptions::default(),
             settings: CommandSettings::default(),

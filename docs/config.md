@@ -23,7 +23,7 @@ different value.
 | --- | --- | --- |
 | `skip_without_test` | Boolean | Set the skip-without-test policy. |
 | `skip_with_cfg` | Boolean | Set the conditional-compilation policy. |
-| `json_output` | Boolean | Set the JSON report policy. |
+| `json_output` | Boolean | Write the full report to `report.json`. |
 | `html_output` | Boolean | Set the HTML report policy. |
 | `silent_mode` | Boolean | Hide status output for individual mutants. |
 | `min_msi` | Integer, 0 to 100 | Set the total-score policy. |
@@ -55,6 +55,10 @@ Mutarust checks the total-score policy after a normal mutation run. A result
 below `min_msi` returns exit value 4. With `--coverage`, Mutarust also checks
 the covered-score policy after the total-score policy. A positive
 `min_covered_msi` without `--coverage` returns exit value 4.
+
+When `json_output` is true, Mutarust writes `report.json` after a completed
+run. Use `--logger-summary-json` for the compact `mutarust-summary.json` file.
+See the [JSON report schemas](json-outputs.md).
 
 ## Source Selection
 

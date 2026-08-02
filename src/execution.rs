@@ -37,6 +37,15 @@ pub struct MutationRun {
 }
 
 impl MutationRun {
+    /// Builds a run from completed results for report tests.
+    #[cfg(test)]
+    pub(crate) fn for_test(results: Vec<MutationResult>, has_coverage: bool) -> Self {
+        Self {
+            results,
+            has_coverage,
+        }
+    }
+
     /// Returns the result for each generated mutant.
     pub fn results(&self) -> &[MutationResult] {
         &self.results

@@ -27,6 +27,9 @@ yaml_serde = "0.10.4"
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = ["Win32_System_Console", "Win32_System_Threading"] }
 
+[dev-dependencies]
+jsonschema = { version = "0.49.3", default-features = false }
+
 [[bin]]
 name = "mutarust"
 path = "src/main.rs"

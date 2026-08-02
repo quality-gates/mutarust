@@ -31,6 +31,7 @@ mod expression;
 mod filter;
 mod git;
 mod mutator;
+mod report;
 mod return_value;
 mod value;
 
@@ -46,6 +47,11 @@ pub use execution::{
 };
 pub use filter::SourceFilters;
 pub use mutator::{Mutation, Mutator, Registry, RegistryBuilder, RegistryError};
+pub use report::{
+    COMPACT_SUMMARY_FILE_NAME, FULL_REPORT_FILE_NAME, FullReport, ReportContext, ReportMetadata,
+    ReportMutant, ReportMutator, ReportMutatorStats, ReportStats, compact_summary, full_report,
+    write_compact_summary, write_full_report,
+};
 
 /// The package version for the installed command.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
