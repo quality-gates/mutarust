@@ -663,17 +663,17 @@ fn write_reports_or_error(
     let context = ReportContext {
         one_mutant: command.run_mutant_id.is_some(),
     };
-    if configuration.json_output
-        && let Err(error) = write_full_report(run, &context)
-    {
-        write_error(&error);
-        return Some(ExitCode::from(3));
+    if configuration.json_output {
+        if let Err(error) = write_full_report(run, &context) {
+            write_error(&error);
+            return Some(ExitCode::from(3));
+        }
     }
-    if command.logger_summary_json
-        && let Err(error) = write_compact_summary(run)
-    {
-        write_error(&error);
-        return Some(ExitCode::from(3));
+    if command.logger_summary_json {
+        if let Err(error) = write_compact_summary(run) {
+            write_error(&error);
+            return Some(ExitCode::from(3));
+        }
     }
     None
 }
