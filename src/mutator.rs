@@ -2,13 +2,28 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::ops::Range;
 
-use proc_macro2::{Span, TokenStream, TokenTree};
+use proc_macro2::Span;
+
+use crate::concurrency_selection::{ConcurrencyMutator, SelectionMutator};
+use crate::control_flow::ControlFlowMutator;
+use crate::expression::{
+    ArithmeticNegate, BinaryOperatorMutator, BoolLiteralMutator, ConditionalNotMutator,
+    NumberMutator, StringLiteralMutator,
+};
+use crate::return_value::ReturnValueMutator;
+use crate::value::ValueMutator;
 
 /// A source replacement produced by a mutator.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Mutation {
     range: Range<usize>,
+    change: MutationChange,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct MutationChange {
     replacement: String,
+    requires_compile_validation: bool,
 }
 
 impl Mutation {
@@ -16,8 +31,20 @@ impl Mutation {
     pub fn new(range: Range<usize>, replacement: impl Into<String>) -> Self {
         Self {
             range,
-            replacement: replacement.into(),
+            change: MutationChange {
+                replacement: replacement.into(),
+                requires_compile_validation: false,
+            },
         }
+    }
+
+    pub(crate) fn requiring_compile_validation(mut self) -> Self {
+        self.change.requires_compile_validation = true;
+        self
+    }
+
+    pub(crate) fn requires_compile_validation(&self) -> bool {
+        self.change.requires_compile_validation
     }
 
     /// Returns a changed source string when this mutation has a valid range.
@@ -27,12 +54,12 @@ impl Mutation {
         }
         let before = source.get(..self.range.start)?;
         let after = source.get(self.range.end..)?;
-        Some(format!("{before}{}{after}", self.replacement))
+        Some(format!("{before}{}{after}", self.change.replacement))
     }
 
     /// Returns the replaced byte range and the replacement source text.
     pub fn identity(&self) -> (Range<usize>, &str) {
-        (self.range.clone(), &self.replacement)
+        (self.range.clone(), &self.change.replacement)
     }
 }
 
@@ -61,7 +88,61 @@ impl RegistryBuilder {
     /// Creates a builder with all mutators supplied by Mutarust.
     pub fn with_builtins() -> Self {
         Self::new()
-            .register(BoolLiteral)
+            .register(ControlFlowMutator::branch_case())
+            .expect("built-in mutator registration must be valid")
+            .register(ControlFlowMutator::branch_else())
+            .expect("built-in mutator registration must be valid")
+            .register(ControlFlowMutator::branch_if())
+            .expect("built-in mutator registration must be valid")
+            .register(BinaryOperatorMutator::arithmetic_base())
+            .expect("built-in mutator registration must be valid")
+            .register(BinaryOperatorMutator::arithmetic_bitwise())
+            .expect("built-in mutator registration must be valid")
+            .register(BinaryOperatorMutator::arithmetic_assign_invert())
+            .expect("built-in mutator registration must be valid")
+            .register(BinaryOperatorMutator::arithmetic_assignment())
+            .expect("built-in mutator registration must be valid")
+            .register(ArithmeticNegate)
+            .expect("built-in mutator registration must be valid")
+            .register(NumberMutator::incrementer())
+            .expect("built-in mutator registration must be valid")
+            .register(NumberMutator::decrementer())
+            .expect("built-in mutator registration must be valid")
+            .register(NumberMutator::float_negate())
+            .expect("built-in mutator registration must be valid")
+            .register(BinaryOperatorMutator::conditional_negated())
+            .expect("built-in mutator registration must be valid")
+            .register(BinaryOperatorMutator::expression_comparison())
+            .expect("built-in mutator registration must be valid")
+            .register(BinaryOperatorMutator::expression_logical())
+            .expect("built-in mutator registration must be valid")
+            .register(StringLiteralMutator)
+            .expect("built-in mutator registration must be valid")
+            .register(BoolLiteralMutator)
+            .expect("built-in mutator registration must be valid")
+            .register(ConditionalNotMutator)
+            .expect("built-in mutator registration must be valid")
+            .register(ControlFlowMutator::loop_break())
+            .expect("built-in mutator registration must be valid")
+            .register(ControlFlowMutator::loop_condition())
+            .expect("built-in mutator registration must be valid")
+            .register(ControlFlowMutator::loop_range_break())
+            .expect("built-in mutator registration must be valid")
+            .register(ControlFlowMutator::statement_remove())
+            .expect("built-in mutator registration must be valid")
+            .register(ValueMutator::composite_field_clear())
+            .expect("built-in mutator registration must be valid")
+            .register(ValueMutator::context_nil())
+            .expect("built-in mutator registration must be valid")
+            .register(ValueMutator::remove_self_assign())
+            .expect("built-in mutator registration must be valid")
+            .register(ReturnValueMutator)
+            .expect("built-in mutator registration must be valid")
+            .register(ConcurrencyMutator)
+            .expect("built-in mutator registration must be valid")
+            .register(SelectionMutator::case_remove())
+            .expect("built-in mutator registration must be valid")
+            .register(SelectionMutator::default_remove())
             .expect("built-in mutator registration must be valid")
     }
 
@@ -137,54 +218,6 @@ impl fmt::Display for RegistryError {
 
 impl std::error::Error for RegistryError {}
 
-struct BoolLiteral;
-
-impl Mutator for BoolLiteral {
-    fn name(&self) -> &str {
-        "conditional/bool-literal"
-    }
-
-    fn mutations(&self, source: &str) -> Vec<Mutation> {
-        let Ok(tokens) = source.parse::<TokenStream>() else {
-            return Vec::new();
-        };
-        boolean_mutations(source, tokens)
-    }
-}
-
-fn boolean_mutations(source: &str, tokens: TokenStream) -> Vec<Mutation> {
-    let mut mutations = Vec::new();
-    collect_boolean_mutations(source, tokens, &mut mutations);
-    mutations
-}
-
-fn collect_boolean_mutations(source: &str, tokens: TokenStream, mutations: &mut Vec<Mutation>) {
-    for token in tokens {
-        match token {
-            TokenTree::Ident(identifier) => add_boolean_mutation(source, identifier, mutations),
-            TokenTree::Group(group) => {
-                collect_boolean_mutations(source, group.stream(), mutations);
-            }
-            _ => {}
-        }
-    }
-}
-
-fn add_boolean_mutation(
-    source: &str,
-    identifier: proc_macro2::Ident,
-    mutations: &mut Vec<Mutation>,
-) {
-    let replacement = match identifier.to_string().as_str() {
-        "true" => "false",
-        "false" => "true",
-        _ => return,
-    };
-    if let Some(range) = span_range(source, identifier.span()) {
-        mutations.push(Mutation::new(range, replacement));
-    }
-}
-
 fn validate_mutator_name(name: &str) -> Result<(), RegistryError> {
     name.split('/')
         .all(valid_mutator_name_part)
@@ -195,11 +228,14 @@ fn validate_mutator_name(name: &str) -> Result<(), RegistryError> {
 fn valid_mutator_name_part(part: &str) -> bool {
     !part.is_empty()
         && part.chars().all(|character| {
-            character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-'
+            character.is_ascii_lowercase()
+                || character.is_ascii_digit()
+                || character == '-'
+                || character == '_'
         })
 }
 
-fn span_range(source: &str, span: Span) -> Option<Range<usize>> {
+pub(crate) fn span_range(source: &str, span: Span) -> Option<Range<usize>> {
     let range = span.byte_range();
     (range.start < range.end
         && range.end <= source.len()

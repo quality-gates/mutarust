@@ -1,0 +1,17 @@
+arithmetic/assign_invert :: += :: -= :: Killed
+arithmetic/assignment :: += :: = :: Killed
+arithmetic/base :: + :: - :: Killed
+arithmetic/bitwise :: & :: | :: Killed
+arithmetic/negate :: - ::  :: Killed
+conditional/bool-literal :: true :: false :: Killed
+conditional/negated :: < :: >= :: Killed
+conditional/negated :: == :: != :: Killed
+conditional/not :: ! ::  :: Killed
+expression/comparison :: < :: <= :: Escaped
+expression/logical :: && :: || :: Killed
+expression/string-literal :: "yes" :: "" :: Killed
+numbers/decrementer :: 2 :: 1 :: Killed
+numbers/decrementer :: 2.5 :: 1.5 :: Killed
+numbers/float-negate :: 2.5 :: 0.0 :: Killed
+numbers/incrementer :: 2 :: 3 :: Killed
+numbers/incrementer :: 2.5 :: 3.5 :: Killed

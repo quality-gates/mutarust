@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::env;
 use std::fs;
 use std::ops::Deref;
@@ -37,6 +38,19 @@ fn wait_for_file(path: &Path, message: &str) {
     panic!("{message}");
 }
 
+fn wait_for_file_lines(path: &Path, count: usize, message: &str) {
+    for _ in 0..1_000 {
+        let lines = fs::read_to_string(path)
+            .map(|content| content.lines().count())
+            .unwrap_or(0);
+        if lines >= count {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    panic!("{message}");
+}
+
 #[test]
 fn installed_command_prints_help() {
     let root = smoke_root();
@@ -51,6 +65,11 @@ fn installed_command_prints_help() {
     assert!(
         String::from_utf8_lossy(&output.stdout).contains("Mutation testing for Rust"),
         "help must identify the command purpose"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout)
+            .contains("--git-diff-base REF  Set Git base; default origin/HEAD, then master"),
+        "help must document the Git default and fallback"
     );
 
     let version = Command::new(command_path(&install))
@@ -83,9 +102,506 @@ fn installed_command_lists_builtin_mutators() {
         String::from_utf8(output.stdout)
             .expect("mutator list must be UTF-8")
             .trim(),
-        "conditional/bool-literal",
+        "arithmetic/assign_invert\narithmetic/assignment\narithmetic/base\narithmetic/bitwise\narithmetic/negate\nbranch/case\nbranch/else\nbranch/if\ncomposite/field-clear\nconcurrency/goroutine-remove\nconditional/bool-literal\nconditional/negated\nconditional/not\nexpression/comparison\nexpression/context-nil\nexpression/logical\nexpression/string-literal\nloop/break\nloop/condition\nloop/range_break\nnumbers/decrementer\nnumbers/float-negate\nnumbers/incrementer\nselect/case-remove\nselect/default-remove\nstatement/remove\nstatement/remove-self-assign\nstatement/return",
         "the built-in mutator list must be stable and sorted"
     );
+}
+
+#[test]
+fn installed_command_classifies_control_flow_fixture_mutants() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_control_flow_fixture(&root);
+    let source = fixture.join("src").join("lib.rs");
+    let source_before = fs::read(&source).expect("control-flow source must be readable");
+
+    let output = Command::new(command_path(&install))
+        .args([
+            "--enable",
+            "branch/*",
+            "--enable",
+            "loop/*",
+            "--enable",
+            "statement/remove",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start for the control-flow fixture");
+
+    assert!(
+        output.status.success(),
+        "control-flow fixture run must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("control-flow output must be UTF-8");
+    assert!(
+        stdout.contains("Killed: 14")
+            && stdout.contains("Escaped: 0")
+            && stdout.contains("Errored: 0")
+            && stdout.contains("Total: 14")
+            && stdout.contains("branch/if | 3 | 0 | 0 | 3")
+            && stdout.contains("loop/break | 2 | 0 | 0 | 2")
+            && stdout.contains("statement/remove | 4 | 0 | 0 | 4"),
+        "the fixture must classify every control-flow mutant: {stdout}"
+    );
+    assert_control_flow_oracle(&fixture, &source_before, &stdout);
+    assert_eq!(
+        fs::read(&source).expect("control-flow source must remain readable"),
+        source_before
+    );
+    assert!(
+        !fixture.join("target").exists(),
+        "the control-flow fixture must not get a Cargo target directory"
+    );
+}
+
+fn assert_control_flow_oracle(fixture: &Path, source: &[u8], stdout: &str) {
+    let expected = fs::read_to_string(fixture.join("expected-mutants.txt"))
+        .expect("expected control-flow mutants must be readable");
+    let results = mutation_results(stdout);
+    let source = String::from_utf8(source.to_vec()).expect("control-flow source must be UTF-8");
+    let registry = mutarust::Registry::builtins();
+    let names = [
+        "branch/case",
+        "branch/else",
+        "branch/if",
+        "loop/break",
+        "loop/condition",
+        "loop/range_break",
+        "statement/remove",
+    ];
+    let mut actual = Vec::new();
+    let mut changed_sources = BTreeSet::new();
+    let mut duplicate_count = 0;
+    let mut state_index = 0;
+    for name in names {
+        for mutation in registry.get(name).unwrap().mutations(&source) {
+            let changed_source = mutation
+                .apply(&source)
+                .expect("control-flow mutation range must be valid");
+            if !changed_sources.insert(changed_source) {
+                duplicate_count += 1;
+                continue;
+            }
+            let (range, replacement) = mutation.identity();
+            let original = source.get(range).expect("mutation range must be valid");
+            let (state, result_name) = results
+                .get(state_index)
+                .expect("each mutant must have a state");
+            assert_eq!(*result_name, name, "result order must match plan order");
+            let original = original.replace('\n', "\\n");
+            let replacement = replacement.replace('\n', "\\n");
+            actual.push(format!("{name} :: {original} :: {replacement} :: {state}"));
+            state_index += 1;
+        }
+    }
+    assert_eq!(
+        duplicate_count, 1,
+        "the installed command fixture must contain one cross-mutator duplicate"
+    );
+    assert_eq!(state_index, results.len());
+    assert_eq!(actual.join("\n") + "\n", expected);
+}
+
+fn mutation_results(stdout: &str) -> Vec<(&'static str, &str)> {
+    stdout
+        .lines()
+        .filter_map(|line| {
+            [
+                ("killed", "Killed"),
+                ("escaped", "Escaped"),
+                ("errored", "Errored"),
+                ("not covered", "NotCovered"),
+                ("skipped", "Skipped"),
+            ]
+            .into_iter()
+            .find_map(|(prefix, state)| {
+                line.strip_prefix(prefix).and_then(|rest| {
+                    rest.split_whitespace()
+                        .last()
+                        .map(|mutator| (state, mutator))
+                })
+            })
+        })
+        .collect()
+}
+
+#[test]
+fn installed_command_classifies_expression_fixture_mutants() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_expression_fixture(&root);
+    let source = fixture.join("src").join("lib.rs");
+    let source_before = fs::read(&source).expect("expression fixture source must be readable");
+
+    let output = Command::new(command_path(&install))
+        .args([
+            "--enable",
+            "arithmetic/*",
+            "--enable",
+            "conditional/*",
+            "--enable",
+            "expression/*",
+            "--enable",
+            "numbers/*",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start for the expression fixture");
+
+    assert!(
+        output.status.success(),
+        "expression fixture run must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("expression output must be UTF-8");
+    assert!(
+        stdout.contains("Killed: 16")
+            && stdout.contains("Escaped: 1")
+            && stdout.contains("Errored: 0")
+            && stdout.contains("Total: 17")
+            && stdout.contains("conditional/negated | 2 | 0 | 0 | 2")
+            && stdout.contains("expression/comparison | 0 | 1 | 0 | 1")
+            && stdout.contains("numbers/decrementer | 2 | 0 | 0 | 2")
+            && stdout.contains("numbers/incrementer | 2 | 0 | 0 | 2"),
+        "the fixture must classify every valid expression mutant: {stdout}"
+    );
+    let expected = fs::read_to_string(fixture.join("expected-mutants.txt"))
+        .expect("expected expression mutants must be readable");
+    let states = stdout
+        .lines()
+        .filter_map(|line| {
+            ["killed", "escaped", "errored", "not covered", "skipped"]
+                .into_iter()
+                .find_map(|state| {
+                    line.strip_prefix(state).and_then(|rest| {
+                        rest.split_whitespace()
+                            .last()
+                            .map(|mutator| (state, mutator))
+                    })
+                })
+        })
+        .collect::<Vec<_>>();
+    let source_text =
+        String::from_utf8(source_before.clone()).expect("expression fixture source must be UTF-8");
+    let registry = mutarust::Registry::builtins();
+    let mut state_index = 0;
+    let mut actual = Vec::new();
+    for name in registry.names().filter(|name| {
+        !name.starts_with("branch/") && !name.starts_with("loop/") && *name != "statement/remove"
+    }) {
+        for mutation in registry
+            .get(name)
+            .expect("the built-in mutator must exist")
+            .mutations(&source_text)
+        {
+            let (range, replacement) = mutation.identity();
+            let original = source_text
+                .get(range)
+                .expect("a fixture mutation range must be valid");
+            let (state, result_name) = states
+                .get(state_index)
+                .expect("each generated mutation must have a result");
+            assert_eq!(*result_name, name, "result order must match plan order");
+            let state = match *state {
+                "killed" => "Killed",
+                "escaped" => "Escaped",
+                "errored" => "Errored",
+                "not covered" => "NotCovered",
+                "skipped" => "Skipped",
+                _ => unreachable!("the state filter accepts known states only"),
+            };
+            actual.push(format!("{name} :: {original} :: {replacement} :: {state}"));
+            state_index += 1;
+        }
+    }
+    assert_eq!(state_index, states.len());
+    assert_eq!(actual.join("\n") + "\n", expected);
+    assert_eq!(
+        fs::read(&source).expect("expression fixture source must remain readable"),
+        source_before
+    );
+    assert!(
+        !fixture.join("target").exists(),
+        "the expression fixture must not get a Cargo target directory"
+    );
+}
+
+#[test]
+fn installed_command_classifies_value_fixture_mutants() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_value_fixture(&root);
+    let source = fixture.join("src").join("lib.rs");
+    let source_before = fs::read(&source).expect("value fixture source must be readable");
+
+    let output = Command::new(command_path(&install))
+        .args([
+            "--enable",
+            "composite/field-clear",
+            "--enable",
+            "expression/context-nil",
+            "--enable",
+            "statement/remove-self-assign",
+            "--enable",
+            "statement/return",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start for the value fixture");
+
+    assert!(
+        output.status.success(),
+        "value fixture run must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("value output must be UTF-8");
+    assert!(
+        stdout.contains("Killed: 9")
+            && stdout.contains("Escaped: 1")
+            && stdout.contains("Errored: 0")
+            && stdout.contains("Skipped: 1")
+            && stdout.contains("Total: 11")
+            && stdout.contains("composite/field-clear | 4 | 0 | 0 | 4")
+            && stdout.contains("expression/context-nil | 1 | 0 | 1 | 2")
+            && stdout.contains("statement/remove-self-assign | 0 | 1 | 0 | 1")
+            && stdout.contains("statement/return | 4 | 0 | 0 | 4"),
+        "the fixture must classify every value mutant: {stdout}"
+    );
+    assert_value_oracle(&fixture, &source_before, &stdout);
+    assert_eq!(
+        fs::read(&source).expect("value source must remain readable"),
+        source_before
+    );
+    assert!(
+        !fixture.join("target").exists(),
+        "the value fixture must not get a Cargo target directory"
+    );
+}
+
+#[test]
+fn installed_command_classifies_concurrency_and_selection_fixture_mutants() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_concurrency_selection_fixture(&root);
+    let source = fixture.join("src").join("lib.rs");
+    let source_before = fs::read(&source).expect("concurrency source must be readable");
+
+    let output = Command::new(command_path(&install))
+        .args([
+            "--workers",
+            "1",
+            "--enable",
+            "concurrency/*",
+            "--enable",
+            "select/*",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start for the concurrency fixture");
+
+    assert!(
+        output.status.success(),
+        "concurrency fixture run must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("concurrency output must be UTF-8");
+    assert!(
+        stdout.contains("Killed: 13")
+            && stdout.contains("Escaped: 2")
+            && stdout.contains("Errored: 0")
+            && stdout.contains("Skipped: 0")
+            && stdout.contains("Total: 15")
+            && stdout.contains("concurrency/goroutine-remove | 8 | 1 | 0 | 9")
+            && stdout.contains("select/case-remove | 3 | 1 | 0 | 4")
+            && stdout.contains("select/default-remove | 2 | 0 | 0 | 2"),
+        "the fixture must classify each concurrency and selection mutant: {stdout}"
+    );
+    assert_eq!(
+        stable_mutant_ids(&stdout),
+        vec![
+            "da7a72038a6e705f827b374dcfa1f021",
+            "dfb5cb6454dbd48ba9e3be2ef434f7f1",
+            "9ab9229d93c295e47b2af77c55c8b947",
+            "24f6ecba07d1a73e84581275625af761",
+            "7e46fea7c893afcf1266055160731272",
+            "008c257b53da2c9e02eb85fe124aa440",
+            "b271fa942ec99f38515ffb2cb31737f9",
+            "7d5c591835ce42b8f19aefa5b517c69e",
+            "dfbc1564e0bfd5bc7436fea6a9c7c520",
+            "025ae38052f5cdfc073e9d11368f082d",
+            "a5002ed7f2f8e877fa36a1bec33278a6",
+            "0370f0994b87087371d98c5fa2653b27",
+            "cc042cd55cd347f0e8d078c984329142",
+            "fdc0bda58143f2580479b12df42e7e77",
+            "25ee32fe7b8ee9f7e088093a311d6692",
+        ],
+        "the concurrency fixture IDs must stay stable: {stdout}"
+    );
+    assert!(
+        stdout.contains("--- src/lib.rs")
+            && stdout.contains("-    thread::spawn(move || {")
+            && stdout.contains("+    (move || {")
+            && stdout
+                .contains("-        value = async { \"outer-first\" }, if mode == 1 => value,"),
+        "the concurrency fixture must show readable diffs: {stdout}"
+    );
+    assert_concurrency_selection_oracle(&fixture, &source_before, &stdout);
+
+    let custom = Command::new(command_path(&install))
+        .args(["--enable", "select/*", "--exec", "true"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start with a custom command");
+    assert!(custom.status.success(), "selection custom run must succeed");
+    let custom_stdout =
+        String::from_utf8(custom.stdout).expect("selection custom output must be UTF-8");
+    assert!(
+        custom_stdout.contains("Skipped: 6") && custom_stdout.contains("Total: 6"),
+        "selection candidates without Cargo proof must be skipped: {custom_stdout}"
+    );
+    assert_eq!(
+        fs::read(&source).expect("concurrency source must remain readable"),
+        source_before
+    );
+    assert!(
+        !fixture.join("target").exists(),
+        "the concurrency fixture must not get a Cargo target directory"
+    );
+}
+
+fn assert_concurrency_selection_oracle(fixture: &Path, source: &[u8], stdout: &str) {
+    let expected = fs::read_to_string(fixture.join("expected-mutants.txt"))
+        .expect("expected concurrency mutants must be readable");
+    let results = mutation_results(stdout);
+    let source = String::from_utf8(source.to_vec()).expect("concurrency source must be UTF-8");
+    let registry = mutarust::Registry::builtins();
+    let names = [
+        "concurrency/goroutine-remove",
+        "select/case-remove",
+        "select/default-remove",
+    ];
+    let mut actual = Vec::new();
+    let mut state_index = 0;
+    for name in names {
+        for mutation in registry.get(name).unwrap().mutations(&source) {
+            let (range, replacement) = mutation.identity();
+            let original = source.get(range).expect("mutation range must be valid");
+            let (state, result_name) = results
+                .get(state_index)
+                .expect("each concurrency mutant must have a state");
+            assert_eq!(*result_name, name, "result order must match plan order");
+            actual.push(format!(
+                "{name} :: {} :: {} :: {state}",
+                original.replace('\n', "\\n"),
+                replacement.replace('\n', "\\n")
+            ));
+            state_index += 1;
+        }
+    }
+    assert_eq!(state_index, results.len());
+    assert_eq!(actual.join("\n") + "\n", expected);
+}
+
+#[cfg(unix)]
+#[test]
+fn custom_command_skips_a_value_mutant_that_does_not_compile() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_value_fixture(&root);
+    let source = fixture.join("src").join("lib.rs");
+    let manifest = fixture.join("Cargo.toml");
+    let manifest_text = fs::read_to_string(&manifest).expect("value manifest must be readable");
+    fs::write(
+        &manifest,
+        format!("{manifest_text}\n[features]\nrequired = []\n"),
+    )
+    .expect("value manifest must require an explicit feature");
+    let source_text = fs::read_to_string(&source).expect("value source must be readable");
+    fs::write(
+        &source,
+        format!(
+            "#[cfg(not(feature = \"required\"))]\ncompile_error!(\"required feature is missing\");\n{source_text}\nstruct String;\npub fn custom_string(value: String) -> String {{ return value; }}\n#[allow(non_camel_case_types)] trait unwrap_context {{}}\nfn shadowed(_: Option<i32>) {{}}\npub fn shadowing_value() {{ let shadowed = core::convert::identity; shadowed(Some(1)); }}\npub fn shadowing_if(generic: fn(Option<i32>)) {{ if let Some(shadowed) = Some(generic) {{ shadowed(Some(1)); }} }}\npub fn shadowing_while() {{ while let Some(shadowed) = None::<fn(Option<i32>)> {{ shadowed(Some(1)); }} }}\npub fn shadowing_for(values: [fn(Option<i32>); 0]) {{ for shadowed in values {{ shadowed(Some(1)); }} }}\nmod other {{ pub fn imported<T>(_: Option<T>) {{}} }}\nfn imported(_: Option<i32>) {{}}\npub fn shadowing_import() {{ use other::imported; imported(Some(1)); }}\nfn generic_consume<T>(value: Option<i32>, _: T) -> i32 {{ value.unwrap_or(-1) }}\npub fn generic_parameter() -> i32 {{ generic_consume(Some(1), ()) }}\npub fn before_binding() -> i32 {{ let result = unwrap_context(Some(1)); let unwrap_context: fn(i32) -> i32 = core::convert::identity; let _ = unwrap_context; result }}\n#[cfg(test)] mod scope_tests {{ #[test] fn checks_proved_calls() {{ assert_eq!(super::generic_parameter(), 1); assert_eq!(super::before_binding(), 1); }} }}\n"
+        ),
+    )
+    .expect("value source must require the feature");
+    let command = root.join("feature-command");
+    fs::write(
+        &command,
+        "#!/bin/sh\nif ! \"$MUTARUST_REAL_CARGO\" test --features required --no-run --quiet; then\n  exit 2\nfi\nif \"$MUTARUST_REAL_CARGO\" test --features required --quiet; then\n  exit 1\nfi\nexit 0\n",
+    )
+    .expect("feature command must be written");
+    fs::set_permissions(&command, fs::Permissions::from_mode(0o755))
+        .expect("feature command must be executable");
+
+    let output = Command::new(command_path(&install))
+        .args([
+            "--enable",
+            "expression/context-nil",
+            "--enable",
+            "statement/return",
+            "--exec",
+        ])
+        .arg(&command)
+        .arg(&source)
+        .current_dir(&fixture)
+        .env("MUTARUST_REAL_CARGO", env!("CARGO"))
+        .output()
+        .expect("installed mutarust must start the custom command");
+
+    assert!(
+        output.status.success(),
+        "custom mutation run must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("custom output must be UTF-8");
+    assert!(
+        stdout.contains("Killed: 5")
+            && stdout.contains("Skipped: 9")
+            && stdout.contains("Total: 14")
+            && stdout.contains("expression/context-nil | 3 | 0 | 6 | 9")
+            && stdout.contains("statement/return | 2 | 0 | 3 | 5"),
+        "the invalid custom-command mutant must be skipped: {stdout}"
+    );
+}
+
+fn assert_value_oracle(fixture: &Path, source: &[u8], stdout: &str) {
+    let expected = fs::read_to_string(fixture.join("expected-mutants.txt"))
+        .expect("expected value mutants must be readable");
+    let results = mutation_results(stdout);
+    let source = String::from_utf8(source.to_vec()).expect("value source must be UTF-8");
+    let registry = mutarust::Registry::builtins();
+    let names = [
+        "composite/field-clear",
+        "expression/context-nil",
+        "statement/remove-self-assign",
+        "statement/return",
+    ];
+    let mut actual = Vec::new();
+    let mut state_index = 0;
+    for name in names {
+        for mutation in registry.get(name).unwrap().mutations(&source) {
+            let (range, replacement) = mutation.identity();
+            let original = source.get(range).expect("mutation range must be valid");
+            let (state, result_name) = results
+                .get(state_index)
+                .expect("each value mutant must have a state");
+            assert_eq!(*result_name, name, "result order must match plan order");
+            let original = original.replace('\n', "\\n");
+            let replacement = replacement.replace('\n', "\\n");
+            actual.push(format!("{name} :: {original} :: {replacement} :: {state}"));
+            state_index += 1;
+        }
+    }
+    assert_eq!(state_index, results.len());
+    assert_eq!(actual.join("\n") + "\n", expected);
 }
 
 #[test]
@@ -182,7 +698,7 @@ fn installed_command_filters_mutator_and_source_candidates() {
         .expect("excluded source must be written");
     fs::write(
         &source,
-        "pub fn checked() -> bool { true }\npub fn ignored_by_line() -> bool { true }\n",
+        "pub fn checked() -> bool { let value = true; value }\npub fn ignored_by_line() -> bool { let value = true; value }\n",
     )
     .expect("source filtering fixture must be written");
     let configuration = fixture.join("filter.yml");
@@ -263,7 +779,7 @@ fn installed_command_filters_mutator_and_source_candidates() {
     let nested = fixture.join("checked").join("src").join("nested.rs");
     fs::write(
         &nested,
-        "pub fn outer() -> bool {\n    fn inner() -> bool { true }\n    true\n}\n",
+        "pub fn outer() -> bool {\n    fn inner() -> bool { let value = true; value }\n    let value = true;\n    value\n}\n",
     )
     .expect("nested function source must be written");
     let nested_match = Command::new(command_path(&install))
@@ -319,7 +835,7 @@ fn installed_command_filters_mutator_and_source_candidates() {
     let annotations = fixture.join("checked").join("src").join("annotations.rs");
     fs::write(
         &annotations,
-        "pub fn allowed() -> bool { true }\n\n// mutator-disable-func\npub fn function_all() -> bool { true }\n\n// mutator-disable-func conditional/bool-literal\n#[inline]\npub fn function_selected() -> bool { true }\n\n// mutator-disable-next-line\npub fn next_line_all() -> bool { true }\n\n// mutator-disable-next-line conditional/bool-literal\npub fn next_line_selected() -> bool { true }\n\n// mutator-disable-regexp regexp_all\npub fn regexp_all() -> bool { true }\n\n// mutator-disable-regexp regexp_selected conditional/bool-literal\npub fn regexp_selected() -> bool { true }\n",
+        "pub fn allowed() -> bool { let value = true; value }\n\n// mutator-disable-func\npub fn function_all() -> bool { let value = true; value }\n\n// mutator-disable-func conditional/bool-literal\n#[inline]\npub fn function_selected() -> bool { let value = true; value }\n\n// mutator-disable-next-line\npub fn next_line_all() -> bool { let value = true; value }\n\n// mutator-disable-next-line conditional/bool-literal\npub fn next_line_selected() -> bool { let value = true; value }\n\n// mutator-disable-regexp regexp_all\npub fn regexp_all() -> bool { let value = true; value }\n\n// mutator-disable-regexp regexp_selected conditional/bool-literal\npub fn regexp_selected() -> bool { let value = true; value }\n",
     )
     .expect("annotation fixture must be written");
     let annotations_elsewhere = fixture
@@ -328,7 +844,7 @@ fn installed_command_filters_mutator_and_source_candidates() {
         .join("annotations_elsewhere.rs");
     fs::write(
         &annotations_elsewhere,
-        "pub fn regexp_all_elsewhere() -> bool { true }\n",
+        "pub fn regexp_all_elsewhere() -> bool { let value = true; value }\n",
     )
     .expect("second annotation fixture must be written");
     let annotated = Command::new(command_path(&install))
@@ -511,32 +1027,118 @@ fn installed_command_classifies_killed_and_escaped_mutants() {
     let source = fixture.join("checked").join("src").join("lib.rs");
     let user_target = root.join("user-target");
 
-    let output = Command::new(command_path(&install))
+    let sequential = Command::new(command_path(&install))
+        .args(["--workers", "1"])
+        .arg(&source)
+        .current_dir(&*root)
+        .env("CARGO_TARGET_DIR", &user_target)
+        .output()
+        .expect("installed mutarust must start");
+    let parallel = Command::new(command_path(&install))
+        .args(["--workers", "2"])
         .arg(&source)
         .current_dir(&*root)
         .env("CARGO_TARGET_DIR", &user_target)
         .output()
         .expect("installed mutarust must start");
 
-    assert!(output.status.success(), "mutation run must succeed");
-    let stdout = String::from_utf8(output.stdout).expect("mutation output must be UTF-8");
     assert!(
-        stdout.contains("killed ") && stdout.contains("escaped "),
-        "one mutant must be killed and one must escape: {stdout}"
+        sequential.status.success(),
+        "sequential mutation run must succeed"
     );
     assert!(
-        stdout.contains("Killed: 1") && stdout.contains("Escaped: 1"),
-        "the final counts must use mutation result terms: {stdout}"
+        parallel.status.success(),
+        "parallel mutation run must succeed"
+    );
+    let sequential_stdout =
+        String::from_utf8(sequential.stdout).expect("sequential mutation output must be UTF-8");
+    let parallel_stdout =
+        String::from_utf8(parallel.stdout).expect("parallel mutation output must be UTF-8");
+    assert!(
+        parallel_stdout.contains("killed ") && parallel_stdout.contains("escaped "),
+        "one mutant must be killed and one must escape: {parallel_stdout}"
+    );
+    assert!(
+        parallel_stdout.contains("Killed: 1") && parallel_stdout.contains("Escaped: 1"),
+        "the final counts must use mutation result terms: {parallel_stdout}"
+    );
+    assert_eq!(
+        parallel_stdout, sequential_stdout,
+        "parallel workers must keep mutation result records and summaries in plan order"
     );
     assert_eq!(
         fs::read_to_string(source).expect("fixture source must remain readable"),
-        "pub fn checked() -> bool { true }\npub fn unchecked() -> bool { true }\n",
+        "pub fn checked() -> bool { let value = true; value }\npub fn unchecked() -> bool { let value = true; value }\n",
         "the mutation run must not change user source"
     );
     assert!(
         !user_target.exists(),
         "the mutation run must not write Cargo output to the user target directory"
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn installed_command_keeps_parallel_cargo_output_out_of_result_records() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_mutation_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    let source_before = fs::read(&source).expect("source must be readable");
+    let fake_cargo = root.join("parallel-output-cargo");
+    let markers = root.join("parallel-output-markers");
+    let temporary_root = root.join("parallel-output-temporary");
+    fs::create_dir(&markers).expect("parallel output markers must be created");
+    fs::create_dir(&temporary_root).expect("parallel output root must be created");
+    fs::write(
+        &fake_cargo,
+        format!(
+            "#!/bin/sh\nif [ \"$1\" = \"metadata\" ]; then\n  exec '{}' \"$@\"\nfi\nif ! grep -q false checked/src/lib.rs 2>/dev/null; then\n  exit 0\nfi\nif [ \"$(grep -c false checked/src/lib.rs)\" -ne 1 ]; then\n  exit 91\nfi\ncase \" $* \" in\n  *\" --no-run \"*) exit 0 ;;\nesac\ntouch \"$MUTARUST_OUTPUT_MARKERS/$$\"\nfor _ in $(seq 1 100); do\n  [ \"$(find \"$MUTARUST_OUTPUT_MARKERS\" -type f | wc -l)\" -ge 2 ] && break\n  sleep 0.01\ndone\nif [ \"$(find \"$MUTARUST_OUTPUT_MARKERS\" -type f | wc -l)\" -ne 2 ]; then\n  exit 92\nfi\nprintf 'parallel worker output: begin'\nsleep 0.05\nprintf ': complete\\n'\nexit 1\n",
+            env!("CARGO")
+        ),
+    )
+    .expect("parallel output Cargo command must be written");
+    fs::set_permissions(&fake_cargo, fs::Permissions::from_mode(0o755))
+        .expect("parallel output Cargo command must be executable");
+
+    let output = Command::new(command_path(&install))
+        .args(["--workers", "2"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .env("CARGO", &fake_cargo)
+        .env("MUTARUST_OUTPUT_MARKERS", &markers)
+        .env("TMPDIR", &temporary_root)
+        .output()
+        .expect("installed mutarust must start");
+
+    assert!(
+        output.status.success(),
+        "parallel Cargo run must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("mutation output must be UTF-8");
+    assert!(
+        stdout.contains("Killed: 2"),
+        "both concurrent Cargo workers must report complete results: {stdout}"
+    );
+    assert!(
+        !stdout.contains("parallel worker output"),
+        "concurrent Cargo output must not mix with mutation result records: {stdout}"
+    );
+    assert_eq!(
+        fs::read_dir(&markers)
+            .expect("parallel output markers must be readable")
+            .count(),
+        2,
+        "two Cargo workers must run at the same time"
+    );
+    assert!(
+        mutarust_temp_entries(&temporary_root).is_empty(),
+        "parallel workspaces must be removed after the run"
+    );
+    assert_eq!(fs::read(&source).unwrap(), source_before);
 }
 
 #[test]
@@ -562,8 +1164,8 @@ fn installed_command_reports_stable_evidence_and_enforces_total_score() {
     assert_eq!(
         ids,
         vec![
-            "a4afb3df07ad704a7e118ca1f9c8ce1e".to_owned(),
-            "7e44f5b6649ca4de087acb260e75a287".to_owned(),
+            "4582b234c128077507b7558eb62c337e".to_owned(),
+            "c2b28e81b2cc0af0ff4a6a1225106223".to_owned(),
         ],
         "each mutant must have the Mutago-compatible stable ID: {stdout}"
     );
@@ -571,8 +1173,8 @@ fn installed_command_reports_stable_evidence_and_enforces_total_score() {
         stdout.contains("--- checked/src/lib.rs")
             && stdout.contains("+++ checked/src/lib.rs")
             && stdout.contains("@@ -")
-            && stdout.contains("-pub fn unchecked() -> bool { true }")
-            && stdout.contains("+pub fn unchecked() -> bool { false }"),
+            && stdout.contains("-pub fn unchecked() -> bool { let value = true; value }")
+            && stdout.contains("+pub fn unchecked() -> bool { let value = false; value }"),
         "an escaped mutant must show a readable source diff: {stdout}"
     );
     assert!(
@@ -673,6 +1275,276 @@ fn installed_command_reports_stable_evidence_and_enforces_total_score() {
             && !one_mutant_stdout.contains("Mutation score:")
             && !one_mutant_stdout.contains("Per-mutator results:"),
         "one-mutant execution must show one evidence result without a summary or score gate: {one_mutant_stdout}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn installed_command_manages_baselines_blacklists_and_one_mutant_ids() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_mutation_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    let original = fs::read_to_string(&source).expect("fixture source must remain readable");
+    let baseline = fixture.join("mutarust-baseline.json");
+
+    let updated = Command::new(command_path(&install))
+        .args([
+            "--exec",
+            "false",
+            "--baseline",
+            baseline.to_str().expect("baseline path must be UTF-8"),
+            "--update-baseline",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must update a baseline");
+    assert!(
+        updated.status.success(),
+        "baseline update must succeed: {}",
+        String::from_utf8_lossy(&updated.stderr)
+    );
+    let baseline_text = fs::read_to_string(&baseline).expect("baseline must be written");
+    assert!(
+        baseline_text.contains("\"version\": 1")
+            && baseline_text.contains("\"id\": \"4582b234c128077507b7558eb62c337e\"")
+            && baseline_text.contains("\"id\": \"c2b28e81b2cc0af0ff4a6a1225106223\"")
+            && baseline_text.contains("\"file\": \"checked/src/lib.rs\"")
+            && baseline_text.contains("\"mutator\": \"conditional/bool-literal\"")
+            && baseline_text.contains("\"line\": 1"),
+        "the baseline must record deterministic escaped-mutant evidence: {baseline_text}"
+    );
+    assert!(
+        !String::from_utf8_lossy(&updated.stdout).contains("Killed:"),
+        "baseline update must finish before the normal summary"
+    );
+
+    let accepted = Command::new(command_path(&install))
+        .args([
+            "--exec",
+            "false",
+            "--baseline",
+            baseline.to_str().expect("baseline path must be UTF-8"),
+            "--fail-on-escaped",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must accept baseline escapes");
+    assert!(
+        accepted.status.success(),
+        "known escaped mutants must pass the new-escape gate: {}",
+        String::from_utf8_lossy(&accepted.stderr)
+    );
+
+    fs::write(&source, format!("// unrelated source edit\n{original}"))
+        .expect("unrelated source edit must be written");
+    let accepted_after_edit = Command::new(command_path(&install))
+        .args([
+            "--exec",
+            "false",
+            "--baseline",
+            baseline.to_str().expect("baseline path must be UTF-8"),
+            "--fail-on-escaped",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must check an edited baseline source");
+    assert!(
+        accepted_after_edit.status.success(),
+        "an unrelated source edit must keep baseline IDs valid: {}",
+        String::from_utf8_lossy(&accepted_after_edit.stderr)
+    );
+
+    fs::write(
+        &source,
+        format!(
+            "// unrelated source edit\n{original}pub fn new_escape() -> bool {{ let value = true; value }}\n"
+        ),
+    )
+    .expect("new escaping source must be written");
+    let new_escape = Command::new(command_path(&install))
+        .args([
+            "--exec",
+            "false",
+            "--baseline",
+            baseline.to_str().expect("baseline path must be UTF-8"),
+            "--fail-on-escaped",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must find a new escaped mutant");
+    assert_eq!(new_escape.status.code(), Some(4));
+    assert!(
+        String::from_utf8_lossy(&new_escape.stderr).contains("1 new mutant(s) escaped"),
+        "only new escaped mutants must fail the new-escape gate: {}",
+        String::from_utf8_lossy(&new_escape.stderr)
+    );
+
+    fs::write(&source, &original).expect("fixture source must be restored");
+    let blacklist = fixture.join("mutarust-blacklist.txt");
+    fs::write(&blacklist, "c056b4a14386291b011db5e4053d8e58\n").expect("blacklist must be written");
+    let blacklisted = Command::new(command_path(&install))
+        .args([
+            "--exec",
+            "false",
+            "--blacklist",
+            blacklist.to_str().expect("blacklist path must be UTF-8"),
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must apply a blacklist");
+    assert!(
+        blacklisted.status.success(),
+        "a valid blacklist must succeed: {}",
+        String::from_utf8_lossy(&blacklisted.stderr)
+    );
+    assert_eq!(
+        stable_mutant_ids(
+            &String::from_utf8(blacklisted.stdout)
+                .expect("blacklisted mutation output must be UTF-8")
+        ),
+        vec!["c2b28e81b2cc0af0ff4a6a1225106223".to_owned()],
+        "the changed-line checksum must remove its accepted mutant"
+    );
+
+    fs::write(&source, format!("// unrelated source edit\n{original}"))
+        .expect("unrelated source edit must be written");
+    let blacklisted_after_edit = Command::new(command_path(&install))
+        .args([
+            "--exec",
+            "false",
+            "--blacklist",
+            blacklist.to_str().expect("blacklist path must be UTF-8"),
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must apply a stable blacklist");
+    assert!(
+        blacklisted_after_edit.status.success(),
+        "an unrelated source edit must keep blacklist checksums valid: {}",
+        String::from_utf8_lossy(&blacklisted_after_edit.stderr)
+    );
+    assert_eq!(
+        stable_mutant_ids(
+            &String::from_utf8(blacklisted_after_edit.stdout)
+                .expect("edited blacklist mutation output must be UTF-8")
+        ),
+        vec!["c2b28e81b2cc0af0ff4a6a1225106223".to_owned()],
+        "the blacklist checksum must use only changed source lines"
+    );
+
+    let malformed = Command::new(command_path(&install))
+        .args(["--run-mutant-id", "not-an-id"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must reject a malformed ID");
+    assert_eq!(malformed.status.code(), Some(3));
+    assert!(
+        String::from_utf8_lossy(&malformed.stderr).contains("32-character lower-case hexadecimal"),
+        "a malformed ID must have a clear diagnostic"
+    );
+
+    let unknown = Command::new(command_path(&install))
+        .args(["--run-mutant-id", &"f".repeat(32)])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must reject an unknown ID");
+    assert_eq!(unknown.status.code(), Some(3));
+    assert!(
+        String::from_utf8_lossy(&unknown.stderr).contains("could not find mutant ID"),
+        "an unknown ID must have a clear diagnostic"
+    );
+
+    let missing = Command::new(command_path(&install))
+        .arg("--run-mutant-id")
+        .output()
+        .expect("installed mutarust must reject a missing ID");
+    assert_eq!(missing.status.code(), Some(3));
+    assert!(
+        String::from_utf8_lossy(&missing.stderr).contains("--run-mutant-id requires a value"),
+        "a missing ID must have a clear diagnostic"
+    );
+
+    let duplicate = Command::new(command_path(&install))
+        .args([
+            "--run-mutant-id",
+            "4582b234c128077507b7558eb62c337e",
+            "--run-mutant-id",
+            "c2b28e81b2cc0af0ff4a6a1225106223",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must reject duplicate IDs");
+    assert_eq!(duplicate.status.code(), Some(3));
+    assert!(
+        String::from_utf8_lossy(&duplicate.stderr)
+            .contains("--run-mutant-id can be supplied only once"),
+        "a duplicate ID must have a clear diagnostic"
+    );
+
+    let malformed_baseline = fixture.join("malformed-baseline.json");
+    fs::write(&malformed_baseline, "not JSON\n").expect("malformed baseline must be written");
+    let malformed_baseline_output = Command::new(command_path(&install))
+        .args([
+            "--baseline",
+            malformed_baseline
+                .to_str()
+                .expect("malformed baseline path must be UTF-8"),
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must reject a malformed baseline");
+    assert_eq!(malformed_baseline_output.status.code(), Some(3));
+    assert!(
+        String::from_utf8_lossy(&malformed_baseline_output.stderr)
+            .contains("could not parse baseline"),
+        "a malformed baseline must have a clear diagnostic"
+    );
+
+    let duplicate_baseline = fixture.join("duplicate-baseline.json");
+    fs::write(
+        &duplicate_baseline,
+        "{\"version\":1,\"mutants\":[{\"id\":\"4582b234c128077507b7558eb62c337e\",\"file\":\"checked/src/lib.rs\",\"mutator\":\"conditional/bool-literal\",\"line\":1},{\"id\":\"4582b234c128077507b7558eb62c337e\",\"file\":\"checked/src/lib.rs\",\"mutator\":\"conditional/bool-literal\",\"line\":1}]}\n",
+    )
+    .expect("duplicate baseline must be written");
+    let duplicate_baseline_output = Command::new(command_path(&install))
+        .args([
+            "--baseline",
+            duplicate_baseline
+                .to_str()
+                .expect("duplicate baseline path must be UTF-8"),
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must reject a duplicate baseline ID");
+    assert_eq!(duplicate_baseline_output.status.code(), Some(3));
+    assert!(
+        String::from_utf8_lossy(&duplicate_baseline_output.stderr).contains("duplicate mutant ID"),
+        "a duplicate baseline ID must have a clear diagnostic"
+    );
+
+    let incomplete_update = Command::new(command_path(&install))
+        .args(["--update-baseline", "--dry-run"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must reject an incomplete baseline update");
+    assert_eq!(incomplete_update.status.code(), Some(3));
+    assert!(
+        String::from_utf8_lossy(&incomplete_update.stderr)
+            .contains("--update-baseline cannot be used with --dry-run"),
+        "an incomplete baseline update must have a clear diagnostic"
     );
 }
 
@@ -777,12 +1649,12 @@ fn installed_command_skips_mutants_that_do_not_compile() {
     let source = fixture.join("checked").join("src").join("lib.rs");
     fs::write(
         &source,
-        "pub struct Marker<const ENABLED: bool>;\npub fn marker() -> Marker<true> { Marker::<true> }\n",
+        "pub fn first() -> String { \"a\".to_owned() + \"b\" }\npub fn second() -> String { \"c\".to_owned() + \"d\" }\n",
     )
     .expect("compile rejection source must be written");
     fs::write(
         fixture.join("checked").join("tests").join("mutation.rs"),
-        "use mutation_checked::{marker, Marker};\n\n#[test]\nfn marker_is_enabled() {\n    let _: Marker<true> = marker();\n}\n",
+        "use mutation_checked::{first, second};\n\n#[test]\nfn strings_join() {\n    assert_eq!(first(), \"ab\");\n    assert_eq!(second(), \"cd\");\n}\n",
     )
     .expect("compile rejection test must be written");
 
@@ -820,8 +1692,11 @@ fn installed_command_reports_a_failed_test_command_as_errored() {
     let install = install_command(&root);
     let fixture = write_mutation_fixture(&root);
     let source = fixture.join("checked").join("src").join("lib.rs");
-    fs::write(&source, "pub fn checked() -> bool { true }\n")
-        .expect("single-mutant source must be written");
+    fs::write(
+        &source,
+        "pub fn checked() -> bool { let value = true; value }\n",
+    )
+    .expect("single-mutant source must be written");
     let fake_cargo = root.join("vanishing-cargo");
     fs::write(
         &fake_cargo,
@@ -869,7 +1744,7 @@ fn installed_command_preserves_existing_user_changes() {
     run_git(&fixture, &["commit", "-m", "fixture"]);
     fs::write(
         &source,
-        "pub fn checked() -> bool { true }\npub fn unchecked() -> bool { true }\n// tracked local source change\n",
+        "pub fn checked() -> bool { let value = true; value }\npub fn unchecked() -> bool { let value = true; value }\n// tracked local source change\n",
     )
     .expect("tracked source change must be written");
     fs::write(
@@ -934,7 +1809,7 @@ fn installed_command_runs_external_source_with_local_dependency_and_configuratio
     );
     assert_eq!(
         fs::read_to_string(source).expect("external source must remain readable"),
-        "pub fn checked() -> bool { true }\npub fn unchecked() -> bool { true }\npub fn configured() -> bool { cfg!(config_check) }\npub fn local_value() -> u8 { local_support::value() }\n",
+        "pub fn checked() -> bool { let value = true; value }\npub fn unchecked() -> bool { let value = true; value }\npub fn configured() -> bool { cfg!(config_check) }\npub fn local_value() -> u8 { local_support::value() }\n",
         "the mutation run must not change the external user source"
     );
 }
@@ -1221,8 +2096,11 @@ fn installed_command_review_copies_a_source_directory_named_target() {
     )
     .expect("target module root must be written");
     let source = target_module.join("mod.rs");
-    fs::write(&source, "pub fn checked() -> bool { true }\n")
-        .expect("target module source must be written");
+    fs::write(
+        &source,
+        "pub fn checked() -> bool { let value = true; value }\n",
+    )
+    .expect("target module source must be written");
     let fake_cargo = root.join("cargo-target-module-check");
     fs::write(
         &fake_cargo,
@@ -1422,7 +2300,7 @@ fn installed_command_tests_one_mutation_per_temporary_workspace() {
     let record = root.join("mutant-tests");
     fs::write(
         &fake_cargo,
-        "#!/bin/sh\nif [ \"$1\" = \"metadata\" ]; then\n  exec \"$MUTARUST_REAL_CARGO\" \"$@\"\nfi\ncase \" $* \" in\n  *\" --no-run \"*) exec \"$MUTARUST_REAL_CARGO\" \"$@\" ;;\nesac\nif grep -q false checked/src/lib.rs 2>/dev/null; then\n  checked=true\n  unchecked=true\n  grep -q 'pub fn checked() -> bool { false }' checked/src/lib.rs && checked=false\n  grep -q 'pub fn unchecked() -> bool { false }' checked/src/lib.rs && unchecked=false\n  mode=$(stat -c %a \"$PWD\" 2>/dev/null || stat -f %Lp \"$PWD\")\n  printf '%s|%s|%s|%s\\n' \"$PWD\" \"$checked\" \"$unchecked\" \"$mode\" >> \"$MUTARUST_TEST_RECORD\"\nfi\nexec \"$MUTARUST_REAL_CARGO\" \"$@\"\n",
+        "#!/bin/sh\nif [ \"$1\" = \"metadata\" ]; then\n  exec \"$MUTARUST_REAL_CARGO\" \"$@\"\nfi\ncase \" $* \" in\n  *\" --no-run \"*) exec \"$MUTARUST_REAL_CARGO\" \"$@\" ;;\nesac\nif grep -q false checked/src/lib.rs 2>/dev/null; then\n  checked=true\n  unchecked=true\n  grep -q 'pub fn checked() -> bool { let value = false; value }' checked/src/lib.rs && checked=false\n  grep -q 'pub fn unchecked() -> bool { let value = false; value }' checked/src/lib.rs && unchecked=false\n  mode=$(stat -c %a \"$PWD\" 2>/dev/null || stat -f %Lp \"$PWD\")\n  printf '%s|%s|%s|%s\\n' \"$PWD\" \"$checked\" \"$unchecked\" \"$mode\" >> \"$MUTARUST_TEST_RECORD\"\nfi\nexec \"$MUTARUST_REAL_CARGO\" \"$@\"\n",
     )
     .expect("recording Cargo command must be written");
     fs::set_permissions(&fake_cargo, fs::Permissions::from_mode(0o755))
@@ -1465,6 +2343,588 @@ fn installed_command_tests_one_mutation_per_temporary_workspace() {
             "each temporary workspace must be removed"
         );
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn installed_command_dry_run_does_not_write_or_test() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_mutation_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    let source_before = fs::read(&source).expect("source must be readable");
+    let temporary_root = root.join("dry-run-temporary");
+    let fake_cargo = root.join("dry-run-cargo");
+    fs::create_dir(&temporary_root).expect("temporary root must be created");
+    fs::write(
+        &fake_cargo,
+        "#!/bin/sh\nif [ \"$1\" = \"metadata\" ]; then\n  exec \"$MUTARUST_REAL_CARGO\" \"$@\"\nfi\nprintf 'cargo test ran\\n' > \"$MUTARUST_CARGO_RECORD\"\nexit 1\n",
+    )
+    .expect("dry-run Cargo command must be written");
+    fs::set_permissions(&fake_cargo, fs::Permissions::from_mode(0o755))
+        .expect("dry-run Cargo command must be executable");
+    let record = root.join("dry-run-cargo-record");
+
+    let output = Command::new(command_path(&install))
+        .args(["--dry-run"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .env("CARGO", &fake_cargo)
+        .env("MUTARUST_REAL_CARGO", env!("CARGO"))
+        .env("MUTARUST_CARGO_RECORD", &record)
+        .env("TMPDIR", &temporary_root)
+        .output()
+        .expect("installed mutarust must start dry run");
+
+    assert!(
+        output.status.success(),
+        "dry run must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("dry-run output must be UTF-8"),
+        "Total: 2 mutation(s) would be generated. No files written, no tests run.\n"
+    );
+    assert!(!record.exists(), "dry run must not start Cargo tests");
+    assert_eq!(fs::read(&source).unwrap(), source_before);
+    assert!(
+        mutarust_temp_entries(&temporary_root).is_empty(),
+        "dry run must not create mutation workspaces"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn installed_command_no_exec_keeps_generated_mutants() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_mutation_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    let source_before = fs::read(&source).expect("source must be readable");
+    let temporary_root = root.join("no-exec-temporary");
+    let fake_cargo = root.join("no-exec-cargo");
+    fs::create_dir(&temporary_root).expect("temporary root must be created");
+    fs::write(
+        &fake_cargo,
+        "#!/bin/sh\nif [ \"$1\" = \"metadata\" ]; then\n  exec \"$MUTARUST_REAL_CARGO\" \"$@\"\nfi\nprintf 'cargo test ran\\n' > \"$MUTARUST_CARGO_RECORD\"\nexit 1\n",
+    )
+    .expect("no-exec Cargo command must be written");
+    fs::set_permissions(&fake_cargo, fs::Permissions::from_mode(0o755))
+        .expect("no-exec Cargo command must be executable");
+    let record = root.join("no-exec-cargo-record");
+
+    let output = Command::new(command_path(&install))
+        .args(["--no-exec"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .env("CARGO", &fake_cargo)
+        .env("MUTARUST_REAL_CARGO", env!("CARGO"))
+        .env("MUTARUST_CARGO_RECORD", &record)
+        .env("TMPDIR", &temporary_root)
+        .output()
+        .expect("installed mutarust must start no-exec run");
+
+    assert!(
+        output.status.success(),
+        "no-exec run must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("no-exec output must be UTF-8");
+    assert!(
+        stdout.contains("Generated: 2") && stdout.contains("mutation area:"),
+        "no-exec output must report generated areas: {stdout}"
+    );
+    assert!(!record.exists(), "no-exec must not start Cargo tests");
+    assert_eq!(fs::read(&source).unwrap(), source_before);
+    let entries = mutarust_temp_entries(&temporary_root);
+    assert_eq!(
+        entries.len(),
+        2,
+        "no-exec must keep each mutation workspace"
+    );
+    assert!(
+        entries
+            .iter()
+            .all(|path| path.join("checked/src/lib.rs").is_file()),
+        "each generated mutation area must contain the selected source"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn installed_command_keeps_requested_mutation_workspaces() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_mutation_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    let source_before = fs::read(&source).expect("source must be readable");
+    let temporary_root = root.join("keep-temporary-root");
+    fs::create_dir(&temporary_root).expect("temporary root must be created");
+
+    let output = Command::new(command_path(&install))
+        .args(["--do-not-remove-tmp-folder"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .env("TMPDIR", &temporary_root)
+        .output()
+        .expect("installed mutarust must start retained run");
+
+    assert!(
+        output.status.success(),
+        "retained run must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("mutation area:"),
+        "retained run must report mutation areas"
+    );
+    assert_eq!(fs::read(&source).unwrap(), source_before);
+    assert_eq!(
+        mutarust_temp_entries(&temporary_root).len(),
+        2,
+        "retained run must keep only mutation workspaces"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn installed_command_reports_retained_area_after_a_test_command_error() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_mutation_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    let temporary_root = root.join("retained-error-temporary");
+    let fake_cargo = root.join("retained-error-cargo");
+    fs::create_dir(&temporary_root).expect("temporary root must be created");
+    fs::write(
+        &fake_cargo,
+        "#!/bin/sh\nif [ \"$1\" = \"metadata\" ]; then\n  exec \"$MUTARUST_REAL_CARGO\" \"$@\"\nfi\ncase \" $* \" in\n  *\" --no-run \"*) chmod 000 \"$0\"; exit 0 ;;\nesac\nexit 0\n",
+    )
+    .expect("retained-error Cargo command must be written");
+    fs::set_permissions(&fake_cargo, fs::Permissions::from_mode(0o755))
+        .expect("retained-error Cargo command must be executable");
+
+    let output = Command::new(command_path(&install))
+        .args(["--do-not-remove-tmp-folder"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .env("CARGO", &fake_cargo)
+        .env("MUTARUST_REAL_CARGO", env!("CARGO"))
+        .env("TMPDIR", &temporary_root)
+        .output()
+        .expect("installed mutarust must start retained error run");
+
+    assert!(
+        output.status.success(),
+        "retained error run must complete: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("retained output must be UTF-8");
+    assert!(
+        (stdout.contains("Errored: 1") || stdout.contains("Errored: 2"))
+            && stdout.contains("could not run cargo test")
+            && stdout.contains("mutation area:"),
+        "a retained command-start error must report its mutation area: {stdout}"
+    );
+    assert_eq!(
+        mutarust_temp_entries(&temporary_root).len(),
+        2,
+        "retained error run must preserve mutation workspaces"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn installed_command_applies_adaptive_cargo_controls() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_mutation_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    let fake_cargo = root.join("adaptive-cargo");
+    let record = root.join("adaptive-cargo-record");
+    fs::write(
+        &fake_cargo,
+        "#!/bin/sh\nif [ \"$1\" = \"metadata\" ]; then\n  exec \"$MUTARUST_REAL_CARGO\" \"$@\"\nfi\nprintf '%s\\n' \"$*\" >> \"$MUTARUST_CARGO_RECORD\"\ncase \" $* \" in\n  *\" --no-run \"*) exit 0 ;;\nesac\nif grep -q false checked/src/lib.rs; then\n  sleep 3\nelse\n  sleep 1\nfi\n",
+    )
+    .expect("adaptive Cargo command must be written");
+    fs::set_permissions(&fake_cargo, fs::Permissions::from_mode(0o755))
+        .expect("adaptive Cargo command must be executable");
+
+    let output = Command::new(command_path(&install))
+        .args([
+            "--timeout-coefficient",
+            "1.5",
+            "--test-flags",
+            "--package mutation-checked",
+            "--test-recursive",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .env("CARGO", &fake_cargo)
+        .env("MUTARUST_REAL_CARGO", env!("CARGO"))
+        .env("MUTARUST_CARGO_RECORD", &record)
+        .output()
+        .expect("installed mutarust must start adaptive run");
+
+    assert!(
+        output.status.success(),
+        "adaptive run must complete: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("adaptive output must be UTF-8");
+    assert!(
+        stdout.contains("Errored: 2") && stdout.contains("timed out after 2 seconds"),
+        "adaptive timeout must use the clean duration: {stdout}"
+    );
+    let record = fs::read_to_string(record).expect("Cargo record must be readable");
+    assert!(
+        record.lines().all(|line| {
+            line.contains("--workspace") && line.contains("--package mutation-checked")
+        }),
+        "Cargo controls must apply to each Cargo command: {record}"
+    );
+}
+
+#[test]
+fn installed_command_tests_workspace_packages_recursively() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_mutation_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+
+    let output = Command::new(command_path(&install))
+        .args(["--test-recursive"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start recursive test run");
+
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "the failing workspace package must fail the clean test run"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("clean cargo test failed"),
+        "recursive test selection must include the full workspace"
+    );
+}
+
+#[test]
+fn installed_command_rejects_incompatible_execution_controls() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    for (arguments, error) in [
+        (
+            vec!["--dry-run", "--no-exec"],
+            "--dry-run and --no-exec cannot be used together",
+        ),
+        (
+            vec!["--no-exec", "--exec", "true"],
+            "--no-exec cannot be used with --exec",
+        ),
+        (
+            vec!["--timeout", "1", "--timeout-coefficient", "1.5"],
+            "--timeout-coefficient cannot be used with --timeout",
+        ),
+        (
+            vec!["--exec", "true", "--timeout-coefficient", "1.5"],
+            "--timeout-coefficient requires the Cargo test command",
+        ),
+        (
+            vec!["--dry-run", "--test-recursive"],
+            "--dry-run cannot be used with --test-recursive",
+        ),
+        (
+            vec!["--dry-run", "--do-not-remove-tmp-folder"],
+            "--dry-run cannot be used with --do-not-remove-tmp-folder",
+        ),
+        (
+            vec!["--no-exec", "--timeout", "1"],
+            "--no-exec cannot be used with --timeout",
+        ),
+        (
+            vec!["--workers", "0"],
+            "--workers requires a positive whole number",
+        ),
+        (
+            vec!["--workers", "two"],
+            "--workers requires a positive whole number",
+        ),
+        (
+            vec!["--workers", "1", "--workers", "2"],
+            "--workers can be supplied only once",
+        ),
+        (
+            vec!["--dry-run", "--workers", "2"],
+            "--dry-run cannot be used with --workers",
+        ),
+        (
+            vec!["--dry-run", "--coverage"],
+            "--dry-run cannot be used with --coverage",
+        ),
+        (
+            vec!["--no-exec", "--per-test"],
+            "--per-test cannot be used with --no-exec",
+        ),
+        (
+            vec!["--exec", "true", "--coverage"],
+            "--coverage requires the Cargo test command",
+        ),
+    ] {
+        let output = Command::new(command_path(&install))
+            .args(arguments)
+            .output()
+            .expect("installed mutarust must reject invalid controls");
+        assert_eq!(output.status.code(), Some(3));
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains(error),
+            "control error must explain the invalid combination"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn installed_command_collects_coverage_and_selects_covering_tests() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_coverage_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    let source_before = fs::read(&source).expect("coverage fixture source must be readable");
+    let fake_cargo = root.join("coverage-cargo");
+    let record = root.join("coverage-test-record");
+    let temporary_root = root.join("coverage-temporary");
+    fs::create_dir(&temporary_root).expect("coverage temporary root must be created");
+    fs::write(
+        &fake_cargo,
+        "#!/bin/sh\nif [ \"$1\" = \"metadata\" ]; then\n  exec \"$MUTARUST_REAL_CARGO\" \"$@\"\nfi\nif [ \"$1\" = \"llvm-cov\" ]; then\n  output=\n  while [ \"$#\" -gt 0 ]; do\n    if [ \"$1\" = \"--output-path\" ]; then\n      output=$2\n      break\n    fi\n    shift\n  done\n  if [ \"$MUTARUST_COVERAGE_MODE\" = \"missing\" ]; then\n    exit 0\n  fi\n  if [ \"$MUTARUST_COVERAGE_MODE\" = \"invalid\" ]; then\n    printf 'SF:%s\\nDA:zero,one\\nend_of_record\\n' \"$MUTARUST_COVERAGE_SOURCE\" > \"$output\"\n    exit 0\n  fi\n  case \" $* \" in\n    *\" --exact detects_detected \"*) data='DA:1,1' ;;\n    *\" --exact detects_escaped \"*) data='DA:2,1' ;;\n    *) data='DA:1,1\\nDA:2,1\\nDA:3,0' ;;\n  esac\n  printf 'SF:%s\\n%b\\nend_of_record\\n' \"$MUTARUST_COVERAGE_SOURCE\" \"$data\" > \"$output\"\n  exit 0\nfi\ncase \" $* \" in\n  *\" --list \"*) printf 'detects_detected: test\\ndetects_escaped: test\\n'; exit 0 ;;\nesac\nif ! grep -q false checked/src/lib.rs 2>/dev/null; then\n  exit 0\nfi\nif grep -q 'pub fn detected() -> bool { let value = false; value }' checked/src/lib.rs; then\n  mutant=detected\nelif grep -q 'pub fn escaped() -> bool { let value = false; value }' checked/src/lib.rs; then\n  mutant=escaped\nelif grep -q 'pub fn uncovered() -> bool { let value = false; value }' checked/src/lib.rs; then\n  mutant=uncovered\nelse\n  exit 94\nfi\nprintf '%s|%s\\n' \"$mutant\" \"$*\" >> \"$MUTARUST_COVERAGE_RECORD\"\ncase \" $* \" in\n  *\" --no-run \"*) exit 0 ;;\n  *\" --exact detects_detected \"*) exit 1 ;;\n  *\" --exact detects_escaped \"*) exit 0 ;;\n  *) exit 93 ;;\nesac\n",
+    )
+    .expect("coverage Cargo command must be written");
+    fs::set_permissions(&fake_cargo, fs::Permissions::from_mode(0o755))
+        .expect("coverage Cargo command must be executable");
+
+    let output = Command::new(command_path(&install))
+        .args(["--coverage", "--per-test", "--workers", "1"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .env("CARGO", &fake_cargo)
+        .env("MUTARUST_REAL_CARGO", env!("CARGO"))
+        .env("MUTARUST_COVERAGE_SOURCE", &source)
+        .env("MUTARUST_COVERAGE_RECORD", &record)
+        .env("TMPDIR", &temporary_root)
+        .output()
+        .expect("installed mutarust must collect coverage");
+
+    assert!(
+        output.status.success(),
+        "coverage mutation run must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("coverage output must be UTF-8");
+    assert!(
+        stdout.contains("Killed: 1")
+            && stdout.contains("Escaped: 1")
+            && stdout.contains("Not covered: 1")
+            && stdout.contains("Mutation score: 33.33%")
+            && stdout.contains("Covered-code mutation score: 50.00%"),
+        "coverage results must keep total and covered scores separate: {stdout}"
+    );
+    let records = fs::read_to_string(&record).expect("selected test records must exist");
+    assert!(
+        records.contains("detected|")
+            && records.contains("--exact detects_detected")
+            && records.contains("escaped|")
+            && records.contains("--exact detects_escaped")
+            && !records.contains("uncovered|"),
+        "only mapped covered tests must run: {records}"
+    );
+    assert_eq!(fs::read(&source).unwrap(), source_before);
+    assert!(
+        mutarust_temp_entries(&temporary_root).is_empty(),
+        "coverage and mutation temporary data must be removed"
+    );
+
+    let failed_gate = Command::new(command_path(&install))
+        .args(["--coverage", "--per-test", "--min-covered-msi", "51"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .env("CARGO", &fake_cargo)
+        .env("MUTARUST_REAL_CARGO", env!("CARGO"))
+        .env("MUTARUST_COVERAGE_SOURCE", &source)
+        .env("MUTARUST_COVERAGE_RECORD", &record)
+        .env("TMPDIR", &temporary_root)
+        .output()
+        .expect("installed mutarust must check covered score");
+    assert_eq!(failed_gate.status.code(), Some(4));
+    assert!(
+        String::from_utf8_lossy(&failed_gate.stderr).contains("covered-code mutation score"),
+        "covered score gate must explain failure"
+    );
+
+    let _ = fs::remove_file(&record);
+    let invalid = Command::new(command_path(&install))
+        .arg("--coverage")
+        .arg(&source)
+        .current_dir(&fixture)
+        .env("CARGO", &fake_cargo)
+        .env("MUTARUST_REAL_CARGO", env!("CARGO"))
+        .env("MUTARUST_COVERAGE_MODE", "invalid")
+        .env("MUTARUST_COVERAGE_SOURCE", &source)
+        .env("MUTARUST_COVERAGE_RECORD", &record)
+        .env("TMPDIR", &temporary_root)
+        .output()
+        .expect("installed mutarust must reject invalid coverage");
+    assert_eq!(invalid.status.code(), Some(3));
+    assert!(
+        String::from_utf8_lossy(&invalid.stderr).contains("LLVM coverage"),
+        "invalid coverage must have a clear diagnostic"
+    );
+    assert!(
+        !record.exists(),
+        "invalid coverage must stop before any mutant test can escape"
+    );
+    assert!(mutarust_temp_entries(&temporary_root).is_empty());
+
+    let missing = Command::new(command_path(&install))
+        .arg("--coverage")
+        .arg(&source)
+        .current_dir(&fixture)
+        .env("CARGO", &fake_cargo)
+        .env("MUTARUST_REAL_CARGO", env!("CARGO"))
+        .env("MUTARUST_COVERAGE_MODE", "missing")
+        .env("MUTARUST_COVERAGE_SOURCE", &source)
+        .env("MUTARUST_COVERAGE_RECORD", &record)
+        .env("TMPDIR", &temporary_root)
+        .output()
+        .expect("installed mutarust must reject missing coverage");
+    assert_eq!(missing.status.code(), Some(3));
+    assert!(
+        String::from_utf8_lossy(&missing.stderr).contains("could not read LLVM coverage data"),
+        "missing coverage must have a clear diagnostic"
+    );
+    assert!(!record.exists());
+    assert!(mutarust_temp_entries(&temporary_root).is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn installed_command_isolates_full_and_per_test_coverage() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_shared_coverage_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    let source_before = fs::read(&source).expect("shared coverage source must be readable");
+    let fake_cargo = root.join("shared-coverage-cargo");
+    let record = root.join("shared-coverage-record");
+    let temporary_root = root.join("shared-coverage-temporary");
+    fs::create_dir(&temporary_root).expect("shared coverage temporary root must be created");
+    fs::write(
+        &fake_cargo,
+        "#!/bin/sh\nif [ \"$1\" = \"metadata\" ]; then\n  exec \"$MUTARUST_REAL_CARGO\" \"$@\"\nfi\nall=\"$*\"\nif [ \"$1\" = \"llvm-cov\" ]; then\n  case \" $all \" in\n    *\" --exact \"*) [ \"$2\" = test ] || exit 95 ;;\n  esac\n  output=\n  while [ \"$#\" -gt 0 ]; do\n    if [ \"$1\" = \"--output-path\" ]; then\n      output=$2\n      break\n    fi\n    shift\n  done\n  touch Cargo.lock\n  case \" $all \" in\n    *\" --test left \"*\" --exact shared \"*) data='DA:1,1' ;;\n    *\" --test right \"*\" --exact shared \"*) data='DA:2,1' ;;\n    *\" --exact detects_left \"*) data='DA:3,1' ;;\n    *\" --exact detects_right \"*) data='DA:3,1' ;;\n    *) data='DA:1,1\\nDA:2,1\\nDA:3,1' ;;\n  esac\n  printf 'SF:%s\\n%b\\nend_of_record\\n' \"$MUTARUST_COVERAGE_SOURCE\" \"$data\" > \"$output\"\n  exit 0\nfi\ncase \" $all \" in\n  *\" --test left \"*\" --list \"*) printf 'shared: test\\ndetects_left: test\\n'; exit 0 ;;\n  *\" --test right \"*\" --list \"*) printf 'shared: test\\ndetects_right: test\\n'; exit 0 ;;\n  *\" --list \"*) exit 0 ;;\nesac\ncase \" $all \" in\n  *\" --no-run \"*) exit 0 ;;\nesac\nif grep -q 'pub fn first() -> bool { let value = false; value }' checked/src/lib.rs; then\n  mutant=first\nelif grep -q 'pub fn second() -> bool { let value = false; value }' checked/src/lib.rs; then\n  mutant=second\nelif grep -q 'pub fn shared() -> bool { let value = false; value }' checked/src/lib.rs; then\n  mutant=shared\nelse\n  exit 94\nfi\nprintf '%s|%s\\n' \"$mutant\" \"$all\" >> \"$MUTARUST_COVERAGE_RECORD\"\ncase \"$mutant|$all\" in\n  first*\" --test left \"*\" --exact shared \"*) exit 1 ;;\n  second*\" --test right \"*\" --exact shared \"*) exit 1 ;;\n  shared*\" --exact detects_left \"*) exit 0 ;;\n  shared*\" --exact detects_right \"*) exit 0 ;;\n  *) exit 93 ;;\nesac\n",
+    )
+    .expect("shared coverage Cargo command must be written");
+    let fake_cargo_script =
+        fs::read_to_string(&fake_cargo).expect("shared coverage Cargo command must be readable");
+    let fake_cargo_script = fake_cargo_script
+        .replacen(
+            "if grep -q 'pub fn first() -> bool { let value = false; value }' checked/src/lib.rs; then",
+            "case \" $all \" in\n  *\" --exact \"*) ;;\n  *) exit 0 ;;\nesac\nif grep -q 'pub fn first() -> bool { let value = false; value }' checked/src/lib.rs; then",
+            1,
+        )
+        .replace(
+            "shared*\" --exact detects_left \"*)",
+            "shared*\" --exact detects_left\"*)",
+        )
+        .replace(
+            "shared*\" --exact detects_right \"*)",
+            "shared*\" --exact detects_right\"*)",
+        );
+    fs::write(&fake_cargo, fake_cargo_script)
+        .expect("shared coverage Cargo command must accept the clean test");
+    fs::set_permissions(&fake_cargo, fs::Permissions::from_mode(0o755))
+        .expect("shared coverage Cargo command must be executable");
+
+    let output = Command::new(command_path(&install))
+        .args(["--coverage", "--per-test", "--workers", "1"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .env("CARGO", &fake_cargo)
+        .env("MUTARUST_REAL_CARGO", env!("CARGO"))
+        .env("MUTARUST_COVERAGE_SOURCE", &source)
+        .env("MUTARUST_COVERAGE_RECORD", &record)
+        .env("TMPDIR", &temporary_root)
+        .output()
+        .expect("installed mutarust must collect isolated shared coverage");
+
+    assert!(
+        output.status.success(),
+        "shared coverage run must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("shared coverage output must be UTF-8");
+    assert!(
+        stdout.contains("Killed: 2")
+            && stdout.contains("Escaped: 1")
+            && stdout.contains("Not covered: 0")
+            && stdout.contains("Mutation score: 66.67%")
+            && stdout.contains("Covered-code mutation score: 66.67%"),
+        "fully covered source must keep both scores: {stdout}"
+    );
+    let records = fs::read_to_string(&record).expect("shared coverage records must exist");
+    let first = coverage_record(&records, "first");
+    let second = coverage_record(&records, "second");
+    let shared = records
+        .lines()
+        .filter(|line| line.starts_with("shared|"))
+        .collect::<Vec<_>>();
+    assert!(
+        first.contains("--test left")
+            && first.contains("--exact shared")
+            && second.contains("--test right")
+            && second.contains("--exact shared")
+            && shared.len() == 2
+            && shared
+                .iter()
+                .any(|line| line.contains("--exact detects_left"))
+            && shared
+                .iter()
+                .any(|line| line.contains("--exact detects_right")),
+        "per-test coverage must keep duplicate names separate and run all shared coverage tests: {records}"
+    );
+    assert!(
+        !first.contains("--test right") && !second.contains("--test left"),
+        "per-test coverage must not run a duplicate name from another target: {records}"
+    );
+    assert_eq!(fs::read(&source).unwrap(), source_before);
+    assert!(
+        !fixture.join("Cargo.lock").exists(),
+        "coverage collection must not write a lock file in the user workspace"
+    );
+    assert!(
+        mutarust_temp_entries(&temporary_root).is_empty(),
+        "isolated coverage data must be removed"
+    );
+}
+
+#[cfg(unix)]
+fn coverage_record<'a>(records: &'a str, mutant: &str) -> &'a str {
+    records
+        .lines()
+        .find(|line| line.starts_with(&format!("{mutant}|")))
+        .expect("coverage test record must exist")
 }
 
 #[cfg(unix)]
@@ -1565,7 +3025,7 @@ fn installed_command_runs_custom_commands_with_a_stable_contract() {
                 "--exec",
                 command.to_str().expect("custom command path must be UTF-8"),
                 "--exec-timeout",
-                "1",
+                "5",
                 "--test-recursive",
                 "--verbose",
                 "--debug",
@@ -1608,7 +3068,7 @@ fn installed_command_runs_custom_commands_with_a_stable_contract() {
     assert_ne!(values[0], source.display().to_string());
     assert_ne!(values[1], source.display().to_string());
     assert_eq!(values[2], "mutation-checked");
-    assert_eq!(values[3], "1");
+    assert_eq!(values[3], "5");
     assert_eq!(values[4], "true");
     assert_eq!(values[5], "true");
     assert_eq!(values[6], "true");
@@ -1835,7 +3295,7 @@ fn installed_command_stops_test_at_interrupt() {
     run_git(&fixture, &["commit", "-m", "fixture"]);
     fs::write(
         &source,
-        "pub fn checked() -> bool { true }\npub fn unchecked() -> bool { true }\n// interrupted source change\n",
+        "pub fn checked() -> bool { let value = true; value }\npub fn unchecked() -> bool { let value = true; value }\n// interrupted source change\n",
     )
     .expect("interrupted source change must be written");
     fs::write(
@@ -1856,7 +3316,7 @@ fn installed_command_stops_test_at_interrupt() {
     fs::write(
         &fake_cargo,
         format!(
-            "#!/bin/sh\nif [ \"$1\" = \"metadata\" ]; then\n  exec '{}' \"$@\"\nfi\nif ! grep -q false checked/src/lib.rs 2>/dev/null; then\n  exit 0\nfi\ncase \" $* \" in\n  *\" --no-run \"*) exit 0 ;;\nesac\necho $$ > \"$MUTARUST_INTERRUPTED_CARGO\"\nsleep 30\n",
+            "#!/bin/sh\nif [ \"$1\" = \"metadata\" ]; then\n  exec '{}' \"$@\"\nfi\nif ! grep -q false checked/src/lib.rs 2>/dev/null; then\n  exit 0\nfi\nif [ \"$(grep -c false checked/src/lib.rs)\" -ne 1 ]; then\n  exit 93\nfi\ncase \" $* \" in\n  *\" --no-run \"*) exit 0 ;;\nesac\necho $$ >> \"$MUTARUST_INTERRUPTED_CARGO\"\nsleep 30\n",
             env!("CARGO")
         ),
     )
@@ -1866,6 +3326,7 @@ fn installed_command_stops_test_at_interrupt() {
 
     let mut command = Command::new(command_path(&install));
     let process = command
+        .args(["--workers", "2"])
         .arg(&source)
         .current_dir(&fixture)
         .env("CARGO", &fake_cargo)
@@ -1875,7 +3336,11 @@ fn installed_command_stops_test_at_interrupt() {
         .stderr(std::process::Stdio::piped())
         .spawn()
         .expect("installed mutarust must start");
-    wait_for_file(&cargo_identifier, "interrupted Cargo process must start");
+    wait_for_file_lines(
+        &cargo_identifier,
+        2,
+        "parallel interrupted Cargo processes must start",
+    );
     let signal = Command::new("kill")
         .args(["-INT", &process.id().to_string()])
         .status()
@@ -1898,18 +3363,14 @@ fn installed_command_stops_test_at_interrupt() {
         String::from_utf8_lossy(&output.stderr).contains("mutation run interrupted"),
         "the interrupt diagnostic must be clear"
     );
-    let cargo = fs::read_to_string(&cargo_identifier)
-        .expect("interrupted Cargo identifier must be written")
-        .trim()
-        .to_owned();
-    let cargo_status = Command::new("kill")
-        .args(["-0", &cargo])
-        .status()
-        .expect("Cargo process check must start");
-    assert!(
-        !cargo_status.success(),
-        "the interrupt must stop the Cargo process"
-    );
+    let cargo_processes = fs::read_to_string(&cargo_identifier)
+        .expect("interrupted Cargo identifiers must be written");
+    for cargo in cargo_processes.lines() {
+        assert!(
+            process_has_stopped(cargo),
+            "the interrupt must stop each Cargo process"
+        );
+    }
     assert!(
         mutarust_temp_entries(&temporary_root).is_empty(),
         "the interrupt must remove each mutation workspace"
@@ -1933,8 +3394,11 @@ fn installed_command_stops_test_at_interrupt() {
     let source = fixture.join("checked").join("src").join("lib.rs");
     let test = fixture.join("checked").join("tests").join("mutation.rs");
     let marker = root.join("windows-interrupt-workspace");
-    fs::write(&source, "pub fn checked() -> bool { true }\n")
-        .expect("interrupt source must be written");
+    fs::write(
+        &source,
+        "pub fn checked() -> bool { let value = true; value }\n",
+    )
+    .expect("interrupt source must be written");
     fs::write(
         &test,
         "#[test]\nfn blocks_on_the_mutant() {\n    if !mutation_checked::checked() {\n        std::fs::write(std::env::var_os(\"MUTARUST_INTERRUPT_MARKER\").unwrap(), env!(\"CARGO_MANIFEST_DIR\")).unwrap();\n        std::thread::sleep(std::time::Duration::from_secs(30));\n    }\n}\n",
@@ -2001,7 +3465,7 @@ fn packaged_library_builds_a_custom_mutator() {
     .expect("downstream manifest must be written");
     fs::write(
         downstream.join("src").join("main.rs"),
-        "use mutarust::{Mutation, Mutator, Registry, RegistryBuilder};\n\nstruct Custom;\nstruct Invalid;\n\nimpl Mutator for Custom {\n    fn name(&self) -> &str { \"custom/no-op\" }\n\n    fn mutations(&self, _source: &str) -> Vec<Mutation> { Vec::new() }\n}\n\nimpl Mutator for Invalid {\n    fn name(&self) -> &str { \"Custom\" }\n\n    fn mutations(&self, _source: &str) -> Vec<Mutation> { Vec::new() }\n}\n\nfn mutate(registry: &Registry, source: &str) -> String {\n    let mutation = registry.get(\"conditional/bool-literal\").expect(\"built-in mutator must exist\").mutations(source).pop().expect(\"boolean must mutate\");\n    mutation.apply(source).expect(\"mutation must apply\")\n}\n\nfn main() {\n    let registry = RegistryBuilder::with_builtins().register(Custom).expect(\"custom mutator must register\").build();\n    assert_eq!(registry.names().collect::<Vec<_>>(), vec![\"conditional/bool-literal\", \"custom/no-op\"]);\n    let duplicate = RegistryBuilder::new().register(Custom).expect(\"first custom mutator must register\").register(Custom).err().expect(\"duplicate must fail\");\n    assert_eq!(duplicate.to_string(), \"duplicate mutator name: custom/no-op\");\n    let invalid = RegistryBuilder::new().register(Invalid).err().expect(\"invalid name must fail\");\n    assert_eq!(invalid.to_string(), \"invalid mutator name: Custom\");\n    assert_eq!(mutate(&registry, \"fn enabled() -> bool { true }\"), \"fn enabled() -> bool { false }\");\n    assert_eq!(mutate(&registry, \"fn enabled() -> bool { let label = \\\"é\\\"; true }\"), \"fn enabled() -> bool { let label = \\\"é\\\"; false }\");\n    assert_eq!(mutate(&registry, \"fn check() { assert!(true); }\"), \"fn check() { assert!(false); }\");\n    println!(\"custom mutator works\");\n}\n",
+        "use mutarust::{Mutation, Mutator, Registry, RegistryBuilder};\n\nstruct Custom;\nstruct Invalid;\n\nimpl Mutator for Custom {\n    fn name(&self) -> &str { \"custom/no-op\" }\n\n    fn mutations(&self, _source: &str) -> Vec<Mutation> { Vec::new() }\n}\n\nimpl Mutator for Invalid {\n    fn name(&self) -> &str { \"Custom\" }\n\n    fn mutations(&self, _source: &str) -> Vec<Mutation> { Vec::new() }\n}\n\nfn mutate(registry: &Registry, source: &str) -> String {\n    let mutation = registry.get(\"conditional/bool-literal\").expect(\"built-in mutator must exist\").mutations(source).pop().expect(\"boolean must mutate\");\n    mutation.apply(source).expect(\"mutation must apply\")\n}\n\nfn main() {\n    let registry = RegistryBuilder::with_builtins().register(Custom).expect(\"custom mutator must register\").build();\n    assert_eq!(registry.names().collect::<Vec<_>>(), vec![\"arithmetic/assign_invert\", \"arithmetic/assignment\", \"arithmetic/base\", \"arithmetic/bitwise\", \"arithmetic/negate\", \"branch/case\", \"branch/else\", \"branch/if\", \"composite/field-clear\", \"concurrency/goroutine-remove\", \"conditional/bool-literal\", \"conditional/negated\", \"conditional/not\", \"custom/no-op\", \"expression/comparison\", \"expression/context-nil\", \"expression/logical\", \"expression/string-literal\", \"loop/break\", \"loop/condition\", \"loop/range_break\", \"numbers/decrementer\", \"numbers/float-negate\", \"numbers/incrementer\", \"select/case-remove\", \"select/default-remove\", \"statement/remove\", \"statement/remove-self-assign\", \"statement/return\"]);\n    let duplicate = RegistryBuilder::new().register(Custom).expect(\"first custom mutator must register\").register(Custom).err().expect(\"duplicate must fail\");\n    assert_eq!(duplicate.to_string(), \"duplicate mutator name: custom/no-op\");\n    let invalid = RegistryBuilder::new().register(Invalid).err().expect(\"invalid name must fail\");\n    assert_eq!(invalid.to_string(), \"invalid mutator name: Custom\");\n    assert_eq!(mutate(&registry, \"fn enabled() -> bool { let enabled = true; enabled }\"), \"fn enabled() -> bool { let enabled = false; enabled }\");\n    assert_eq!(mutate(&registry, \"fn enabled() -> bool { let label = \\\"é\\\"; let enabled = true; enabled }\"), \"fn enabled() -> bool { let label = \\\"é\\\"; let enabled = false; enabled }\");\n    assert!(registry.get(\"conditional/bool-literal\").unwrap().mutations(\"fn check() { assert!(true); }\").is_empty());\n    println!(\"custom mutator works\");\n}\n",
     )
     .expect("downstream source must be written");
 
@@ -2031,6 +3495,10 @@ fn packaged_library_runs_one_duplicate_custom_mutation() {
     let downstream = root.join("downstream");
     fs::create_dir_all(downstream.join("src"))
         .expect("downstream source directory must be created");
+    fs::write(downstream.join("src").join("one.rs"), "pub fn one() {}\n")
+        .expect("first duplicate source must be written");
+    fs::write(downstream.join("src").join("two.rs"), "pub fn two() {}\n")
+        .expect("second duplicate source must be written");
     fs::write(
         downstream.join("Cargo.toml"),
         format!(
@@ -2041,7 +3509,7 @@ fn packaged_library_runs_one_duplicate_custom_mutation() {
     .expect("downstream manifest must be written");
     fs::write(
         downstream.join("src").join("main.rs"),
-        "use mutarust::{Mutation, Mutator, RegistryBuilder};\n\nstruct Duplicate;\n\nimpl Mutator for Duplicate {\n    fn name(&self) -> &str { \"custom/duplicate\" }\n\n    fn mutations(&self, _source: &str) -> Vec<Mutation> {\n        vec![Mutation::new(0..0, \"\"), Mutation::new(0..0, \"\")]\n    }\n}\n\nfn main() {\n    let source = concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/src/main.rs\").to_owned();\n    let registry = RegistryBuilder::new().register(Duplicate).expect(\"mutator must register\").build();\n    let run = mutarust::run_mutation_tests(&[source], &registry).expect(\"mutation run must work\");\n    assert_eq!(run.results().len(), 1);\n    println!(\"duplicate mutation runs once\");\n}\n",
+        "use mutarust::{Mutation, Mutator, RegistryBuilder};\n\nmod one;\nmod two;\n\nstruct Duplicate;\nstruct Twin;\n\nimpl Mutator for Duplicate {\n    fn name(&self) -> &str { \"custom/duplicate\" }\n\n    fn mutations(&self, _source: &str) -> Vec<Mutation> {\n        vec![Mutation::new(0..0, \"\"), Mutation::new(0..0, \"\")]\n    }\n}\n\nimpl Mutator for Twin {\n    fn name(&self) -> &str { \"custom/twin\" }\n\n    fn mutations(&self, _source: &str) -> Vec<Mutation> {\n        vec![Mutation::new(0..0, \"\")]\n    }\n}\n\nfn main() {\n    let root = env!(\"CARGO_MANIFEST_DIR\");\n    let sources = vec![format!(\"{root}/src/one.rs\"), format!(\"{root}/src/two.rs\")];\n    let registry = RegistryBuilder::new().register(Duplicate).expect(\"first mutator must register\").register(Twin).expect(\"second mutator must register\").build();\n    let run = mutarust::run_mutation_tests(&sources, &registry).expect(\"mutation run must work\");\n    assert_eq!(run.results().len(), 2);\n    assert!(run.results().iter().all(|result| result.mutator == \"custom/duplicate\"));\n    println!(\"duplicate mutations use source identity\");\n}\n",
     )
     .expect("downstream source must be written");
 
@@ -2060,7 +3528,7 @@ fn packaged_library_runs_one_duplicate_custom_mutation() {
         String::from_utf8(output.stdout)
             .expect("downstream output must be UTF-8")
             .trim(),
-        "duplicate mutation runs once"
+        "duplicate mutations use source identity"
     );
 }
 
@@ -2640,6 +4108,299 @@ fn installed_command_lists_production_sources() {
     );
 }
 
+#[test]
+fn installed_command_selects_git_merge_base_and_uncommitted_changes() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = git_mutation_fixture(&root, "merge-base", "main");
+    let a = write_git_source(
+        &fixture,
+        "src/a.rs",
+        "pub fn a() -> bool { let value = true; value }\n",
+    );
+    let b = write_git_source(
+        &fixture,
+        "src/b.rs",
+        "pub fn b() -> bool { let value = true; value }\n",
+    );
+    let c = write_git_source(
+        &fixture,
+        "src/c.rs",
+        "pub fn c() -> bool { let value = true; value }\n",
+    );
+    let d = write_git_source(
+        &fixture,
+        "src/d.rs",
+        "pub fn d() -> bool { let value = true; value }\n",
+    );
+    commit_all(&fixture, "base");
+    run_git(&fixture, &["switch", "-c", "feature"]);
+
+    run_git(&fixture, &["switch", "main"]);
+    write_git_source(
+        &fixture,
+        "src/b.rs",
+        "pub fn b() -> bool { let value = false; value }\n",
+    );
+    commit_all(&fixture, "base moves ahead");
+    run_git(&fixture, &["switch", "feature"]);
+
+    write_git_source(
+        &fixture,
+        "src/c.rs",
+        "pub fn c() -> bool { let value = false; value }\n",
+    );
+    commit_all(&fixture, "feature commit");
+    write_git_source(
+        &fixture,
+        "src/d.rs",
+        "pub fn d() -> bool { let value = false; value }\n",
+    );
+    run_git(&fixture, &["add", "src/d.rs"]);
+    write_git_source(
+        &fixture,
+        "src/a.rs",
+        "pub fn a() -> bool { let value = false; value }\n",
+    );
+
+    for source in [&a, &c, &d] {
+        assert_dry_run_total(&git_dry_run(&install, &fixture, Some("main"), source), 1);
+    }
+    assert_dry_run_total(&git_dry_run(&install, &fixture, Some("main"), &b), 0);
+}
+
+#[test]
+fn installed_command_uses_git_remote_default_and_master_fallback() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let remote = root.join("remote.git");
+    let remote_text = remote.to_str().expect("remote path must be UTF-8");
+    run_git(
+        &root,
+        &["init", "--bare", "--initial-branch=trunk", remote_text],
+    );
+
+    let seed = git_mutation_fixture(&root, "remote-seed", "trunk");
+    write_git_source(
+        &seed,
+        "src/lib.rs",
+        "pub fn value() -> bool { let value = true; value }\n",
+    );
+    commit_all(&seed, "seed");
+    run_git(&seed, &["remote", "add", "origin", remote_text]);
+    run_git(&seed, &["push", "--set-upstream", "origin", "trunk"]);
+
+    let clone = root.join("remote-clone");
+    let clone_text = clone.to_str().expect("clone path must be UTF-8");
+    run_git(&root, &["clone", remote_text, clone_text]);
+    run_git(&clone, &["switch", "-c", "feature"]);
+    let remote_source = write_git_source(
+        &clone,
+        "src/lib.rs",
+        "pub fn value() -> bool { let value = false; value }\n",
+    );
+    assert_dry_run_total(&git_dry_run(&install, &clone, None, &remote_source), 1);
+
+    let fallback = git_mutation_fixture(&root, "master-fallback", "master");
+    let fallback_source = write_git_source(
+        &fallback,
+        "src/lib.rs",
+        "pub fn value() -> bool { let value = true; value }\n",
+    );
+    commit_all(&fallback, "base");
+    run_git(&fallback, &["switch", "-c", "feature"]);
+    write_git_source(
+        &fallback,
+        "src/lib.rs",
+        "pub fn value() -> bool { let value = false; value }\n",
+    );
+    assert_dry_run_total(&git_dry_run(&install, &fallback, None, &fallback_source), 1);
+}
+
+#[test]
+fn installed_command_selects_added_and_renamed_git_source_files() {
+    let root = smoke_root();
+    let install = install_command(&root);
+
+    let added = git_mutation_fixture(&root, "added", "main");
+    write_git_source(
+        &added,
+        "src/lib.rs",
+        "pub fn base() -> bool { let value = true; value }\n",
+    );
+    commit_all(&added, "base");
+    run_git(&added, &["switch", "-c", "feature"]);
+    let added_source = write_git_source(
+        &added,
+        "src/added.rs",
+        "pub fn added() -> bool { let value = true; value }\n",
+    );
+    run_git(&added, &["add", "src/added.rs"]);
+    assert_dry_run_total(
+        &git_dry_run(&install, &added, Some("main"), &added_source),
+        1,
+    );
+
+    let renamed = git_mutation_fixture(&root, "renamed", "main");
+    let old = write_git_source(
+        &renamed,
+        "src/old.rs",
+        "pub fn changed() -> bool { let value = true; value }\npub fn one() -> bool { let value = true; value }\npub fn two() -> bool { let value = true; value }\npub fn three() -> bool { let value = true; value }\npub fn four() -> bool { let value = true; value }\n",
+    );
+    commit_all(&renamed, "base");
+    run_git(&renamed, &["switch", "-c", "feature"]);
+    let new = renamed.join("src/new.rs");
+    run_git(
+        &renamed,
+        &[
+            "mv",
+            old.strip_prefix(&renamed)
+                .expect("renamed source must be below the repository")
+                .to_str()
+                .expect("renamed source path must be UTF-8"),
+            "src/new.rs",
+        ],
+    );
+    assert_dry_run_total(&git_dry_run(&install, &renamed, Some("main"), &new), 0);
+    fs::write(
+        &new,
+        "pub fn changed() -> bool { let value = false; value }\npub fn one() -> bool { let value = true; value }\npub fn two() -> bool { let value = true; value }\npub fn three() -> bool { let value = true; value }\npub fn four() -> bool { let value = true; value }\n",
+    )
+    .expect("renamed Git source must be written");
+    run_git(&renamed, &["add", "src/new.rs"]);
+    assert_dry_run_total(&git_dry_run(&install, &renamed, Some("main"), &new), 1);
+}
+
+#[test]
+fn installed_command_ignores_deleted_git_lines_and_selects_multiple_hunks() {
+    let root = smoke_root();
+    let install = install_command(&root);
+
+    let deleted = git_mutation_fixture(&root, "deleted", "main");
+    let deleted_source = write_git_source(
+        &deleted,
+        "src/lib.rs",
+        "pub fn deleted() -> bool { let value = true; value }\npub fn retained() -> bool { let value = true; value }\n",
+    );
+    commit_all(&deleted, "base");
+    run_git(&deleted, &["switch", "-c", "feature"]);
+    write_git_source(
+        &deleted,
+        "src/lib.rs",
+        "pub fn retained() -> bool { let value = true; value }\n",
+    );
+    run_git(&deleted, &["add", "src/lib.rs"]);
+    assert_dry_run_total(
+        &git_dry_run(&install, &deleted, Some("main"), &deleted_source),
+        0,
+    );
+
+    let hunks = git_mutation_fixture(&root, "hunks", "main");
+    let hunk_source = write_git_source(
+        &hunks,
+        "src/lib.rs",
+        "pub fn first() -> bool { let value = true; value }\npub fn keep_one() -> bool { let value = true; value }\npub fn keep_two() -> bool { let value = true; value }\npub fn keep_three() -> bool { let value = true; value }\npub fn second() -> bool { let value = true; value }\n",
+    );
+    commit_all(&hunks, "base");
+    run_git(&hunks, &["switch", "-c", "feature"]);
+    write_git_source(
+        &hunks,
+        "src/lib.rs",
+        "pub fn first() -> bool { let value = false; value }\npub fn keep_one() -> bool { let value = true; value }\npub fn keep_two() -> bool { let value = true; value }\npub fn keep_three() -> bool { let value = true; value }\npub fn second() -> bool { let value = false; value }\n",
+    );
+    assert_dry_run_total(
+        &git_dry_run(&install, &hunks, Some("main"), &hunk_source),
+        2,
+    );
+}
+
+#[test]
+fn installed_command_succeeds_when_git_diff_has_no_mutable_lines() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = git_mutation_fixture(&root, "no-mutants", "main");
+    let source = write_git_source(
+        &fixture,
+        "src/lib.rs",
+        "pub fn value() -> bool { let value = true; value }\n",
+    );
+    commit_all(&fixture, "base");
+    run_git(&fixture, &["switch", "-c", "feature"]);
+    fs::write(fixture.join("README.md"), "Changed documentation.\n")
+        .expect("Git fixture README must be written");
+    commit_all(&fixture, "docs only");
+
+    let output = git_dry_run(&install, &fixture, Some("main"), &source);
+    assert_dry_run_total(&output, 0);
+    assert_eq!(
+        String::from_utf8(output.stdout)
+            .expect("zero-mutant output must be UTF-8")
+            .trim(),
+        "Total: 0 mutation(s) would be generated. No files written, no tests run."
+    );
+}
+
+#[test]
+fn installed_command_rejects_invalid_git_scope() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let non_git = root.join("non-git");
+    let non_git_source = non_git.join("src/lib.rs");
+    fs::create_dir_all(
+        non_git_source
+            .parent()
+            .expect("non-Git source must have a parent"),
+    )
+    .expect("non-Git source directory must be created");
+    fs::write(
+        non_git.join("Cargo.toml"),
+        "[package]\nname = \"non-git\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .expect("non-Git manifest must be written");
+    fs::write(&non_git_source, "pub fn value() -> bool { true }\n")
+        .expect("non-Git source must be written");
+    assert_git_scope_error(
+        git_dry_run(&install, &non_git, None, &non_git_source),
+        "could not find a Git repository",
+    );
+
+    let fixture = git_mutation_fixture(&root, "bad-base", "main");
+    let source = write_git_source(&fixture, "src/lib.rs", "pub fn value() -> bool { true }\n");
+    commit_all(&fixture, "base");
+    assert_git_scope_error(
+        git_dry_run(&install, &fixture, Some("does-not-exist"), &source),
+        "does-not-exist",
+    );
+
+    let external = git_mutation_fixture(&root, "external-git", "main");
+    let external_source =
+        write_git_source(&external, "src/lib.rs", "pub fn value() -> bool { true }\n");
+    commit_all(&external, "base");
+    run_git(&external, &["switch", "-c", "feature"]);
+    write_git_source(
+        &external,
+        "src/lib.rs",
+        "pub fn value() -> bool { false }\n",
+    );
+    assert_git_scope_error(
+        git_dry_run(&install, &fixture, Some("main"), &external_source),
+        "outside Git repository",
+    );
+
+    let output = Command::new(command_path(&install))
+        .args(["--git-diff-base", "main", "--dry-run"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must reject a base without changed-line selection");
+    assert_eq!(output.status.code(), Some(3));
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("--git-diff-base requires --git-diff-lines"),
+        "invalid Git controls must explain the required selector"
+    );
+}
+
 fn install_command(_root: &Path) -> PathBuf {
     INSTALL_CLEANUP_REGISTERED.get_or_init(|| {
         let registered = unsafe { libc::atexit(clean_installed_command) };
@@ -2686,6 +4447,84 @@ fn run_git(directory: &Path, arguments: &[&str]) {
         output.status.success(),
         "Git command failed: {}",
         String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn git_mutation_fixture(root: &Path, name: &str, branch: &str) -> PathBuf {
+    let fixture = root.join(name);
+    fs::create_dir_all(fixture.join("src")).expect("Git fixture source directory must be created");
+    fs::write(fixture.join("src/lib.rs"), "").expect("Git fixture library source must be written");
+    fs::write(
+        fixture.join("Cargo.toml"),
+        format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n"),
+    )
+    .expect("Git fixture manifest must be written");
+    run_git(&fixture, &["init", "--initial-branch", branch]);
+    run_git(
+        &fixture,
+        &["config", "user.email", "mutarust@example.invalid"],
+    );
+    run_git(&fixture, &["config", "user.name", "Mutarust Test"]);
+    fixture
+}
+
+fn write_git_source(repository: &Path, relative: &str, text: &str) -> PathBuf {
+    let source = repository.join(relative);
+    fs::create_dir_all(source.parent().expect("Git source must have a parent"))
+        .expect("Git source directory must be created");
+    fs::write(&source, text).expect("Git source must be written");
+    source
+}
+
+fn commit_all(repository: &Path, message: &str) {
+    run_git(repository, &["add", "."]);
+    run_git(repository, &["commit", "--message", message]);
+}
+
+fn git_dry_run(
+    install: &Path,
+    repository: &Path,
+    base: Option<&str>,
+    source: &Path,
+) -> std::process::Output {
+    let mut command = Command::new(command_path(install));
+    command.args(["--git-diff-lines", "--dry-run"]);
+    if let Some(base) = base {
+        command.args(["--git-diff-base", base]);
+    }
+    command
+        .arg(source)
+        .current_dir(repository)
+        .output()
+        .expect("installed mutarust must select changed Git lines")
+}
+
+fn assert_dry_run_total(output: &std::process::Output, expected: usize) {
+    assert!(
+        output.status.success(),
+        "changed-line selection must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains(&format!("Total: {expected} mutation(s) would be generated")),
+        "changed-line selection must report {expected} mutants: {stdout}"
+    );
+}
+
+fn assert_git_scope_error(output: std::process::Output, required_text: &str) {
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "Git scope errors must return exit value 3"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains(required_text),
+        "Git scope error must identify {required_text}"
+    );
+    assert!(
+        !String::from_utf8_lossy(&output.stdout).contains("Total:"),
+        "Git scope errors must not select an unfiltered source scope"
     );
 }
 
@@ -2763,7 +4602,7 @@ fn write_mutation_fixture(root: &Path) -> PathBuf {
     .expect("checked mutation fixture manifest must be written");
     fs::write(
         fixture.join("checked").join("src").join("lib.rs"),
-        "pub fn checked() -> bool { true }\npub fn unchecked() -> bool { true }\n",
+        "pub fn checked() -> bool { let value = true; value }\npub fn unchecked() -> bool { let value = true; value }\n",
     )
     .expect("mutation fixture source must be written");
     fs::write(
@@ -2786,6 +4625,180 @@ fn write_mutation_fixture(root: &Path) -> PathBuf {
         "#[test]\nfn is_unrelated_and_failing() {\n    assert!(false);\n}\n",
     )
     .expect("other mutation fixture test must be written");
+    fixture
+}
+
+fn write_expression_fixture(root: &Path) -> PathBuf {
+    let fixture = root.join("expression-fixture");
+    fs::create_dir_all(fixture.join("src"))
+        .expect("expression fixture source directory must be created");
+    fs::create_dir_all(fixture.join("tests"))
+        .expect("expression fixture test directory must be created");
+    fs::write(
+        fixture.join("Cargo.toml"),
+        include_str!("fixtures/expression/Cargo.toml"),
+    )
+    .expect("expression fixture manifest must be written");
+    fs::write(
+        fixture.join("src").join("lib.rs"),
+        include_str!("fixtures/expression/src/lib.rs"),
+    )
+    .expect("expression fixture source must be written");
+    fs::write(
+        fixture.join("tests").join("expression.rs"),
+        include_str!("fixtures/expression/tests/expression.rs"),
+    )
+    .expect("expression fixture tests must be written");
+    fs::write(
+        fixture.join("expected-mutants.txt"),
+        include_str!("fixtures/expression/expected-mutants.txt"),
+    )
+    .expect("expected expression mutants must be written");
+    fixture
+}
+
+fn write_value_fixture(root: &Path) -> PathBuf {
+    let fixture = root.join("value-fixture");
+    fs::create_dir_all(fixture.join("src"))
+        .expect("value fixture source directory must be created");
+    fs::create_dir_all(fixture.join("tests"))
+        .expect("value fixture test directory must be created");
+    fs::write(
+        fixture.join("Cargo.toml"),
+        include_str!("fixtures/value/Cargo.toml"),
+    )
+    .expect("value fixture manifest must be written");
+    fs::write(
+        fixture.join("src").join("lib.rs"),
+        include_str!("fixtures/value/src/lib.rs"),
+    )
+    .expect("value fixture source must be written");
+    fs::write(
+        fixture.join("tests").join("value.rs"),
+        include_str!("fixtures/value/tests/value.rs"),
+    )
+    .expect("value fixture tests must be written");
+    fs::write(
+        fixture.join("expected-mutants.txt"),
+        include_str!("fixtures/value/expected-mutants.txt"),
+    )
+    .expect("expected value mutants must be written");
+    fixture
+}
+
+fn write_concurrency_selection_fixture(root: &Path) -> PathBuf {
+    let fixture = root.join("concurrency-selection-fixture");
+    fs::create_dir_all(fixture.join("src"))
+        .expect("concurrency fixture source directory must be created");
+    fs::create_dir_all(fixture.join("tests"))
+        .expect("concurrency fixture test directory must be created");
+    fs::write(
+        fixture.join("Cargo.toml"),
+        include_str!("fixtures/concurrency-selection/Cargo.toml"),
+    )
+    .expect("concurrency fixture manifest must be written");
+    fs::write(
+        fixture.join("src").join("lib.rs"),
+        include_str!("fixtures/concurrency-selection/src/lib.rs"),
+    )
+    .expect("concurrency fixture source must be written");
+    fs::write(
+        fixture.join("tests").join("concurrency_selection.rs"),
+        include_str!("fixtures/concurrency-selection/tests/concurrency_selection.rs"),
+    )
+    .expect("concurrency fixture tests must be written");
+    fs::write(
+        fixture.join("expected-mutants.txt"),
+        include_str!("fixtures/concurrency-selection/expected-mutants.txt"),
+    )
+    .expect("expected concurrency mutants must be written");
+    fixture
+}
+
+fn write_control_flow_fixture(root: &Path) -> PathBuf {
+    let fixture = root.join("control-flow-fixture");
+    fs::create_dir_all(fixture.join("src"))
+        .expect("control-flow fixture source directory must be created");
+    fs::create_dir_all(fixture.join("tests"))
+        .expect("control-flow fixture test directory must be created");
+    fs::write(
+        fixture.join("Cargo.toml"),
+        include_str!("fixtures/control-flow/Cargo.toml"),
+    )
+    .expect("control-flow fixture manifest must be written");
+    fs::write(
+        fixture.join("src").join("lib.rs"),
+        include_str!("fixtures/control-flow/src/lib.rs"),
+    )
+    .expect("control-flow fixture source must be written");
+    fs::write(
+        fixture.join("tests").join("control_flow.rs"),
+        include_str!("fixtures/control-flow/tests/control_flow.rs"),
+    )
+    .expect("control-flow fixture tests must be written");
+    fs::write(
+        fixture.join("expected-mutants.txt"),
+        include_str!("fixtures/control-flow/expected-mutants.txt"),
+    )
+    .expect("expected control-flow mutants must be written");
+    fixture
+}
+
+fn write_coverage_fixture(root: &Path) -> PathBuf {
+    let fixture = root.join("coverage-fixture");
+    let package = fixture.join("checked");
+    fs::create_dir_all(package.join("src"))
+        .expect("coverage fixture source directory must be created");
+    fs::write(
+        fixture.join("Cargo.toml"),
+        "[workspace]\nmembers = [\"checked\"]\nresolver = \"2\"\n",
+    )
+    .expect("coverage fixture workspace manifest must be written");
+    fs::write(
+        package.join("Cargo.toml"),
+        "[package]\nname = \"coverage-checked\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .expect("coverage fixture package manifest must be written");
+    fs::write(
+        package.join("src").join("lib.rs"),
+        "pub fn detected() -> bool { let value = true; value }\npub fn escaped() -> bool { let value = true; value }\npub fn uncovered() -> bool { let value = true; value }\n",
+    )
+    .expect("coverage fixture source must be written");
+    fixture
+}
+
+fn write_shared_coverage_fixture(root: &Path) -> PathBuf {
+    let fixture = root.join("shared-coverage-fixture");
+    let package = fixture.join("checked");
+    fs::create_dir_all(package.join("src"))
+        .expect("shared coverage fixture source directory must be created");
+    fs::create_dir_all(package.join("tests"))
+        .expect("shared coverage fixture test directory must be created");
+    fs::write(
+        fixture.join("Cargo.toml"),
+        "[workspace]\nmembers = [\"checked\"]\nresolver = \"2\"\n",
+    )
+    .expect("shared coverage fixture workspace manifest must be written");
+    fs::write(
+        package.join("Cargo.toml"),
+        "[package]\nname = \"shared-coverage-checked\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .expect("shared coverage fixture package manifest must be written");
+    fs::write(
+        package.join("src").join("lib.rs"),
+        "pub fn first() -> bool { let value = true; value }\npub fn second() -> bool { let value = true; value }\npub fn shared() -> bool { let value = true; value }\n",
+    )
+    .expect("shared coverage fixture source must be written");
+    fs::write(
+        package.join("tests").join("left.rs"),
+        "#[test]\nfn shared() {}\n",
+    )
+    .expect("shared coverage left test must be written");
+    fs::write(
+        package.join("tests").join("right.rs"),
+        "#[test]\nfn shared() {}\n",
+    )
+    .expect("shared coverage right test must be written");
     fixture
 }
 
@@ -2812,7 +4825,7 @@ fn write_external_mutation_fixture(root: &Path) -> PathBuf {
     .expect("external fixture package manifest must be written");
     fs::write(
         external.join("lib.rs"),
-        "pub fn checked() -> bool { true }\npub fn unchecked() -> bool { true }\npub fn configured() -> bool { cfg!(config_check) }\npub fn local_value() -> u8 { local_support::value() }\n",
+        "pub fn checked() -> bool { let value = true; value }\npub fn unchecked() -> bool { let value = true; value }\npub fn configured() -> bool { cfg!(config_check) }\npub fn local_value() -> u8 { local_support::value() }\n",
     )
     .expect("external fixture source must be written");
     fs::write(
