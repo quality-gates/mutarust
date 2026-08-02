@@ -1,6 +1,14 @@
 #[cfg(any(unix, windows))]
 use std::sync::atomic::{AtomicBool, Ordering};
 
+static PUBLIC_RUN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn public_run_guard() -> std::sync::MutexGuard<'static, ()> {
+    PUBLIC_RUN_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 struct InvalidEdit;
 
 impl mutarust::Mutator for InvalidEdit {
@@ -34,6 +42,7 @@ impl Drop for FixtureRoot {
 
 #[test]
 fn invalid_diff_fuzz_corpus_does_not_become_mutation_results() {
+    let _run_guard = public_run_guard();
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .expect("system time must follow the Unix epoch")
@@ -104,6 +113,7 @@ unsafe extern "system" fn host_interrupt_handler(control_type: u32) -> i32 {
 #[cfg(unix)]
 #[test]
 fn mutation_run_restores_the_host_interrupt_handler() {
+    let _run_guard = public_run_guard();
     HOST_INTERRUPT_SEEN.store(false, Ordering::SeqCst);
     let handler = host_interrupt_handler as *const () as usize;
     let previous = unsafe { libc::signal(libc::SIGINT, handler) };
