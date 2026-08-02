@@ -1,11 +1,12 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::env;
 use std::fmt;
 use std::fs;
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -26,7 +27,7 @@ static MUTATION_RUN_INTERRUPTED: AtomicBool = AtomicBool::new(false);
 /// The fixed test timeout for a mutation run without a timeout option.
 pub const DEFAULT_TEST_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// A complete sequential mutation test run.
+/// A complete mutation test run.
 pub struct MutationRun {
     results: Vec<MutationResult>,
 }
@@ -262,6 +263,30 @@ pub struct ExecutionControls {
     pub keep_temporary: bool,
     /// Multiplies the longest clean Cargo test duration to select a timeout.
     pub timeout_coefficient: Option<f64>,
+    /// Limits the number of concurrent Cargo mutation jobs.
+    pub workers: WorkerLimit,
+}
+
+/// A positive limit for concurrent Cargo mutation jobs.
+#[derive(Clone, Copy, Debug)]
+pub struct WorkerLimit(NonZeroUsize);
+
+impl WorkerLimit {
+    /// Creates a worker limit when `workers` is greater than zero.
+    pub fn new(workers: usize) -> Option<Self> {
+        NonZeroUsize::new(workers).map(Self)
+    }
+
+    /// Returns the configured number of workers.
+    pub fn get(self) -> usize {
+        self.0.get()
+    }
+}
+
+impl Default for WorkerLimit {
+    fn default() -> Self {
+        Self(std::thread::available_parallelism().unwrap_or(NonZeroUsize::MIN))
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -445,8 +470,43 @@ pub fn run_mutation_tests_with_controls(
             test_clean_workspaces(&plan.workspaces, timeout, execution)?,
         )
     };
-    let mut results = Vec::new();
-    for candidate in plan.candidates {
+    let results = test_candidates(plan.candidates, timeout, execution, controls)?;
+    Ok(MutationRun { results })
+}
+
+fn test_candidates(
+    candidates: Vec<MutationCandidate>,
+    timeout: Duration,
+    execution: &TestExecution,
+    controls: &ExecutionControls,
+) -> Result<Vec<MutationResult>, RunError> {
+    let workers = active_worker_count(candidates.len(), execution, controls);
+    if workers < 2 {
+        return test_candidates_sequential(candidates, timeout, execution, controls);
+    }
+    test_candidates_in_parallel(candidates, workers, timeout, execution, controls)
+}
+
+fn active_worker_count(
+    candidate_count: usize,
+    execution: &TestExecution,
+    controls: &ExecutionControls,
+) -> usize {
+    if execution.uses_cargo() {
+        controls.workers.get().min(candidate_count)
+    } else {
+        1
+    }
+}
+
+fn test_candidates_sequential(
+    candidates: Vec<MutationCandidate>,
+    timeout: Duration,
+    execution: &TestExecution,
+    controls: &ExecutionControls,
+) -> Result<Vec<MutationResult>, RunError> {
+    let mut results = Vec::with_capacity(candidates.len());
+    for candidate in candidates {
         if mutation_run_was_interrupted() {
             return Err(run_error("mutation run interrupted"));
         }
@@ -455,7 +515,102 @@ pub fn run_mutation_tests_with_controls(
             return Err(run_error("mutation run interrupted"));
         }
     }
-    Ok(MutationRun { results })
+    Ok(results)
+}
+
+fn test_candidates_in_parallel(
+    candidates: Vec<MutationCandidate>,
+    workers: usize,
+    timeout: Duration,
+    execution: &TestExecution,
+    controls: &ExecutionControls,
+) -> Result<Vec<MutationResult>, RunError> {
+    let candidates = Arc::new(Mutex::new(indexed_candidates(candidates)));
+    let indexed_results = thread::scope(|scope| {
+        let mut handles = Vec::with_capacity(workers);
+        for _ in 0..workers {
+            let candidates = Arc::clone(&candidates);
+            let execution = execution.clone();
+            let controls = *controls;
+            handles.push(
+                scope.spawn(move || test_mutation_worker(candidates, timeout, execution, controls)),
+            );
+        }
+        collect_worker_results(handles)
+    })?;
+    if mutation_run_was_interrupted() {
+        return Err(run_error("mutation run interrupted"));
+    }
+    Ok(results_in_plan_order(indexed_results))
+}
+
+fn indexed_candidates(candidates: Vec<MutationCandidate>) -> VecDeque<IndexedCandidate> {
+    candidates
+        .into_iter()
+        .enumerate()
+        .map(|(index, candidate)| IndexedCandidate { index, candidate })
+        .collect()
+}
+
+fn test_mutation_worker(
+    candidates: Arc<Mutex<VecDeque<IndexedCandidate>>>,
+    timeout: Duration,
+    execution: TestExecution,
+    controls: ExecutionControls,
+) -> Result<Vec<IndexedResult>, RunError> {
+    let mut results = Vec::new();
+    while let Some(candidate) = next_candidate(&candidates)? {
+        if mutation_run_was_interrupted() {
+            break;
+        }
+        let result = test_candidate(candidate.candidate, timeout, &execution, &controls);
+        results.push(IndexedResult {
+            index: candidate.index,
+            result,
+        });
+        if mutation_run_was_interrupted() {
+            break;
+        }
+    }
+    Ok(results)
+}
+
+fn next_candidate(
+    candidates: &Mutex<VecDeque<IndexedCandidate>>,
+) -> Result<Option<IndexedCandidate>, RunError> {
+    candidates
+        .lock()
+        .map_err(|_| run_error("mutation worker queue stopped after a previous panic"))
+        .map(|mut candidates| candidates.pop_front())
+}
+
+fn collect_worker_results(
+    handles: Vec<thread::ScopedJoinHandle<'_, Result<Vec<IndexedResult>, RunError>>>,
+) -> Result<Vec<IndexedResult>, RunError> {
+    let mut results = Vec::new();
+    let mut first_error = None;
+    for handle in handles {
+        match handle.join() {
+            Ok(Ok(worker_results)) => results.extend(worker_results),
+            Ok(Err(error)) => record_worker_error(&mut first_error, error),
+            Err(_) => record_worker_error(
+                &mut first_error,
+                run_error("mutation worker stopped unexpectedly"),
+            ),
+        }
+    }
+    first_error.map_or(Ok(results), Err)
+}
+
+fn record_worker_error(first_error: &mut Option<RunError>, error: RunError) {
+    if first_error.is_none() {
+        *first_error = Some(error);
+    }
+}
+
+fn results_in_plan_order(mut results: Vec<IndexedResult>) -> Vec<MutationResult> {
+    results.sort_by_key(|result| result.index);
+    results.into_iter().map(|result| result.result).collect()
 }
 
 fn validate_adaptive_timeout(
@@ -2362,6 +2517,16 @@ fn copy_entry(workspace: &Workspace, source: &Path, destination: &Path) -> Resul
 struct MutationPlan {
     workspaces: Vec<Workspace>,
     candidates: Vec<MutationCandidate>,
+}
+
+struct IndexedCandidate {
+    index: usize,
+    candidate: MutationCandidate,
+}
+
+struct IndexedResult {
+    index: usize,
+    result: MutationResult,
 }
 
 struct MutationCandidate {
