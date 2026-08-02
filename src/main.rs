@@ -842,6 +842,7 @@ fn validation_error(command: &RunCommand) -> Option<&'static str> {
         .or_else(|| cargo_control_error(command))
         .or_else(|| coverage_control_error(command))
         .or_else(|| git_diff_control_error(command))
+        .or_else(|| baseline_control_error(command))
 }
 
 fn dry_run_control_error(command: &RunCommand) -> Option<&'static str> {
@@ -967,4 +968,23 @@ fn coverage_control_error(command: &RunCommand) -> Option<&'static str> {
 fn git_diff_control_error(command: &RunCommand) -> Option<&'static str> {
     (!command.execution.git_diff_lines && command.execution.git_diff_base.is_some())
         .then_some("--git-diff-base requires --git-diff-lines")
+}
+
+fn baseline_control_error(command: &RunCommand) -> Option<&'static str> {
+    [
+        (
+            command.baseline.update && command.execution.dry_run,
+            "--update-baseline cannot be used with --dry-run",
+        ),
+        (
+            command.baseline.update && command.execution.no_exec,
+            "--update-baseline cannot be used with --no-exec",
+        ),
+        (
+            command.baseline.update && command.run_mutant_id.is_some(),
+            "--update-baseline cannot be used with --run-mutant-id",
+        ),
+    ]
+    .into_iter()
+    .find_map(|(invalid, message)| invalid.then_some(message))
 }

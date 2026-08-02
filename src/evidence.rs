@@ -1,12 +1,13 @@
 use std::path::{Path, PathBuf};
 
 use crate::Mutation;
+use crate::blacklist::MutationChecksum;
 
 pub(crate) struct MutationEvidence {
     pub(crate) source: PathBuf,
     pub(crate) line: usize,
     pub(crate) stable_id: StableMutantId,
-    pub(crate) blacklist_checksum: String,
+    pub(crate) blacklist_checksum: MutationChecksum,
     pub(crate) diff: String,
 }
 
@@ -120,11 +121,11 @@ fn stable_mutant_id(source: &str, mutator: &str, changes: &ChangedLines) -> Stab
     ))
 }
 
-fn blacklist_checksum(changes: &ChangedLines) -> String {
+fn blacklist_checksum(changes: &ChangedLines) -> MutationChecksum {
     let mut content = String::new();
     append_checksum_lines(&mut content, '-', &changes.before);
     append_checksum_lines(&mut content, '+', &changes.after);
-    format!("{:x}", md5::compute(content))
+    MutationChecksum::from_changed_lines(content)
 }
 
 fn append_checksum_lines(content: &mut String, marker: char, lines: &[String]) {

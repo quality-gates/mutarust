@@ -15,7 +15,7 @@ use cargo_metadata::{Metadata, MetadataCommand, Target, TargetKind};
 #[cfg(any(unix, windows))]
 use std::sync::atomic::AtomicBool;
 
-use crate::baseline::Blacklist;
+use crate::blacklist::Blacklist;
 use crate::coverage::{CoverageMap, PerTestCoverageMap, TestIdentity, TestTarget, parse_lcov};
 use crate::evidence::{MutationEvidence, StableMutantId, mutation_evidence};
 use crate::filter::{SourceFilter, SourceFilters};

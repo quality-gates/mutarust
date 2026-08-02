@@ -1,6 +1,7 @@
 //! Public support for the `mutarust` command.
 
 mod baseline;
+mod blacklist;
 mod configuration;
 mod coverage;
 mod discovery;

@@ -1033,6 +1033,19 @@ fn installed_command_manages_baselines_blacklists_and_one_mutant_ids() {
         String::from_utf8_lossy(&duplicate_baseline_output.stderr).contains("duplicate mutant ID"),
         "a duplicate baseline ID must have a clear diagnostic"
     );
+
+    let incomplete_update = Command::new(command_path(&install))
+        .args(["--update-baseline", "--dry-run"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must reject an incomplete baseline update");
+    assert_eq!(incomplete_update.status.code(), Some(3));
+    assert!(
+        String::from_utf8_lossy(&incomplete_update.stderr)
+            .contains("--update-baseline cannot be used with --dry-run"),
+        "an incomplete baseline update must have a clear diagnostic"
+    );
 }
 
 #[test]

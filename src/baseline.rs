@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
@@ -124,39 +124,6 @@ fn validate_mutant(path: &Path, mutant: &BaselineMutant) -> Result<(), String> {
         ));
     }
     Ok(())
-}
-
-pub(crate) struct Blacklist {
-    checksums: BTreeSet<String>,
-}
-
-impl Blacklist {
-    pub(crate) fn load(files: &[PathBuf]) -> Result<Self, String> {
-        let mut checksums = BTreeSet::new();
-        for path in files {
-            let text = fs::read_to_string(path)
-                .map_err(|error| format!("could not read blacklist {}: {error}", path.display()))?;
-            for (index, line) in text.lines().enumerate() {
-                let checksum = line.trim_end_matches('\r');
-                if checksum.is_empty() {
-                    continue;
-                }
-                if StableMutantId::parse(checksum).is_none() {
-                    return Err(format!(
-                        "blacklist {} line {} must be a 32-character lower-case hexadecimal checksum",
-                        path.display(),
-                        index + 1
-                    ));
-                }
-                checksums.insert(checksum.to_owned());
-            }
-        }
-        Ok(Self { checksums })
-    }
-
-    pub(crate) fn accepts(&mut self, checksum: &str) -> bool {
-        !self.checksums.insert(checksum.to_owned())
-    }
 }
 
 #[derive(Deserialize, Serialize)]

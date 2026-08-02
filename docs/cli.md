@@ -103,6 +103,8 @@ Use `--fail-on-escaped` to return exit value 4 only when an escaped stable
 mutant ID is not in the baseline. Known escaped mutants remain visible in the
 normal result output. An update writes the full current escaped set and exits
 successfully before normal output and score gates.
+`--update-baseline` cannot be used with `--dry-run`, `--no-exec`, or
+`--run-mutant-id`, because these modes do not produce a full escaped set.
 
 Use `--blacklist FILE` one or more times to read accepted mutation checksums.
 Each non-empty file line is one 32-character lower-case hexadecimal checksum.
