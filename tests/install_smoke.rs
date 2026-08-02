@@ -2052,9 +2052,27 @@ fn installed_command_isolates_full_and_per_test_coverage() {
     fs::create_dir(&temporary_root).expect("shared coverage temporary root must be created");
     fs::write(
         &fake_cargo,
-        "#!/bin/sh\nif [ \"$1\" = \"metadata\" ]; then\n  exec \"$MUTARUST_REAL_CARGO\" \"$@\"\nfi\nall=\"$*\"\nif [ \"$1\" = \"llvm-cov\" ]; then\n  case \" $all \" in\n    *\" --exact \"*) [ \"$2\" = test ] || exit 95 ;;\n  esac\n  output=\n  while [ \"$#\" -gt 0 ]; do\n    if [ \"$1\" = \"--output-path\" ]; then\n      output=$2\n      break\n    fi\n    shift\n  done\n  touch Cargo.lock\n  case \" $all \" in\n    *\" --test left \"*\" --exact shared \"*) data='DA:1,1' ;;\n    *\" --test right \"*\" --exact shared \"*) data='DA:2,1' ;;\n    *\" --exact detects_left \"*) data='DA:3,1' ;;\n    *\" --exact detects_right \"*) data='DA:3,1' ;;\n    *) data='DA:1,1\\nDA:2,1\\nDA:3,1' ;;\n  esac\n  printf 'SF:%s\\n%b\\nend_of_record\\n' \"$MUTARUST_COVERAGE_SOURCE\" \"$data\" > \"$output\"\n  exit 0\nfi\ncase \" $all \" in\n  *\" --test left \"*\" --list \"*) printf 'shared: test\\ndetects_left: test\\n'; exit 0 ;;\n  *\" --test right \"*\" --list \"*) printf 'shared: test\\ndetects_right: test\\n'; exit 0 ;;\nesac\ncase \" $all \" in\n  *\" --no-run \"*) exit 0 ;;\nesac\nif grep -q 'pub fn first() -> bool { false }' checked/src/lib.rs; then\n  mutant=first\nelif grep -q 'pub fn second() -> bool { false }' checked/src/lib.rs; then\n  mutant=second\nelif grep -q 'pub fn shared() -> bool { false }' checked/src/lib.rs; then\n  mutant=shared\nelse\n  exit 94\nfi\nprintf '%s|%s\\n' \"$mutant\" \"$all\" >> \"$MUTARUST_COVERAGE_RECORD\"\ncase \"$mutant|$all\" in\n  first*\" --test left \"*\" --exact shared \"*) exit 1 ;;\n  second*\" --test right \"*\" --exact shared \"*) exit 1 ;;\n  shared*\" --exact detects_left \"*) exit 0 ;;\n  shared*\" --exact detects_right \"*) exit 0 ;;\n  *) exit 93 ;;\nesac\n",
+        "#!/bin/sh\nif [ \"$1\" = \"metadata\" ]; then\n  exec \"$MUTARUST_REAL_CARGO\" \"$@\"\nfi\nall=\"$*\"\nif [ \"$1\" = \"llvm-cov\" ]; then\n  case \" $all \" in\n    *\" --exact \"*) [ \"$2\" = test ] || exit 95 ;;\n  esac\n  output=\n  while [ \"$#\" -gt 0 ]; do\n    if [ \"$1\" = \"--output-path\" ]; then\n      output=$2\n      break\n    fi\n    shift\n  done\n  touch Cargo.lock\n  case \" $all \" in\n    *\" --test left \"*\" --exact shared \"*) data='DA:1,1' ;;\n    *\" --test right \"*\" --exact shared \"*) data='DA:2,1' ;;\n    *\" --exact detects_left \"*) data='DA:3,1' ;;\n    *\" --exact detects_right \"*) data='DA:3,1' ;;\n    *) data='DA:1,1\\nDA:2,1\\nDA:3,1' ;;\n  esac\n  printf 'SF:%s\\n%b\\nend_of_record\\n' \"$MUTARUST_COVERAGE_SOURCE\" \"$data\" > \"$output\"\n  exit 0\nfi\ncase \" $all \" in\n  *\" --test left \"*\" --list \"*) printf 'shared: test\\ndetects_left: test\\n'; exit 0 ;;\n  *\" --test right \"*\" --list \"*) printf 'shared: test\\ndetects_right: test\\n'; exit 0 ;;\n  *\" --list \"*) exit 0 ;;\nesac\ncase \" $all \" in\n  *\" --no-run \"*) exit 0 ;;\nesac\nif grep -q 'pub fn first() -> bool { false }' checked/src/lib.rs; then\n  mutant=first\nelif grep -q 'pub fn second() -> bool { false }' checked/src/lib.rs; then\n  mutant=second\nelif grep -q 'pub fn shared() -> bool { false }' checked/src/lib.rs; then\n  mutant=shared\nelse\n  exit 94\nfi\nprintf '%s|%s\\n' \"$mutant\" \"$all\" >> \"$MUTARUST_COVERAGE_RECORD\"\ncase \"$mutant|$all\" in\n  first*\" --test left \"*\" --exact shared \"*) exit 1 ;;\n  second*\" --test right \"*\" --exact shared \"*) exit 1 ;;\n  shared*\" --exact detects_left \"*) exit 0 ;;\n  shared*\" --exact detects_right \"*) exit 0 ;;\n  *) exit 93 ;;\nesac\n",
     )
     .expect("shared coverage Cargo command must be written");
+    let fake_cargo_script =
+        fs::read_to_string(&fake_cargo).expect("shared coverage Cargo command must be readable");
+    let fake_cargo_script = fake_cargo_script
+        .replacen(
+            "if grep -q 'pub fn first() -> bool { false }' checked/src/lib.rs; then",
+            "case \" $all \" in\n  *\" --exact \"*) ;;\n  *) exit 0 ;;\nesac\nif grep -q 'pub fn first() -> bool { false }' checked/src/lib.rs; then",
+            1,
+        )
+        .replace(
+            "shared*\" --exact detects_left \"*)",
+            "shared*\" --exact detects_left\"*)",
+        )
+        .replace(
+            "shared*\" --exact detects_right \"*)",
+            "shared*\" --exact detects_right\"*)",
+        );
+    fs::write(&fake_cargo, fake_cargo_script)
+        .expect("shared coverage Cargo command must accept the clean test");
     fs::set_permissions(&fake_cargo, fs::Permissions::from_mode(0o755))
         .expect("shared coverage Cargo command must be executable");
 
