@@ -36,16 +36,27 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "file", "line", "mutator", "diff"],
+        "required": [
+          "id",
+          "file",
+          "line",
+          "mutator",
+          "description",
+          "kill_hint",
+          "diff",
+          "context_start_line",
+          "context_lines",
+          "test_files"
+        ],
         "properties": {
           "id": { "type": "string", "minLength": 1 },
           "file": { "type": "string", "minLength": 1 },
           "line": { "type": "integer", "minimum": 1 },
           "mutator": { "type": "string", "minLength": 1 },
-          "description": { "type": "string", "minLength": 1 },
-          "kill_hint": { "type": "string", "minLength": 1 },
+          "description": { "type": "string" },
+          "kill_hint": { "type": "string" },
           "diff": { "type": "string" },
-          "context_start_line": { "type": "integer", "minimum": 1 },
+          "context_start_line": { "type": "integer", "minimum": 0 },
           "context_lines": {
             "type": "array",
             "items": { "type": "string" }

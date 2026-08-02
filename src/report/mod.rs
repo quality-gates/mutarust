@@ -225,7 +225,7 @@ fn write_json(file_name: &str, value: &impl Serialize) -> Result<(), String> {
     fs::write(file_name, text).map_err(|error| format!("could not write {file_name}: {error}"))
 }
 
-fn portable_path(path: &Path) -> String {
+pub(super) fn portable_path(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 

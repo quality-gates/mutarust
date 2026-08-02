@@ -7,6 +7,7 @@ use serde::Serialize;
 use crate::{MutationResult, MutationRun, MutationState};
 
 use super::hints::{kill_hint, mutator_description};
+use super::portable_path;
 
 /// File name for the agent-ready escaped-mutant report.
 pub const AGENTIC_REPORT_FILE_NAME: &str = "mutarust-agentic.json";
@@ -51,21 +52,16 @@ pub struct AgenticMutant {
     /// Stable mutator name.
     pub mutator: String,
     /// Plain-language description of the change.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
+    pub description: String,
     /// Hint for a test that can kill the mutant.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub kill_hint: Option<String>,
+    pub kill_hint: String,
     /// Unified source diff.
     pub diff: String,
     /// One-based line of the first context line.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub context_start_line: Option<usize>,
+    pub context_start_line: usize,
     /// Nearby source lines.
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub context_lines: Vec<String>,
     /// Nearby test file paths.
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub test_files: Vec<String>,
 }
 
@@ -114,7 +110,9 @@ fn agentic_mutant(result: &MutationResult, source_root: &Path) -> AgenticMutant 
         line: result.line,
         mutator: result.mutator.clone(),
         description: instance_description(&result.mutator, &result.diff),
-        kill_hint: kill_hint(&result.mutator).map(str::to_owned),
+        kill_hint: kill_hint(&result.mutator)
+            .unwrap_or("Write a test that asserts the behaviour this mutation changes")
+            .to_owned(),
         diff: result.diff.clone(),
         context_start_line,
         context_lines,
@@ -122,12 +120,14 @@ fn agentic_mutant(result: &MutationResult, source_root: &Path) -> AgenticMutant 
     }
 }
 
-fn instance_description(mutator: &str, diff: &str) -> Option<String> {
+fn instance_description(mutator: &str, diff: &str) -> String {
     let (from_lines, to_lines) = diff_changed_lines(diff);
     if let Some(description) = single_line_change_description(&from_lines, &to_lines) {
-        return Some(description);
+        return description;
     }
-    mutator_description(mutator).map(str::to_owned)
+    mutator_description(mutator)
+        .unwrap_or("Applies a source mutation that the test suite did not detect")
+        .to_owned()
 }
 
 fn diff_changed_lines(diff: &str) -> (Vec<&str>, Vec<&str>) {
@@ -158,14 +158,14 @@ fn single_line_change_description(from_lines: &[&str], to_lines: &[&str]) -> Opt
     Some(format!("Changes: `{from}` → `{to}`"))
 }
 
-fn extract_context_lines(source: &str, line: usize, radius: usize) -> (Vec<String>, Option<usize>) {
+fn extract_context_lines(source: &str, line: usize, radius: usize) -> (Vec<String>, usize) {
     if source.is_empty() || line == 0 {
-        return (Vec::new(), None);
+        return (Vec::new(), 0);
     }
     let lines: Vec<&str> = source.split('\n').collect();
     let index = line.saturating_sub(1);
     if index >= lines.len() {
-        return (Vec::new(), None);
+        return (Vec::new(), 0);
     }
     let start = index.saturating_sub(radius);
     let end = (index + radius).min(lines.len().saturating_sub(1));
@@ -173,7 +173,7 @@ fn extract_context_lines(source: &str, line: usize, radius: usize) -> (Vec<Strin
         .iter()
         .map(|entry| (*entry).to_owned())
         .collect();
-    (context, Some(start + 1))
+    (context, start + 1)
 }
 
 fn find_test_files(source: &Path, source_root: &Path) -> Vec<String> {
@@ -227,10 +227,6 @@ fn push_matching_files(
         let relative = path.strip_prefix(source_root).unwrap_or(path.as_path());
         files.push(portable_path(relative));
     }
-}
-
-fn portable_path(path: &Path) -> String {
-    path.to_string_lossy().replace('\\', "/")
 }
 
 fn utc_rfc3339_now() -> Result<String, String> {
@@ -295,15 +291,8 @@ mod tests {
         assert_eq!(report.mutants[0].file, "src/lib.rs");
         assert_eq!(report.mutants[0].line, 2);
         assert_eq!(report.mutants[0].mutator, "conditional/bool-literal");
-        assert!(
-            report.mutants[0]
-                .description
-                .as_deref()
-                .unwrap_or_default()
-                .contains("Changes:")
-                || report.mutants[0].description.is_some()
-        );
-        assert!(report.mutants[0].kill_hint.is_some());
+        assert!(report.mutants[0].description.contains("Changes:"));
+        assert!(report.mutants[0].kill_hint.contains("test"));
         assert!(report.mutants[0].diff.contains("---"));
     }
 
@@ -361,7 +350,7 @@ mod tests {
             },
         );
         let mutant = &report.mutants[0];
-        assert_eq!(mutant.context_start_line, Some(1));
+        assert_eq!(mutant.context_start_line, 1);
         assert_eq!(
             mutant.context_lines,
             vec![

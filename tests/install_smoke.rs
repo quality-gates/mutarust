@@ -1751,9 +1751,12 @@ fn installed_command_writes_html_and_agentic_reports() {
         html.contains("Total Mutants"),
         "html must show run counts: {html}"
     );
-    assert!(html.contains("MSI"), "html must show total score: {html}");
     assert!(
-        html.contains("Covered MSI"),
+        html.contains("Mutation score"),
+        "html must show total score: {html}"
+    );
+    assert!(
+        html.contains("Covered-code mutation score"),
         "html must show covered score: {html}"
     );
     assert!(

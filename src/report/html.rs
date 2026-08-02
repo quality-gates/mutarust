@@ -3,7 +3,7 @@ use std::fs;
 
 use crate::{MutationResult, MutationRun, MutationState};
 
-use super::{ReportMutatorStats, compact_summary, mutator_stats};
+use super::{ReportMutatorStats, compact_summary, mutator_stats, portable_path};
 
 /// File name for the HTML mutation report.
 pub const HTML_REPORT_FILE_NAME: &str = "mutarust-report.html";
@@ -53,7 +53,7 @@ pub fn html_report(run: &MutationRun) -> String {
         &mut body,
         "not-covered",
         &stats.not_covered_count.to_string(),
-        "Not Covered",
+        "Not covered",
     );
     push_stat_card(
         &mut body,
@@ -61,12 +61,17 @@ pub fn html_report(run: &MutationRun) -> String {
         &stats.skipped_count.to_string(),
         "Skipped",
     );
-    push_stat_card(&mut body, "msi", &format!("{msi_percent}%"), "MSI");
+    push_stat_card(
+        &mut body,
+        "msi",
+        &format!("{msi_percent}%"),
+        "Mutation score",
+    );
     push_stat_card(
         &mut body,
         "covered",
         &format!("{covered_percent}%"),
-        "Covered MSI",
+        "Covered-code mutation score",
     );
     body.push_str("</div>");
     push_mutator_table(&mut body, &mutator_stats);
@@ -108,7 +113,7 @@ fn group_escaped_mutants(run: &MutationRun) -> BTreeMap<String, Vec<&MutationRes
         if result.state != MutationState::Escaped {
             continue;
         }
-        let path = result.source.to_string_lossy().replace('\\', "/");
+        let path = portable_path(&result.source);
         grouped.entry(path).or_insert_with(Vec::new).push(result);
     }
     grouped
@@ -149,7 +154,8 @@ fn push_file_section(body: &mut String, file_path: &str, mutants: &[&MutationRes
     ));
     for mutant in mutants {
         body.push_str(&format!(
-            r#"<div class="mutator"><div class="mutator-header" onclick="toggleMutator(this)"><span>Mutator: {} (line {})</span></div><div class="mutator-content"><div class="diff"><h3>Diff:</h3><div class="diff-content">"#,
+            r#"<div class="mutator"><div class="mutator-header" onclick="toggleMutator(this)"><span>{} — {} (line {})</span></div><div class="mutator-content"><div class="diff"><h3>Diff:</h3><div class="diff-content">"#,
+            escape_html(&mutant.stable_id),
             escape_html(&mutant.mutator),
             mutant.line
         ));
@@ -392,10 +398,11 @@ mod tests {
         assert!(html.contains(">2<"));
         assert!(html.contains("Killed"));
         assert!(html.contains("Escaped"));
-        assert!(html.contains("MSI"));
-        assert!(html.contains("Covered MSI"));
+        assert!(html.contains("Mutation score"));
+        assert!(html.contains("Covered-code mutation score"));
         assert!(html.contains("Per-mutator results"));
         assert!(html.contains("conditional/bool-literal"));
+        assert!(html.contains("id-escaped"));
         assert!(html.contains("src/lib.rs"));
         assert!(html.contains("Diff:"));
         assert!(html.contains("let value = true;"));

@@ -219,8 +219,9 @@ mutarust --logger-agentic-json [TARGET]...
 | `mutants[].description` | string | Plain-language description of the change |
 | `mutants[].kill_hint` | string | Hint for a test that can kill the mutant |
 
-An empty run writes `escaped_count` zero and an empty `mutants` array. Optional
-fields such as `description`, `kill_hint`, `context_start_line`,
-`context_lines`, and `test_files` are omitted when empty.
+An empty run writes `escaped_count` zero and an empty `mutants` array. Each
+escaped mutant always includes `description`, `kill_hint`,
+`context_start_line`, `context_lines`, and `test_files`. Missing source context
+or nearby tests use an empty list and `context_start_line` zero.
 
 Published JSON Schema: [schema/agentic.schema.json](../schema/agentic.schema.json).
