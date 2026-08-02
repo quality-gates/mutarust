@@ -9,12 +9,20 @@ use crate::expression::{
     ArithmeticNegate, BinaryOperatorMutator, BoolLiteralMutator, ConditionalNotMutator,
     NumberMutator, StringLiteralMutator,
 };
+use crate::return_value::ReturnValueMutator;
+use crate::value::ValueMutator;
 
 /// A source replacement produced by a mutator.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Mutation {
     range: Range<usize>,
+    change: MutationChange,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct MutationChange {
     replacement: String,
+    requires_compile_validation: bool,
 }
 
 impl Mutation {
@@ -22,8 +30,20 @@ impl Mutation {
     pub fn new(range: Range<usize>, replacement: impl Into<String>) -> Self {
         Self {
             range,
-            replacement: replacement.into(),
+            change: MutationChange {
+                replacement: replacement.into(),
+                requires_compile_validation: false,
+            },
         }
+    }
+
+    pub(crate) fn requiring_compile_validation(mut self) -> Self {
+        self.change.requires_compile_validation = true;
+        self
+    }
+
+    pub(crate) fn requires_compile_validation(&self) -> bool {
+        self.change.requires_compile_validation
     }
 
     /// Returns a changed source string when this mutation has a valid range.
@@ -33,12 +53,12 @@ impl Mutation {
         }
         let before = source.get(..self.range.start)?;
         let after = source.get(self.range.end..)?;
-        Some(format!("{before}{}{after}", self.replacement))
+        Some(format!("{before}{}{after}", self.change.replacement))
     }
 
     /// Returns the replaced byte range and the replacement source text.
     pub fn identity(&self) -> (Range<usize>, &str) {
-        (self.range.clone(), &self.replacement)
+        (self.range.clone(), &self.change.replacement)
     }
 }
 
@@ -108,6 +128,14 @@ impl RegistryBuilder {
             .register(ControlFlowMutator::loop_range_break())
             .expect("built-in mutator registration must be valid")
             .register(ControlFlowMutator::statement_remove())
+            .expect("built-in mutator registration must be valid")
+            .register(ValueMutator::composite_field_clear())
+            .expect("built-in mutator registration must be valid")
+            .register(ValueMutator::context_nil())
+            .expect("built-in mutator registration must be valid")
+            .register(ValueMutator::remove_self_assign())
+            .expect("built-in mutator registration must be valid")
+            .register(ReturnValueMutator)
             .expect("built-in mutator registration must be valid")
     }
 

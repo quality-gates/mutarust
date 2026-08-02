@@ -455,7 +455,8 @@ fn removable_statement(statement: &Stmt) -> bool {
 
 fn removable_expression(expression: &Expr) -> bool {
     match expression {
-        Expr::Assign(_) | Expr::Call(_) | Expr::Macro(_) | Expr::MethodCall(_) => true,
+        Expr::Assign(assignment) => !crate::value::is_safe_self_assignment(assignment),
+        Expr::Call(_) | Expr::Macro(_) | Expr::MethodCall(_) => true,
         Expr::Binary(binary) => assignment_operator(&binary.op),
         _ => false,
     }

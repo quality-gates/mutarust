@@ -1,0 +1,11 @@
+composite/field-clear :: count: 3,\n         ::  :: Killed
+composite/field-clear :: enabled: true,\n         ::  :: Killed
+composite/field-clear :: label: "value",\n         ::  :: Killed
+composite/field-clear :: context: Some(2),\n         ::  :: Killed
+expression/context-nil :: Some(value) :: ::core::option::Option::None :: Killed
+expression/context-nil :: Some(1) :: ::core::option::Option::None :: Skipped
+statement/remove-self-assign :: value = value; ::  :: Escaped
+statement/return :: true :: false :: Killed
+statement/return :: value :: ::core::default::Default::default() :: Killed
+statement/return :: value :: &[] :: Killed
+statement/return :: owned_value :: ::core::default::Default::default() :: Killed
