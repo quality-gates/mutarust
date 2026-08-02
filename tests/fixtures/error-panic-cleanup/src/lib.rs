@@ -78,7 +78,7 @@ pub fn unobserved_recovery() -> bool {
 
 struct Cleanup<'value>(&'value Cell<u8>);
 
-impl Drop for Cleanup<'_> {
+impl ::core::ops::Drop for Cleanup<'_> {
     fn drop(&mut self) {
         self.0.set(self.0.get() + 1);
     }
@@ -98,7 +98,7 @@ pub fn unobserved_cleanup(cell: &Cell<u8>) -> u8 {
 
 struct BorrowCleanup<'value>(&'value mut u8);
 
-impl Drop for BorrowCleanup<'_> {
+impl ::core::ops::Drop for BorrowCleanup<'_> {
     fn drop(&mut self) {
         *self.0 += 1;
     }

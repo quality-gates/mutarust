@@ -2,9 +2,11 @@ use std::collections::BTreeMap;
 
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
-use syn::{Expr, ExprIf, FnArg, Pat, Stmt, Type};
+use syn::{Arm, Expr, ExprClosure, ExprForLoop, ExprIf, ExprWhile, FnArg, Pat, Stmt, Type};
 
-use crate::error_panic_cleanup::crate_root_aliases;
+use crate::error_panic_cleanup::{
+    StandardCrates, condition_binding_names, path_names_are, standard_crates,
+};
 use crate::mutator::span_range;
 use crate::{Mutation, Mutator};
 
@@ -19,7 +21,7 @@ impl Mutator for ErrorGuardMutator {
         let Ok(file) = syn::parse_file(source) else {
             return Vec::new();
         };
-        ErrorGuardVisitor::collect(source, &file, crate_root_aliases(&file.items))
+        ErrorGuardVisitor::collect(source, &file, standard_crates(&file.items))
     }
 }
 
@@ -32,12 +34,12 @@ struct ErrorGuardVisitor<'source> {
 }
 
 impl<'source> ErrorGuardVisitor<'source> {
-    fn collect(source: &'source str, file: &syn::File, aliases: (bool, bool)) -> Vec<Mutation> {
+    fn collect(source: &'source str, file: &syn::File, crates: StandardCrates) -> Vec<Mutation> {
         let mut visitor = Self {
             source,
-            core_available: !aliases.0,
+            core_available: crates.core_available,
             scopes: Vec::new(),
-            std_available: !aliases.1,
+            std_available: crates.std_available,
             mutations: Vec::new(),
         };
         visitor.visit_file(file);
@@ -82,14 +84,8 @@ impl<'source> ErrorGuardVisitor<'source> {
         if kind.qself.is_some() || kind.path.leading_colon.is_none() {
             return false;
         }
-        let names = kind
-            .path
-            .segments
-            .iter()
-            .map(|segment| segment.ident.to_string())
-            .collect::<Vec<_>>();
-        (names == ["core", "result", "Result"] && self.core_available)
-            || (names == ["std", "result", "Result"] && self.std_available)
+        (path_names_are(&kind.path, &["core", "result", "Result"]) && self.core_available)
+            || (path_names_are(&kind.path, &["std", "result", "Result"]) && self.std_available)
     }
 }
 
@@ -126,36 +122,100 @@ impl<'ast> Visit<'ast> for ErrorGuardVisitor<'_> {
         self.scopes.pop();
     }
 
+    fn visit_expr_closure(&mut self, expression: &'ast ExprClosure) {
+        let mut bindings = BTreeMap::new();
+        for input in &expression.inputs {
+            let is_result = match input {
+                Pat::Type(pattern) => self.is_result_type(&pattern.ty),
+                _ => false,
+            };
+            record_pattern(&mut bindings, input, is_result);
+        }
+        self.scopes.push(bindings);
+        self.visit_expr(&expression.body);
+        self.scopes.pop();
+    }
+
+    fn visit_expr_for_loop(&mut self, expression: &'ast ExprForLoop) {
+        self.visit_expr(&expression.expr);
+        let mut bindings = BTreeMap::new();
+        record_pattern(&mut bindings, &expression.pat, false);
+        self.scopes.push(bindings);
+        self.visit_block(&expression.body);
+        self.scopes.pop();
+    }
+
+    fn visit_arm(&mut self, arm: &'ast Arm) {
+        let mut bindings = BTreeMap::new();
+        record_pattern(&mut bindings, &arm.pat, false);
+        self.scopes.push(bindings);
+        if let Some((_, guard)) = &arm.guard {
+            self.visit_expr(guard);
+        }
+        self.visit_expr(&arm.body);
+        self.scopes.pop();
+    }
+
     fn visit_expr_if(&mut self, expression: &'ast ExprIf) {
-        let Expr::MethodCall(call) = expression.cond.as_ref() else {
-            visit::visit_expr_if(self, expression);
-            return;
-        };
-        let replacement = match call.method.to_string().as_str() {
-            "is_err" if call.args.is_empty() => "false",
-            "is_ok" if call.args.is_empty() => "true",
-            _ => {
-                visit::visit_expr_if(self, expression);
-                return;
-            }
-        };
-        if self.result_is_proved(&call.receiver)
+        if let Some((call, replacement)) = error_guard_call(&expression.cond)
+            && self.result_is_proved(&call.receiver)
             && let Some(range) = span_range(self.source, expression.cond.span())
         {
             self.mutations.push(Mutation::new(range, replacement));
         }
-        visit::visit_expr_if(self, expression);
+        self.visit_expr(&expression.cond);
+        let bindings = condition_binding_names(&expression.cond)
+            .into_iter()
+            .map(|name| (name, false))
+            .collect();
+        self.scopes.push(bindings);
+        self.visit_block(&expression.then_branch);
+        self.scopes.pop();
+        if let Some((_, alternate)) = &expression.else_branch {
+            self.visit_expr(alternate);
+        }
+    }
+
+    fn visit_expr_while(&mut self, expression: &'ast ExprWhile) {
+        self.visit_expr(&expression.cond);
+        let bindings = condition_binding_names(&expression.cond)
+            .into_iter()
+            .map(|name| (name, false))
+            .collect();
+        self.scopes.push(bindings);
+        self.visit_block(&expression.body);
+        self.scopes.pop();
+    }
+}
+
+fn error_guard_call(expression: &Expr) -> Option<(&syn::ExprMethodCall, &'static str)> {
+    let Expr::MethodCall(call) = expression else {
+        return None;
+    };
+    match call.method.to_string().as_str() {
+        "is_err" if call.args.is_empty() => Some((call, "false")),
+        "is_ok" if call.args.is_empty() => Some((call, "true")),
+        _ => None,
     }
 }
 
 fn record_pattern(bindings: &mut BTreeMap<String, bool>, pattern: &Pat, is_result: bool) {
-    match pattern {
-        Pat::Ident(pattern) => {
-            bindings.insert(pattern.ident.to_string(), is_result);
-        }
-        Pat::Paren(pattern) => record_pattern(bindings, &pattern.pat, is_result),
-        Pat::Reference(pattern) => record_pattern(bindings, &pattern.pat, is_result),
-        Pat::Type(pattern) => record_pattern(bindings, &pattern.pat, is_result),
-        _ => {}
+    let mut recorder = PatternRecorder {
+        bindings,
+        is_result,
+    };
+    recorder.visit_pat(pattern);
+}
+
+struct PatternRecorder<'bindings> {
+    bindings: &'bindings mut BTreeMap<String, bool>,
+    is_result: bool,
+}
+
+impl<'ast> Visit<'ast> for PatternRecorder<'_> {
+    fn visit_pat_ident(&mut self, pattern: &'ast syn::PatIdent) {
+        self.bindings
+            .insert(pattern.ident.to_string(), self.is_result);
+        visit::visit_pat_ident(self, pattern);
     }
 }

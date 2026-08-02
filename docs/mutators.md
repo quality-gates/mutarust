@@ -112,7 +112,7 @@ explicit `return`, or an aliased standard path.
 `::std::panic::catch_unwind(callback)` call with one argument. It evaluates
 the catch one time. It returns the same successful value, but it passes a
 caught panic to `::std::panic::resume_unwind`. Cargo checks the replacement
-before tests run. A custom test command marks this candidate `Skipped` because
+before tests run. A custom test command marks this mutation `Skipped` because
 the command cannot give Cargo type proof.
 
 `statement/defer-remove` accepts a semicolon statement with one of these
@@ -124,12 +124,25 @@ drop(value);
 ::std::mem::drop(value);
 ```
 
-The unqualified form is not a candidate when the file has another `drop`
-binding or a glob import. A root-qualified form is not a candidate when a
-crate-root alias replaces its standard crate name. The mutator removes the
-statement. The value then stays alive until its normal last use or the end of
-its scope. Cargo checks the replacement because a longer guard lifetime can
-make a borrow invalid. A custom test command marks this candidate `Skipped`.
+The value must be one identifier. An exact root-qualified `Drop`
+implementation for the local type in the same module can prove its cleanup
+work. Its `drop` method must contain a run-time statement. These exact standard
+guard types can also prove cleanup work:
+
+- `::std::sync::MutexGuard`
+- `::std::sync::RwLockReadGuard`
+- `::std::sync::RwLockWriteGuard`
+- `::core::cell::Ref`
+- `::core::cell::RefMut`
+
+The statement must occur before another statement in the block. The mutator
+does not produce a mutation for an unqualified form when the file has another
+`drop` binding or a glob import. It does not produce a mutation for a
+root-qualified form when a crate-root alias replaces its standard crate name.
+The mutator removes the statement. The value then stays alive until its normal
+last use or the end of its scope. Cargo checks the replacement because a
+longer guard lifetime can make a borrow invalid. A custom test command marks
+this mutation `Skipped`.
 
 `concurrency/goroutine-remove` supports these standard thread statements:
 

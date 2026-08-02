@@ -572,6 +572,8 @@ fn installed_command_classifies_error_panic_and_cleanup_fixture_mutants() {
             && stdout.contains("+    if true {")
             && stdout.contains("-        ::std::option::Option::Some(&self.cause)")
             && stdout.contains("+        ::core::option::Option::None")
+            && stdout.contains("-    ::std::panic::catch_unwind(|| 7).is_ok()")
+            && stdout.contains("+    match ::std::panic::catch_unwind(|| 7)")
             && stdout.contains("-    ::core::mem::drop(cleanup);"),
         "the error fixture must show readable diffs: {stdout}"
     );

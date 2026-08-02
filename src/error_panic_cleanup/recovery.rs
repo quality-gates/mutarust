@@ -1,7 +1,7 @@
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
-use crate::error_panic_cleanup::crate_root_aliases;
+use crate::error_panic_cleanup::{path_names_are, standard_crates};
 use crate::mutator::span_range;
 use crate::{Mutation, Mutator};
 
@@ -16,7 +16,7 @@ impl Mutator for RecoveryMutator {
         let Ok(file) = syn::parse_file(source) else {
             return Vec::new();
         };
-        if crate_root_aliases(&file.items).1 {
+        if !standard_crates(&file.items).std_available {
             return Vec::new();
         }
         let mut visitor = RecoveryVisitor {
@@ -59,12 +59,7 @@ fn catch_unwind_call(call: &syn::ExprCall) -> bool {
     if function.qself.is_some() || function.path.leading_colon.is_none() {
         return false;
     }
-    function
-        .path
-        .segments
-        .iter()
-        .map(|segment| segment.ident.to_string())
-        .eq(["std", "panic", "catch_unwind"].map(str::to_owned))
+    path_names_are(&function.path, &["std", "panic", "catch_unwind"])
 }
 
 fn propagate_panics(call: &str) -> String {

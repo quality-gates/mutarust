@@ -54,6 +54,13 @@ fn error_guard_rejects_unproved_methods_and_nested_conditions() {
 }
 
 #[test]
+fn error_guard_keeps_bindings_that_shadow_a_proved_result() {
+    let source = "struct Status; impl Status { fn is_err(&self) -> bool { true } } fn check(result: ::core::result::Result<(), ()>) { let closure = |result: Status| { if result.is_err() { failed(); } }; for result in [Status] { if result.is_err() { failed(); } } closure(Status); }";
+
+    assert!(changed_sources("expression/error-guard", source).is_empty());
+}
+
+#[test]
 fn error_guard_accepts_explicit_result_locals() {
     let source = "fn check() { let result: ::std::result::Result<(), ()> = Ok(()); if result.is_ok() { passed(); } }";
 
@@ -122,7 +129,7 @@ fn recovery_rejects_shadowed_and_nonstandard_catch_functions() {
 
 #[test]
 fn cleanup_removes_documented_explicit_drop_timing() {
-    let source = "fn cleanup(first: String, second: String, third: String) { drop(first); ::std::mem::drop(second); ::core::mem::drop(third); }";
+    let source = "struct Guard; impl ::core::ops::Drop for Guard { fn drop(&mut self) { release(); } } fn cleanup(first: Guard, second: Guard, third: Guard) { drop(first); work(); ::std::mem::drop(second); work(); ::core::mem::drop(third); work(); }";
 
     assert_eq!(
         changed_sources("statement/defer-remove", source),
@@ -132,6 +139,34 @@ fn cleanup_removes_documented_explicit_drop_timing() {
             source.replacen("::core::mem::drop(third);", "", 1),
         ]
     );
+}
+
+#[test]
+fn cleanup_rejects_values_without_proved_cleanup_and_a_final_drop() {
+    let source = "struct Guard; impl ::core::ops::Drop for Guard { fn drop(&mut self) {} } fn cleanup(value: u8, guard: Guard) { drop(value); work(); drop(&value); work(); drop(guard); }";
+
+    assert!(changed_sources("statement/defer-remove", source).is_empty());
+}
+
+#[test]
+fn cleanup_keeps_bindings_that_shadow_a_proved_guard() {
+    let source = "struct Guard; impl ::core::ops::Drop for Guard { fn drop(&mut self) { release(); } } fn cleanup(guard: Guard) { let closure = |guard: u8| { drop(guard); work(); }; for guard in [1_u8] { drop(guard); work(); } if let Some(guard) = Some(1_u8) { drop(guard); work(); } while let Some(guard) = None::<u8> { drop(guard); work(); } closure(1); drop(guard); }";
+
+    assert!(changed_sources("statement/defer-remove", source).is_empty());
+}
+
+#[test]
+fn cleanup_rejects_empty_drop_work_and_a_later_item() {
+    let source = "struct Empty; impl ::core::ops::Drop for Empty { fn drop(&mut self) {} } struct Guard; impl ::core::ops::Drop for Guard { fn drop(&mut self) { release(); } } fn cleanup(empty: Empty, guard: Guard) { drop(empty); work(); drop(guard); struct Marker; }";
+
+    assert!(changed_sources("statement/defer-remove", source).is_empty());
+}
+
+#[test]
+fn cleanup_does_not_share_drop_proof_between_modules() {
+    let source = "mod proved { struct Guard; impl ::core::ops::Drop for Guard { fn drop(&mut self) {} } } mod unproved { struct Guard; fn cleanup(guard: Guard) { drop(guard); work(); } }";
+
+    assert!(changed_sources("statement/defer-remove", source).is_empty());
 }
 
 #[test]
