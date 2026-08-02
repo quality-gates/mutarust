@@ -1691,6 +1691,231 @@ fn installed_command_reports_stable_evidence_and_enforces_total_score() {
     );
 }
 
+#[test]
+fn installed_command_filters_result_output_by_quiet_mode_and_output_statuses() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_mutation_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+
+    let run = |arguments: &[&str]| {
+        Command::new(command_path(&install))
+            .args(arguments)
+            .arg(&source)
+            .current_dir(&fixture)
+            .output()
+            .expect("installed mutarust must start")
+    };
+    let stdout_of = |arguments: &[&str]| {
+        let output = run(arguments);
+        assert!(
+            output.status.success(),
+            "run with {arguments:?} must succeed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).expect("mutation output must be UTF-8")
+    };
+
+    let quiet = stdout_of(&["--quiet"]);
+    assert!(
+        quiet.contains("escaped ") && !quiet.contains("killed "),
+        "--quiet must show only escaped mutants: {quiet}"
+    );
+    assert!(
+        quiet.contains("Killed: 1") && quiet.contains("Escaped: 1"),
+        "--quiet must still show the run summary: {quiet}"
+    );
+
+    let killed_only = stdout_of(&["--output-statuses", "k"]);
+    assert!(
+        killed_only.contains("killed ") && !killed_only.contains("escaped "),
+        "--output-statuses k must show only killed mutants: {killed_only}"
+    );
+
+    let both = stdout_of(&["--output-statuses", "ke"]);
+    assert!(
+        both.contains("killed ") && both.contains("escaped "),
+        "--output-statuses ke must show killed and escaped mutants: {both}"
+    );
+
+    let overrides_quiet = stdout_of(&["--quiet", "--output-statuses", "k"]);
+    assert!(
+        overrides_quiet.contains("killed ") && !overrides_quiet.contains("escaped "),
+        "--output-statuses must override --quiet: {overrides_quiet}"
+    );
+
+    let silent_overrides = stdout_of(&["--silent", "--output-statuses", "e"]);
+    assert!(
+        !silent_overrides.contains("killed ") && !silent_overrides.contains("escaped "),
+        "--silent must override --output-statuses: {silent_overrides}"
+    );
+    assert!(
+        silent_overrides.contains("Killed: 1") && silent_overrides.contains("Escaped: 1"),
+        "--silent must still show the run summary: {silent_overrides}"
+    );
+
+    let quiet_no_diffs = stdout_of(&["--quiet", "--no-diffs"]);
+    assert!(
+        quiet_no_diffs.contains("escaped ") && !quiet_no_diffs.contains("@@ -"),
+        "--no-diffs must still hide the diff of a visible escaped mutant: {quiet_no_diffs}"
+    );
+
+    let statuses_no_diffs = stdout_of(&["--output-statuses", "e", "--no-diffs"]);
+    assert!(
+        statuses_no_diffs.contains("escaped ") && !statuses_no_diffs.contains("@@ -"),
+        "--no-diffs must combine with --output-statuses: {statuses_no_diffs}"
+    );
+
+    for (arguments, error) in [
+        (
+            vec!["--output-statuses", ""],
+            "--output-statuses requires only these letters",
+        ),
+        (
+            vec!["--output-statuses", "z"],
+            "--output-statuses requires only these letters",
+        ),
+        (
+            vec!["--output-statuses", "k", "--output-statuses", "e"],
+            "--output-statuses can be supplied only once",
+        ),
+    ] {
+        let output = run(&arguments);
+        assert_eq!(
+            output.status.code(),
+            Some(3),
+            "invalid --output-statuses value must be rejected: {arguments:?}"
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains(error),
+            "--output-statuses error must explain the problem: {arguments:?}"
+        );
+    }
+}
+
+#[test]
+fn installed_command_reports_verbose_and_debug_diagnostics_without_secrets() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_mutation_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    let secret_value = "sekrit-token-value-should-not-leak";
+
+    let plain = Command::new(command_path(&install))
+        .arg(&source)
+        .current_dir(&fixture)
+        .env("MUTARUST_TEST_SECRET", secret_value)
+        .output()
+        .expect("installed mutarust must start");
+    assert!(plain.status.success());
+    let plain_stdout = String::from_utf8(plain.stdout).expect("plain output must be UTF-8");
+    assert!(
+        !plain_stdout.contains("Mutate ") && !plain_stdout.contains("Running with"),
+        "a plain run must not show verbose diagnostics: {plain_stdout}"
+    );
+    assert!(
+        !plain_stdout.contains('\r') && !plain_stdout.contains('\u{1b}'),
+        "non-terminal output must contain no terminal control sequences: {plain_stdout:?}"
+    );
+    let plain_stderr = String::from_utf8_lossy(&plain.stderr);
+    assert!(
+        !plain_stderr.contains('\r') && !plain_stderr.contains('\u{1b}'),
+        "non-terminal standard error must contain no terminal control sequences: {plain_stderr}"
+    );
+
+    let verbose = Command::new(command_path(&install))
+        .args(["--verbose", "--workers", "1"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .env("MUTARUST_TEST_SECRET", secret_value)
+        .output()
+        .expect("installed mutarust must start with --verbose");
+    assert!(
+        verbose.status.success(),
+        "verbose run must succeed: {}",
+        String::from_utf8_lossy(&verbose.stderr)
+    );
+    let verbose_stdout = String::from_utf8(verbose.stdout).expect("verbose output must be UTF-8");
+    assert!(
+        verbose_stdout.contains("Mutate ")
+            && verbose_stdout.contains("at line")
+            && verbose_stdout.contains("Running with 1 parallel worker(s)"),
+        "--verbose must show the mutated source, line, and worker count: {verbose_stdout}"
+    );
+    assert!(
+        !verbose_stdout.contains("Mutator conditional/bool-literal")
+            && !verbose_stdout.contains("Result "),
+        "--verbose without --debug must not show mutator or per-result debug lines: {verbose_stdout}"
+    );
+    assert!(
+        !verbose_stdout.contains(secret_value) && !verbose_stdout.contains("MUTARUST_TEST_SECRET"),
+        "--verbose must never print inherited environment values: {verbose_stdout}"
+    );
+
+    let debug = Command::new(command_path(&install))
+        .args(["--debug", "--workers", "1"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .env("MUTARUST_TEST_SECRET", secret_value)
+        .output()
+        .expect("installed mutarust must start with --debug");
+    assert!(
+        debug.status.success(),
+        "debug run must succeed: {}",
+        String::from_utf8_lossy(&debug.stderr)
+    );
+    let debug_stdout = String::from_utf8(debug.stdout).expect("debug output must be UTF-8");
+    assert!(
+        debug_stdout.contains("Mutate ")
+            && debug_stdout.contains("Running with 1 parallel worker(s)")
+            && debug_stdout.contains("Mutator conditional/bool-literal")
+            && debug_stdout.contains("Run cargo test")
+            && debug_stdout.contains("Result "),
+        "--debug must show the documented mutation, mutator, command, and result details: {debug_stdout}"
+    );
+    assert!(
+        !debug_stdout.contains(secret_value) && !debug_stdout.contains("MUTARUST_TEST_SECRET"),
+        "--debug must never print inherited environment values: {debug_stdout}"
+    );
+
+    let debug_silent = Command::new(command_path(&install))
+        .args(["--debug", "--silent", "--workers", "1"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start with --debug --silent");
+    assert!(
+        debug_silent.status.success(),
+        "debug-silent run must succeed: {}",
+        String::from_utf8_lossy(&debug_silent.stderr)
+    );
+    let debug_silent_stdout =
+        String::from_utf8(debug_silent.stdout).expect("debug-silent output must be UTF-8");
+    assert!(
+        !debug_silent_stdout.contains("Result "),
+        "--debug with --silent must not show per-mutant result lines: {debug_silent_stdout}"
+    );
+
+    let debug_quiet = Command::new(command_path(&install))
+        .args(["--debug", "--quiet", "--workers", "1"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start with --debug --quiet");
+    assert!(
+        debug_quiet.status.success(),
+        "debug-quiet run must succeed: {}",
+        String::from_utf8_lossy(&debug_quiet.stderr)
+    );
+    let debug_quiet_stdout =
+        String::from_utf8(debug_quiet.stdout).expect("debug-quiet output must be UTF-8");
+    assert!(
+        debug_quiet_stdout.contains("Result escaped for")
+            && !debug_quiet_stdout.contains("Result killed for"),
+        "--debug with --quiet must show only escaped per-mutant result lines: {debug_quiet_stdout}"
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn installed_command_manages_baselines_blacklists_and_one_mutant_ids() {

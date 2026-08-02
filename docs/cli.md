@@ -43,6 +43,42 @@ the full mutant count. The score is zero when no mutant exists.
 Use `--min-msi PERCENT` to require a total mutation score. A failed score gate
 returns exit value 4. A score equal to the required percentage passes.
 
+## Terminal Output Controls
+
+When standard error is a terminal, and none of `--verbose`, `--debug`,
+`--silent`, `--no-exec`, or `--dry-run` is set, Mutarust shows a live progress
+line on standard error. The line updates every 100 milliseconds and reports
+the processed mutant count with a state breakdown. Mutarust clears this line
+before it prints the final result output, so the line does not corrupt the
+final output. Mutarust never writes the progress line, or any other terminal
+control character, to a non-terminal standard error. Piped or redirected
+output is stable text with no control characters.
+
+Use `--silent` to hide all per-mutant result lines. Use `--no-silent` to
+force these lines on, for example to override a `silent_mode: true`
+configuration file value. `--silent` and `--no-silent` cannot be used
+together.
+
+Use `--quiet` to show only escaped-mutant result lines. It hides killed,
+errored, not-covered, and skipped lines. `--silent` overrides `--quiet`.
+
+Use `--output-statuses LETTERS` to show only chosen mutant states. Each
+letter selects one state: `k` killed, `e` escaped, `s` skipped, `n` not
+covered, `x` errored. For example, `--output-statuses ex` shows only escaped
+and errored mutants. This option requires at least one of these letters and
+rejects any other character. `--output-statuses` overrides `--quiet`.
+`--silent` overrides `--output-statuses`.
+
+Use `--no-diffs` to hide escaped-mutant source diffs. A hidden result line
+never shows its diff, regardless of `--no-diffs`.
+
+Use `--verbose` to print the mutated source file, line number, and worker
+count to standard output before each mutant runs. Use `--debug` for
+`--verbose` output plus the active mutator name and the configured test
+command. Debug output never prints environment variable values, because a
+custom test command inherits the caller environment, which can hold secret
+values. Mutarust also prints one result line per mutant under `--debug`.
+
 ## LLVM Coverage
 
 Use `--coverage` to collect Rust line coverage before mutation. Mutarust uses
