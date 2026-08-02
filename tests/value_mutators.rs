@@ -327,6 +327,20 @@ fn context_nil_does_not_use_a_function_signature_for_a_shadowing_value() {
 }
 
 #[test]
+fn context_nil_keeps_function_signatures_when_a_match_guard_reuses_the_name() {
+    let source = "fn consume(_: Option<i32>) {} fn run(value: Option<i32>, preds: &[i32]) { match value { Some(n) if preds.iter().any(|consume| consume == &n) => { consume(Some(1)); }, _ => {} } }";
+
+    assert_eq!(
+        changed_sources("expression/context-nil", source),
+        vec![source.replacen(
+            "consume(Some(1))",
+            "consume(::core::option::Option::None)",
+            1,
+        )]
+    );
+}
+
+#[test]
 fn composite_field_clear_does_not_treat_custom_none_as_option_none() {
     let source = "#[derive(Default)] struct Config { state: State } enum State { None } fn config() -> Config { Config { state: State::None, ..Default::default() } }";
 
