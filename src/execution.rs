@@ -15,6 +15,7 @@ use cargo_metadata::{Metadata, MetadataCommand, Target, TargetKind};
 #[cfg(any(unix, windows))]
 use std::sync::atomic::AtomicBool;
 
+use crate::blacklist::Blacklist;
 use crate::coverage::{CoverageMap, PerTestCoverageMap, TestIdentity, TestTarget, parse_lcov};
 use crate::evidence::{MutationEvidence, StableMutantId, mutation_evidence};
 use crate::filter::{SourceFilter, SourceFilters};
@@ -128,6 +129,8 @@ pub struct MutationResult {
     pub source: PathBuf,
     /// The stable ID for this source change.
     pub stable_id: String,
+    /// The source line where this mutation begins.
+    pub line: usize,
     /// The stable name of the mutator that produced this mutant.
     pub mutator: String,
     /// The unified source diff for this mutant.
@@ -290,6 +293,8 @@ pub struct ExecutionControls {
     pub coverage: CoverageControls,
     /// Selects mutations from lines changed from a Git comparison base.
     pub git_diff: GitDiffControls,
+    /// Reads accepted mutation checksums from these files.
+    pub blacklist_files: Vec<PathBuf>,
 }
 
 /// Git changed-line controls that apply to a complete mutation run.
@@ -503,8 +508,15 @@ pub fn run_mutation_tests_with_controls(
         .then(|| ChangedLines::load(controls.git_diff.base.as_deref()))
         .transpose()
         .map_err(run_error)?;
+    let mut blacklist = Blacklist::load(&controls.blacklist_files).map_err(run_error)?;
     let mut plan = selected_mutation_plan(
-        mutation_plan(targets, registry, filters, changed_lines.as_ref())?,
+        mutation_plan(
+            targets,
+            registry,
+            filters,
+            changed_lines.as_ref(),
+            &mut blacklist,
+        )?,
         stable_id,
     )?;
     stop_if_interrupted()?;
@@ -1074,6 +1086,7 @@ fn generated_result(candidate: &MutationCandidate) -> MutationResult {
     MutationResult {
         source: candidate.evidence.source.clone(),
         stable_id: candidate.evidence.stable_id.as_str().to_owned(),
+        line: candidate.evidence.line,
         mutator: candidate.mutator.clone(),
         diff: candidate.evidence.diff.clone(),
         state: MutationState::Generated,
@@ -1188,6 +1201,7 @@ mod tests {
         MutationResult {
             source: PathBuf::from("src/lib.rs"),
             stable_id: "a".repeat(32),
+            line: 1,
             mutator: "conditional/bool-literal".to_owned(),
             diff: String::new(),
             state,
@@ -1353,6 +1367,7 @@ fn mutation_plan(
     registry: &Registry,
     filters: &SourceFilters,
     changed_lines: Option<&ChangedLines>,
+    blacklist: &mut Blacklist,
 ) -> Result<MutationPlan, RunError> {
     let sources = find_rust_sources(targets).map_err(source_error)?;
     if sources.is_empty() {
@@ -1387,7 +1402,7 @@ fn mutation_plan(
             filter: &source_filter,
             changed_lines,
         };
-        add_source_candidates(&mut candidates, registry, &scope)?;
+        add_source_candidates(&mut candidates, registry, &scope, blacklist)?;
     }
     deduplicate_candidates(&mut candidates);
     Ok(MutationPlan {
@@ -2077,12 +2092,13 @@ fn add_source_candidates(
     candidates: &mut Vec<MutationCandidate>,
     registry: &Registry,
     scope: &CandidateScope<'_>,
+    blacklist: &mut Blacklist,
 ) -> Result<(), RunError> {
     for name in registry.names() {
         let mutator = registry
             .get(name)
             .expect("registered mutator name must resolve to a mutator");
-        add_mutator_candidates(candidates, name, mutator, scope)?;
+        add_mutator_candidates(candidates, name, mutator, scope, blacklist)?;
     }
     Ok(())
 }
@@ -2092,6 +2108,7 @@ fn add_mutator_candidates(
     name: &str,
     mutator: &dyn Mutator,
     scope: &CandidateScope<'_>,
+    blacklist: &mut Blacklist,
 ) -> Result<(), RunError> {
     for mutation in mutator.mutations(scope.text) {
         let (range, _) = mutation.identity();
@@ -2110,6 +2127,9 @@ fn add_mutator_candidates(
             .changed_lines
             .is_some_and(|lines| !lines.includes(scope.source, evidence.line))
         {
+            continue;
+        }
+        if blacklist.contains_or_insert(&evidence.blacklist_checksum) {
             continue;
         }
         candidates.push(MutationCandidate {
@@ -2135,6 +2155,7 @@ fn test_candidate(
     MutationResult {
         source: candidate.evidence.source,
         stable_id: candidate.evidence.stable_id.into_string(),
+        line: candidate.evidence.line,
         mutator: candidate.mutator,
         diff: candidate.evidence.diff,
         state,

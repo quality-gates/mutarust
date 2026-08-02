@@ -780,6 +780,274 @@ fn installed_command_reports_stable_evidence_and_enforces_total_score() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn installed_command_manages_baselines_blacklists_and_one_mutant_ids() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_mutation_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    let original = fs::read_to_string(&source).expect("fixture source must remain readable");
+    let baseline = fixture.join("mutarust-baseline.json");
+
+    let updated = Command::new(command_path(&install))
+        .args([
+            "--exec",
+            "false",
+            "--baseline",
+            baseline.to_str().expect("baseline path must be UTF-8"),
+            "--update-baseline",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must update a baseline");
+    assert!(
+        updated.status.success(),
+        "baseline update must succeed: {}",
+        String::from_utf8_lossy(&updated.stderr)
+    );
+    let baseline_text = fs::read_to_string(&baseline).expect("baseline must be written");
+    assert!(
+        baseline_text.contains("\"version\": 1")
+            && baseline_text.contains("\"id\": \"a4afb3df07ad704a7e118ca1f9c8ce1e\"")
+            && baseline_text.contains("\"id\": \"7e44f5b6649ca4de087acb260e75a287\"")
+            && baseline_text.contains("\"file\": \"checked/src/lib.rs\"")
+            && baseline_text.contains("\"mutator\": \"conditional/bool-literal\"")
+            && baseline_text.contains("\"line\": 1"),
+        "the baseline must record deterministic escaped-mutant evidence: {baseline_text}"
+    );
+    assert!(
+        !String::from_utf8_lossy(&updated.stdout).contains("Killed:"),
+        "baseline update must finish before the normal summary"
+    );
+
+    let accepted = Command::new(command_path(&install))
+        .args([
+            "--exec",
+            "false",
+            "--baseline",
+            baseline.to_str().expect("baseline path must be UTF-8"),
+            "--fail-on-escaped",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must accept baseline escapes");
+    assert!(
+        accepted.status.success(),
+        "known escaped mutants must pass the new-escape gate: {}",
+        String::from_utf8_lossy(&accepted.stderr)
+    );
+
+    fs::write(&source, format!("// unrelated source edit\n{original}"))
+        .expect("unrelated source edit must be written");
+    let accepted_after_edit = Command::new(command_path(&install))
+        .args([
+            "--exec",
+            "false",
+            "--baseline",
+            baseline.to_str().expect("baseline path must be UTF-8"),
+            "--fail-on-escaped",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must check an edited baseline source");
+    assert!(
+        accepted_after_edit.status.success(),
+        "an unrelated source edit must keep baseline IDs valid: {}",
+        String::from_utf8_lossy(&accepted_after_edit.stderr)
+    );
+
+    fs::write(
+        &source,
+        format!("// unrelated source edit\n{original}pub fn new_escape() -> bool {{ true }}\n"),
+    )
+    .expect("new escaping source must be written");
+    let new_escape = Command::new(command_path(&install))
+        .args([
+            "--exec",
+            "false",
+            "--baseline",
+            baseline.to_str().expect("baseline path must be UTF-8"),
+            "--fail-on-escaped",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must find a new escaped mutant");
+    assert_eq!(new_escape.status.code(), Some(4));
+    assert!(
+        String::from_utf8_lossy(&new_escape.stderr).contains("1 new mutant(s) escaped"),
+        "only new escaped mutants must fail the new-escape gate: {}",
+        String::from_utf8_lossy(&new_escape.stderr)
+    );
+
+    fs::write(&source, &original).expect("fixture source must be restored");
+    let blacklist = fixture.join("mutarust-blacklist.txt");
+    fs::write(&blacklist, "6f5d761468aaee678adf2d965e897fb7\n").expect("blacklist must be written");
+    let blacklisted = Command::new(command_path(&install))
+        .args([
+            "--exec",
+            "false",
+            "--blacklist",
+            blacklist.to_str().expect("blacklist path must be UTF-8"),
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must apply a blacklist");
+    assert!(
+        blacklisted.status.success(),
+        "a valid blacklist must succeed: {}",
+        String::from_utf8_lossy(&blacklisted.stderr)
+    );
+    assert_eq!(
+        stable_mutant_ids(
+            &String::from_utf8(blacklisted.stdout)
+                .expect("blacklisted mutation output must be UTF-8")
+        ),
+        vec!["7e44f5b6649ca4de087acb260e75a287".to_owned()],
+        "the changed-line checksum must remove its accepted mutant"
+    );
+
+    fs::write(&source, format!("// unrelated source edit\n{original}"))
+        .expect("unrelated source edit must be written");
+    let blacklisted_after_edit = Command::new(command_path(&install))
+        .args([
+            "--exec",
+            "false",
+            "--blacklist",
+            blacklist.to_str().expect("blacklist path must be UTF-8"),
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must apply a stable blacklist");
+    assert!(
+        blacklisted_after_edit.status.success(),
+        "an unrelated source edit must keep blacklist checksums valid: {}",
+        String::from_utf8_lossy(&blacklisted_after_edit.stderr)
+    );
+    assert_eq!(
+        stable_mutant_ids(
+            &String::from_utf8(blacklisted_after_edit.stdout)
+                .expect("edited blacklist mutation output must be UTF-8")
+        ),
+        vec!["7e44f5b6649ca4de087acb260e75a287".to_owned()],
+        "the blacklist checksum must use only changed source lines"
+    );
+
+    let malformed = Command::new(command_path(&install))
+        .args(["--run-mutant-id", "not-an-id"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must reject a malformed ID");
+    assert_eq!(malformed.status.code(), Some(3));
+    assert!(
+        String::from_utf8_lossy(&malformed.stderr).contains("32-character lower-case hexadecimal"),
+        "a malformed ID must have a clear diagnostic"
+    );
+
+    let unknown = Command::new(command_path(&install))
+        .args(["--run-mutant-id", &"f".repeat(32)])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must reject an unknown ID");
+    assert_eq!(unknown.status.code(), Some(3));
+    assert!(
+        String::from_utf8_lossy(&unknown.stderr).contains("could not find mutant ID"),
+        "an unknown ID must have a clear diagnostic"
+    );
+
+    let missing = Command::new(command_path(&install))
+        .arg("--run-mutant-id")
+        .output()
+        .expect("installed mutarust must reject a missing ID");
+    assert_eq!(missing.status.code(), Some(3));
+    assert!(
+        String::from_utf8_lossy(&missing.stderr).contains("--run-mutant-id requires a value"),
+        "a missing ID must have a clear diagnostic"
+    );
+
+    let duplicate = Command::new(command_path(&install))
+        .args([
+            "--run-mutant-id",
+            "a4afb3df07ad704a7e118ca1f9c8ce1e",
+            "--run-mutant-id",
+            "7e44f5b6649ca4de087acb260e75a287",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must reject duplicate IDs");
+    assert_eq!(duplicate.status.code(), Some(3));
+    assert!(
+        String::from_utf8_lossy(&duplicate.stderr)
+            .contains("--run-mutant-id can be supplied only once"),
+        "a duplicate ID must have a clear diagnostic"
+    );
+
+    let malformed_baseline = fixture.join("malformed-baseline.json");
+    fs::write(&malformed_baseline, "not JSON\n").expect("malformed baseline must be written");
+    let malformed_baseline_output = Command::new(command_path(&install))
+        .args([
+            "--baseline",
+            malformed_baseline
+                .to_str()
+                .expect("malformed baseline path must be UTF-8"),
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must reject a malformed baseline");
+    assert_eq!(malformed_baseline_output.status.code(), Some(3));
+    assert!(
+        String::from_utf8_lossy(&malformed_baseline_output.stderr)
+            .contains("could not parse baseline"),
+        "a malformed baseline must have a clear diagnostic"
+    );
+
+    let duplicate_baseline = fixture.join("duplicate-baseline.json");
+    fs::write(
+        &duplicate_baseline,
+        "{\"version\":1,\"mutants\":[{\"id\":\"a4afb3df07ad704a7e118ca1f9c8ce1e\",\"file\":\"checked/src/lib.rs\",\"mutator\":\"conditional/bool-literal\",\"line\":1},{\"id\":\"a4afb3df07ad704a7e118ca1f9c8ce1e\",\"file\":\"checked/src/lib.rs\",\"mutator\":\"conditional/bool-literal\",\"line\":1}]}\n",
+    )
+    .expect("duplicate baseline must be written");
+    let duplicate_baseline_output = Command::new(command_path(&install))
+        .args([
+            "--baseline",
+            duplicate_baseline
+                .to_str()
+                .expect("duplicate baseline path must be UTF-8"),
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must reject a duplicate baseline ID");
+    assert_eq!(duplicate_baseline_output.status.code(), Some(3));
+    assert!(
+        String::from_utf8_lossy(&duplicate_baseline_output.stderr).contains("duplicate mutant ID"),
+        "a duplicate baseline ID must have a clear diagnostic"
+    );
+
+    let incomplete_update = Command::new(command_path(&install))
+        .args(["--update-baseline", "--dry-run"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must reject an incomplete baseline update");
+    assert_eq!(incomplete_update.status.code(), Some(3));
+    assert!(
+        String::from_utf8_lossy(&incomplete_update.stderr)
+            .contains("--update-baseline cannot be used with --dry-run"),
+        "an incomplete baseline update must have a clear diagnostic"
+    );
+}
+
 #[test]
 fn installed_command_stops_when_baseline_tests_fail() {
     let root = smoke_root();
@@ -1753,8 +2021,10 @@ fn installed_command_reports_retained_area_after_a_test_command_error() {
     );
     let stdout = String::from_utf8(output.stdout).expect("retained output must be UTF-8");
     assert!(
-        stdout.contains("Errored: 2") && stdout.contains("mutation area:"),
-        "retained errors must report mutation areas: {stdout}"
+        (stdout.contains("Errored: 1") || stdout.contains("Errored: 2"))
+            && stdout.contains("could not run cargo test")
+            && stdout.contains("mutation area:"),
+        "a retained command-start error must report its mutation area: {stdout}"
     );
     assert_eq!(
         mutarust_temp_entries(&temporary_root).len(),

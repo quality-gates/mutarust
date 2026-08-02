@@ -78,6 +78,41 @@ Use `--run-mutant-id ID` to run one stable mutant ID. This mode prints only
 the selected mutant evidence. It does not print the normal summary or apply
 score gates.
 
+## Accepted Mutants
+
+Use `--update-baseline` to write the escaped mutants from the current run to
+`mutarust-baseline.json`. Use `--baseline FILE` to set another baseline path.
+A missing baseline file accepts no escaped mutants. A baseline file has a
+format that is compatible with Mutago:
+
+```json
+{
+  "version": 1,
+  "mutants": [
+    {
+      "id": "a4afb3df07ad704a7e118ca1f9c8ce1e",
+      "file": "checked/src/lib.rs",
+      "mutator": "conditional/bool-literal",
+      "line": 1
+    }
+  ]
+}
+```
+
+Use `--fail-on-escaped` to return exit value 4 only when an escaped stable
+mutant ID is not in the baseline. Known escaped mutants remain visible in the
+normal result output. An update writes the full current escaped set and exits
+successfully before normal output and score gates.
+`--update-baseline` cannot be used with `--dry-run`, `--no-exec`, or
+`--run-mutant-id`, because these modes do not produce a full escaped set.
+
+Use `--blacklist FILE` one or more times to read accepted mutation checksums.
+Each non-empty file line is one 32-character lower-case hexadecimal checksum.
+Mutarust does not run a matching mutant. The checksum uses only the changed
+source lines, not the source path, mutator name, or line number. A checksum
+therefore remains valid after unrelated source edits. Baseline, blacklist, and
+one-mutant options are command options. They are not YAML policy fields.
+
 Use `--match REGEXP` to limit mutations to functions with matching names. Use
 `--config FILE` with `exclude_dirs` and `ignore_source_lines` to limit source
 scope. See the [configuration guide](config.md#source-selection) for these

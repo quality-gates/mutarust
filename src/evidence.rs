@@ -1,11 +1,13 @@
 use std::path::{Path, PathBuf};
 
 use crate::Mutation;
+use crate::blacklist::MutationChecksum;
 
 pub(crate) struct MutationEvidence {
     pub(crate) source: PathBuf,
     pub(crate) line: usize,
     pub(crate) stable_id: StableMutantId,
+    pub(crate) blacklist_checksum: MutationChecksum,
     pub(crate) diff: String,
 }
 
@@ -53,11 +55,13 @@ pub(crate) fn mutation_evidence(
     let source_name = portable_path(&source);
     let changes = changed_lines(text, mutation);
     let stable_id = stable_mutant_id(&source_name, mutator, &changes);
+    let blacklist_checksum = blacklist_checksum(&changes);
     let diff = unified_diff(&source_name, &changes);
     Ok(MutationEvidence {
         source,
         line: changes.first_line,
         stable_id,
+        blacklist_checksum,
         diff,
     })
 }
@@ -115,6 +119,21 @@ fn stable_mutant_id(source: &str, mutator: &str, changes: &ChangedLines) -> Stab
         "{:x}",
         md5::compute(format!("{source}\0{mutator}\0{before}\0{after}"))
     ))
+}
+
+fn blacklist_checksum(changes: &ChangedLines) -> MutationChecksum {
+    let mut content = String::new();
+    append_checksum_lines(&mut content, '-', &changes.before);
+    append_checksum_lines(&mut content, '+', &changes.after);
+    MutationChecksum::from_changed_lines(content)
+}
+
+fn append_checksum_lines(content: &mut String, marker: char, lines: &[String]) {
+    for line in lines {
+        content.push(marker);
+        content.push_str(line.trim_end_matches('\n'));
+        content.push('\n');
+    }
 }
 
 fn source_lines(lines: &[String]) -> String {
