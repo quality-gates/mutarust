@@ -79,7 +79,7 @@ fn print_help() -> io::Result<()> {
     )?;
     writeln!(
         stdout,
-        "\nOptions:\n  -h, --help           Print help\n  -V, --version        Print version\n      --config FILE     Read mutation policy from a YAML file\n      --list-files      List selected Rust production source files\n      --print-ast       Print the parsed Rust syntax for selected sources\n      --list-mutators   List available mutators\n      --exec COMMAND    Run a custom command for each mutant\n      --exec-timeout    Stop each test command after this many seconds\n      --timeout         Alias for --exec-timeout\n      --timeout-coefficient FACTOR  Set an adaptive Cargo timeout\n      --test-flags FLAGS  Add shell-quoted Cargo test flags\n      --test-recursive  Select all Cargo workspace packages\n      --workers COUNT   Run this many Cargo mutation jobs\n      --dry-run         List mutants without writing files or running tests\n      --no-exec         Write mutants without running tests\n      --do-not-remove-tmp-folder  Keep mutation workspaces\n      --match REGEXP    Mutate only functions with matching names\n      --verbose         Tell a custom command to produce verbose output\n      --debug           Tell a custom command to produce debug output\n      --silent          Hide mutant status output\n      --no-silent       Print mutant status output\n      --quiet           Show only escaped mutants\n      --output-statuses LETTERS  Show only these states: k e s n x\n      --no-diffs        Hide escaped-mutant source diffs\n      --logger-summary-json  Write compact scores to mutarust-summary.json\n      --blacklist FILE  Read accepted mutation checksums\n      --baseline FILE   Read escaped-mutant IDs; default mutarust-baseline.json\n      --update-baseline Write current escaped-mutant IDs and exit\n      --fail-on-escaped Fail only for escaped IDs outside the baseline\n      --run-mutant-id ID  Run one mutant without score gates\n      --min-msi         Set the minimum mutation score percentage\n      --min-covered-msi Set the minimum covered-code score percentage\n      --enable NAME     Select a mutator name or group pattern\n      --disable NAME    Disable a mutator name or group pattern"
+        "\nOptions:\n  -h, --help           Print help\n  -V, --version        Print version\n      --config FILE     Read mutation policy from a YAML file\n      --list-files      List selected Rust production source files\n      --print-ast       Print the parsed Rust syntax for selected sources\n      --list-mutators   List available mutators\n      --exec COMMAND    Run a custom command for each mutant\n      --exec-timeout    Stop each test command after this many seconds\n      --timeout         Alias for --exec-timeout\n      --timeout-coefficient FACTOR  Set an adaptive Cargo timeout\n      --test-flags FLAGS  Add shell-quoted Cargo test flags\n      --test-recursive  Select all Cargo workspace packages\n      --workers COUNT   Run this many Cargo mutation jobs\n      --dry-run         List mutants without writing files or running tests\n      --no-exec         Write mutants without running tests\n      --do-not-remove-tmp-folder  Keep mutation workspaces\n      --match REGEXP    Mutate only functions with matching names\n      --verbose         Print mutation location and worker count\n      --debug           Print verbose details plus mutator and test command\n      --silent          Hide mutant status output\n      --no-silent       Print mutant status output\n      --quiet           Show only escaped mutants\n      --output-statuses LETTERS  Show only these states: k e s n x\n      --no-diffs        Hide escaped-mutant source diffs\n      --logger-summary-json  Write compact scores to mutarust-summary.json\n      --blacklist FILE  Read accepted mutation checksums\n      --baseline FILE   Read escaped-mutant IDs; default mutarust-baseline.json\n      --update-baseline Write current escaped-mutant IDs and exit\n      --fail-on-escaped Fail only for escaped IDs outside the baseline\n      --run-mutant-id ID  Run one mutant without score gates\n      --min-msi         Set the minimum mutation score percentage\n      --min-covered-msi Set the minimum covered-code score percentage\n      --enable NAME     Select a mutator name or group pattern\n      --disable NAME    Disable a mutator name or group pattern"
     )?;
     writeln!(
         stdout,
@@ -637,11 +637,15 @@ fn execution_controls(command: &RunCommand, silent_mode: bool) -> ExecutionContr
         },
         blacklist_files: command.execution.blacklist_files.clone(),
         progress: progress_enabled(command, silent_mode),
-        filter: DisplayFilter {
-            silent: silent_mode,
-            quiet: command.output.quiet,
-            output_statuses: command.output.output_statuses.clone(),
-        },
+        filter: display_filter(command, silent_mode),
+    }
+}
+
+fn display_filter(command: &RunCommand, silent_mode: bool) -> DisplayFilter {
+    DisplayFilter {
+        silent: silent_mode,
+        quiet: command.output.quiet,
+        output_statuses: command.output.output_statuses.clone(),
     }
 }
 
@@ -702,11 +706,7 @@ fn finish_mutation_run(
     let one_mutant = command.run_mutant_id.is_some();
     print_mutation_results(
         run,
-        DisplayFilter {
-            silent: configuration.silent_mode,
-            quiet: command.output.quiet,
-            output_statuses: command.output.output_statuses.clone(),
-        },
+        display_filter(command, configuration.silent_mode),
         command.output.no_diffs,
         one_mutant,
     )?;

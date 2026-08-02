@@ -290,6 +290,24 @@ impl TestExecution {
     fn uses_cargo(&self) -> bool {
         matches!(self.command, TestCommand::Cargo)
     }
+
+    /// Describes the configured command for a diagnostic message.
+    ///
+    /// Reports only the configured program and arguments, never the process
+    /// environment, since inherited environment variables may hold secrets.
+    fn command_description(&self) -> String {
+        match &self.command {
+            TestCommand::Cargo => {
+                let mut parts = vec!["cargo".to_owned(), "test".to_owned()];
+                if self.recursive {
+                    parts.push("--workspace".to_owned());
+                }
+                parts.extend(self.cargo_flags.iter().cloned());
+                parts.join(" ")
+            }
+            TestCommand::Custom(command) => command.arguments.join(" "),
+        }
+    }
 }
 
 /// Execution controls that apply to a complete mutation run.
@@ -400,19 +418,6 @@ impl Default for WorkerLimit {
 enum TestCommand {
     Cargo,
     Custom(CustomCommand),
-}
-
-impl TestCommand {
-    /// Describes the configured command for a diagnostic message.
-    ///
-    /// Reports only the configured program and arguments, never the process
-    /// environment, since inherited environment variables may hold secrets.
-    fn description(&self) -> String {
-        match self {
-            Self::Cargo => "cargo test".to_owned(),
-            Self::Custom(command) => command.arguments.join(" "),
-        }
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -2318,7 +2323,7 @@ fn log_candidate_start(execution: &TestExecution, candidate: &MutationCandidate)
     ));
     if execution.debug {
         print_diagnostic(format_args!("Mutator {}", candidate.mutator));
-        print_diagnostic(format_args!("Run {}", execution.command.description()));
+        print_diagnostic(format_args!("Run {}", execution.command_description()));
     }
 }
 

@@ -104,6 +104,7 @@ fn run_ticker(counters: &ProgressCounters, stop: &AtomicBool) {
         let _ = write_progress_line(&mut stderr, counters);
     }
     let _ = write!(stderr, "\r\x1b[K");
+    let _ = stderr.flush();
 }
 
 fn write_progress_line(out: &mut impl Write, counters: &ProgressCounters) -> io::Result<()> {
@@ -117,7 +118,8 @@ fn write_progress_line(out: &mut impl Write, counters: &ProgressCounters) -> io:
         snapshot.skipped,
         snapshot.not_covered,
         snapshot.errored
-    )
+    )?;
+    out.flush()
 }
 
 #[cfg(test)]
