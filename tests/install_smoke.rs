@@ -1886,6 +1886,18 @@ fn installed_command_rejects_incompatible_execution_controls() {
             vec!["--dry-run", "--workers", "2"],
             "--dry-run cannot be used with --workers",
         ),
+        (
+            vec!["--dry-run", "--coverage"],
+            "--dry-run cannot be used with --coverage",
+        ),
+        (
+            vec!["--no-exec", "--per-test"],
+            "--per-test cannot be used with --no-exec",
+        ),
+        (
+            vec!["--exec", "true", "--coverage"],
+            "--coverage requires the Cargo test command",
+        ),
     ] {
         let output = Command::new(command_path(&install))
             .args(arguments)
@@ -1897,6 +1909,241 @@ fn installed_command_rejects_incompatible_execution_controls() {
             "control error must explain the invalid combination"
         );
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn installed_command_collects_coverage_and_selects_covering_tests() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_coverage_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    let source_before = fs::read(&source).expect("coverage fixture source must be readable");
+    let fake_cargo = root.join("coverage-cargo");
+    let record = root.join("coverage-test-record");
+    let temporary_root = root.join("coverage-temporary");
+    fs::create_dir(&temporary_root).expect("coverage temporary root must be created");
+    fs::write(
+        &fake_cargo,
+        "#!/bin/sh\nif [ \"$1\" = \"metadata\" ]; then\n  exec \"$MUTARUST_REAL_CARGO\" \"$@\"\nfi\nif [ \"$1\" = \"llvm-cov\" ]; then\n  output=\n  while [ \"$#\" -gt 0 ]; do\n    if [ \"$1\" = \"--output-path\" ]; then\n      output=$2\n      break\n    fi\n    shift\n  done\n  if [ \"$MUTARUST_COVERAGE_MODE\" = \"missing\" ]; then\n    exit 0\n  fi\n  if [ \"$MUTARUST_COVERAGE_MODE\" = \"invalid\" ]; then\n    printf 'SF:%s\\nDA:zero,one\\nend_of_record\\n' \"$MUTARUST_COVERAGE_SOURCE\" > \"$output\"\n    exit 0\n  fi\n  case \" $* \" in\n    *\" --exact detects_detected \"*) data='DA:1,1' ;;\n    *\" --exact detects_escaped \"*) data='DA:2,1' ;;\n    *) data='DA:1,1\\nDA:2,1\\nDA:3,0' ;;\n  esac\n  printf 'SF:%s\\n%b\\nend_of_record\\n' \"$MUTARUST_COVERAGE_SOURCE\" \"$data\" > \"$output\"\n  exit 0\nfi\ncase \" $* \" in\n  *\" --list \"*) printf 'detects_detected: test\\ndetects_escaped: test\\n'; exit 0 ;;\nesac\nif ! grep -q false checked/src/lib.rs 2>/dev/null; then\n  exit 0\nfi\nif grep -q 'pub fn detected() -> bool { false }' checked/src/lib.rs; then\n  mutant=detected\nelif grep -q 'pub fn escaped() -> bool { false }' checked/src/lib.rs; then\n  mutant=escaped\nelif grep -q 'pub fn uncovered() -> bool { false }' checked/src/lib.rs; then\n  mutant=uncovered\nelse\n  exit 94\nfi\nprintf '%s|%s\\n' \"$mutant\" \"$*\" >> \"$MUTARUST_COVERAGE_RECORD\"\ncase \" $* \" in\n  *\" --no-run \"*) exit 0 ;;\n  *\" --exact detects_detected \"*) exit 1 ;;\n  *\" --exact detects_escaped \"*) exit 0 ;;\n  *) exit 93 ;;\nesac\n",
+    )
+    .expect("coverage Cargo command must be written");
+    fs::set_permissions(&fake_cargo, fs::Permissions::from_mode(0o755))
+        .expect("coverage Cargo command must be executable");
+
+    let output = Command::new(command_path(&install))
+        .args(["--coverage", "--per-test", "--workers", "1"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .env("CARGO", &fake_cargo)
+        .env("MUTARUST_REAL_CARGO", env!("CARGO"))
+        .env("MUTARUST_COVERAGE_SOURCE", &source)
+        .env("MUTARUST_COVERAGE_RECORD", &record)
+        .env("TMPDIR", &temporary_root)
+        .output()
+        .expect("installed mutarust must collect coverage");
+
+    assert!(
+        output.status.success(),
+        "coverage mutation run must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("coverage output must be UTF-8");
+    assert!(
+        stdout.contains("Killed: 1")
+            && stdout.contains("Escaped: 1")
+            && stdout.contains("Not covered: 1")
+            && stdout.contains("Mutation score: 33.33%")
+            && stdout.contains("Covered-code mutation score: 50.00%"),
+        "coverage results must keep total and covered scores separate: {stdout}"
+    );
+    let records = fs::read_to_string(&record).expect("selected test records must exist");
+    assert!(
+        records.contains("detected|")
+            && records.contains("--exact detects_detected")
+            && records.contains("escaped|")
+            && records.contains("--exact detects_escaped")
+            && !records.contains("uncovered|"),
+        "only mapped covered tests must run: {records}"
+    );
+    assert_eq!(fs::read(&source).unwrap(), source_before);
+    assert!(
+        mutarust_temp_entries(&temporary_root).is_empty(),
+        "coverage and mutation temporary data must be removed"
+    );
+
+    let failed_gate = Command::new(command_path(&install))
+        .args(["--coverage", "--per-test", "--min-covered-msi", "51"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .env("CARGO", &fake_cargo)
+        .env("MUTARUST_REAL_CARGO", env!("CARGO"))
+        .env("MUTARUST_COVERAGE_SOURCE", &source)
+        .env("MUTARUST_COVERAGE_RECORD", &record)
+        .env("TMPDIR", &temporary_root)
+        .output()
+        .expect("installed mutarust must check covered score");
+    assert_eq!(failed_gate.status.code(), Some(4));
+    assert!(
+        String::from_utf8_lossy(&failed_gate.stderr).contains("covered-code mutation score"),
+        "covered score gate must explain failure"
+    );
+
+    let _ = fs::remove_file(&record);
+    let invalid = Command::new(command_path(&install))
+        .arg("--coverage")
+        .arg(&source)
+        .current_dir(&fixture)
+        .env("CARGO", &fake_cargo)
+        .env("MUTARUST_REAL_CARGO", env!("CARGO"))
+        .env("MUTARUST_COVERAGE_MODE", "invalid")
+        .env("MUTARUST_COVERAGE_SOURCE", &source)
+        .env("MUTARUST_COVERAGE_RECORD", &record)
+        .env("TMPDIR", &temporary_root)
+        .output()
+        .expect("installed mutarust must reject invalid coverage");
+    assert_eq!(invalid.status.code(), Some(3));
+    assert!(
+        String::from_utf8_lossy(&invalid.stderr).contains("LLVM coverage"),
+        "invalid coverage must have a clear diagnostic"
+    );
+    assert!(
+        !record.exists(),
+        "invalid coverage must stop before any mutant test can escape"
+    );
+    assert!(mutarust_temp_entries(&temporary_root).is_empty());
+
+    let missing = Command::new(command_path(&install))
+        .arg("--coverage")
+        .arg(&source)
+        .current_dir(&fixture)
+        .env("CARGO", &fake_cargo)
+        .env("MUTARUST_REAL_CARGO", env!("CARGO"))
+        .env("MUTARUST_COVERAGE_MODE", "missing")
+        .env("MUTARUST_COVERAGE_SOURCE", &source)
+        .env("MUTARUST_COVERAGE_RECORD", &record)
+        .env("TMPDIR", &temporary_root)
+        .output()
+        .expect("installed mutarust must reject missing coverage");
+    assert_eq!(missing.status.code(), Some(3));
+    assert!(
+        String::from_utf8_lossy(&missing.stderr).contains("could not read LLVM coverage data"),
+        "missing coverage must have a clear diagnostic"
+    );
+    assert!(!record.exists());
+    assert!(mutarust_temp_entries(&temporary_root).is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn installed_command_isolates_full_and_per_test_coverage() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_shared_coverage_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    let source_before = fs::read(&source).expect("shared coverage source must be readable");
+    let fake_cargo = root.join("shared-coverage-cargo");
+    let record = root.join("shared-coverage-record");
+    let temporary_root = root.join("shared-coverage-temporary");
+    fs::create_dir(&temporary_root).expect("shared coverage temporary root must be created");
+    fs::write(
+        &fake_cargo,
+        "#!/bin/sh\nif [ \"$1\" = \"metadata\" ]; then\n  exec \"$MUTARUST_REAL_CARGO\" \"$@\"\nfi\nall=\"$*\"\nif [ \"$1\" = \"llvm-cov\" ]; then\n  case \" $all \" in\n    *\" --exact \"*) [ \"$2\" = test ] || exit 95 ;;\n  esac\n  output=\n  while [ \"$#\" -gt 0 ]; do\n    if [ \"$1\" = \"--output-path\" ]; then\n      output=$2\n      break\n    fi\n    shift\n  done\n  touch Cargo.lock\n  case \" $all \" in\n    *\" --test left \"*\" --exact shared \"*) data='DA:1,1' ;;\n    *\" --test right \"*\" --exact shared \"*) data='DA:2,1' ;;\n    *\" --exact detects_left \"*) data='DA:3,1' ;;\n    *\" --exact detects_right \"*) data='DA:3,1' ;;\n    *) data='DA:1,1\\nDA:2,1\\nDA:3,1' ;;\n  esac\n  printf 'SF:%s\\n%b\\nend_of_record\\n' \"$MUTARUST_COVERAGE_SOURCE\" \"$data\" > \"$output\"\n  exit 0\nfi\ncase \" $all \" in\n  *\" --test left \"*\" --list \"*) printf 'shared: test\\ndetects_left: test\\n'; exit 0 ;;\n  *\" --test right \"*\" --list \"*) printf 'shared: test\\ndetects_right: test\\n'; exit 0 ;;\n  *\" --list \"*) exit 0 ;;\nesac\ncase \" $all \" in\n  *\" --no-run \"*) exit 0 ;;\nesac\nif grep -q 'pub fn first() -> bool { false }' checked/src/lib.rs; then\n  mutant=first\nelif grep -q 'pub fn second() -> bool { false }' checked/src/lib.rs; then\n  mutant=second\nelif grep -q 'pub fn shared() -> bool { false }' checked/src/lib.rs; then\n  mutant=shared\nelse\n  exit 94\nfi\nprintf '%s|%s\\n' \"$mutant\" \"$all\" >> \"$MUTARUST_COVERAGE_RECORD\"\ncase \"$mutant|$all\" in\n  first*\" --test left \"*\" --exact shared \"*) exit 1 ;;\n  second*\" --test right \"*\" --exact shared \"*) exit 1 ;;\n  shared*\" --exact detects_left \"*) exit 0 ;;\n  shared*\" --exact detects_right \"*) exit 0 ;;\n  *) exit 93 ;;\nesac\n",
+    )
+    .expect("shared coverage Cargo command must be written");
+    let fake_cargo_script =
+        fs::read_to_string(&fake_cargo).expect("shared coverage Cargo command must be readable");
+    let fake_cargo_script = fake_cargo_script
+        .replacen(
+            "if grep -q 'pub fn first() -> bool { false }' checked/src/lib.rs; then",
+            "case \" $all \" in\n  *\" --exact \"*) ;;\n  *) exit 0 ;;\nesac\nif grep -q 'pub fn first() -> bool { false }' checked/src/lib.rs; then",
+            1,
+        )
+        .replace(
+            "shared*\" --exact detects_left \"*)",
+            "shared*\" --exact detects_left\"*)",
+        )
+        .replace(
+            "shared*\" --exact detects_right \"*)",
+            "shared*\" --exact detects_right\"*)",
+        );
+    fs::write(&fake_cargo, fake_cargo_script)
+        .expect("shared coverage Cargo command must accept the clean test");
+    fs::set_permissions(&fake_cargo, fs::Permissions::from_mode(0o755))
+        .expect("shared coverage Cargo command must be executable");
+
+    let output = Command::new(command_path(&install))
+        .args(["--coverage", "--per-test", "--workers", "1"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .env("CARGO", &fake_cargo)
+        .env("MUTARUST_REAL_CARGO", env!("CARGO"))
+        .env("MUTARUST_COVERAGE_SOURCE", &source)
+        .env("MUTARUST_COVERAGE_RECORD", &record)
+        .env("TMPDIR", &temporary_root)
+        .output()
+        .expect("installed mutarust must collect isolated shared coverage");
+
+    assert!(
+        output.status.success(),
+        "shared coverage run must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("shared coverage output must be UTF-8");
+    assert!(
+        stdout.contains("Killed: 2")
+            && stdout.contains("Escaped: 1")
+            && stdout.contains("Not covered: 0")
+            && stdout.contains("Mutation score: 66.67%")
+            && stdout.contains("Covered-code mutation score: 66.67%"),
+        "fully covered source must keep both scores: {stdout}"
+    );
+    let records = fs::read_to_string(&record).expect("shared coverage records must exist");
+    let first = coverage_record(&records, "first");
+    let second = coverage_record(&records, "second");
+    let shared = records
+        .lines()
+        .filter(|line| line.starts_with("shared|"))
+        .collect::<Vec<_>>();
+    assert!(
+        first.contains("--test left")
+            && first.contains("--exact shared")
+            && second.contains("--test right")
+            && second.contains("--exact shared")
+            && shared.len() == 2
+            && shared
+                .iter()
+                .any(|line| line.contains("--exact detects_left"))
+            && shared
+                .iter()
+                .any(|line| line.contains("--exact detects_right")),
+        "per-test coverage must keep duplicate names separate and run all shared coverage tests: {records}"
+    );
+    assert!(
+        !first.contains("--test right") && !second.contains("--test left"),
+        "per-test coverage must not run a duplicate name from another target: {records}"
+    );
+    assert_eq!(fs::read(&source).unwrap(), source_before);
+    assert!(
+        !fixture.join("Cargo.lock").exists(),
+        "coverage collection must not write a lock file in the user workspace"
+    );
+    assert!(
+        mutarust_temp_entries(&temporary_root).is_empty(),
+        "isolated coverage data must be removed"
+    );
+}
+
+#[cfg(unix)]
+fn coverage_record<'a>(records: &'a str, mutant: &str) -> &'a str {
+    records
+        .lines()
+        .find(|line| line.starts_with(&format!("{mutant}|")))
+        .expect("coverage test record must exist")
 }
 
 #[cfg(unix)]
@@ -3219,6 +3466,64 @@ fn write_mutation_fixture(root: &Path) -> PathBuf {
         "#[test]\nfn is_unrelated_and_failing() {\n    assert!(false);\n}\n",
     )
     .expect("other mutation fixture test must be written");
+    fixture
+}
+
+fn write_coverage_fixture(root: &Path) -> PathBuf {
+    let fixture = root.join("coverage-fixture");
+    let package = fixture.join("checked");
+    fs::create_dir_all(package.join("src"))
+        .expect("coverage fixture source directory must be created");
+    fs::write(
+        fixture.join("Cargo.toml"),
+        "[workspace]\nmembers = [\"checked\"]\nresolver = \"2\"\n",
+    )
+    .expect("coverage fixture workspace manifest must be written");
+    fs::write(
+        package.join("Cargo.toml"),
+        "[package]\nname = \"coverage-checked\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .expect("coverage fixture package manifest must be written");
+    fs::write(
+        package.join("src").join("lib.rs"),
+        "pub fn detected() -> bool { true }\npub fn escaped() -> bool { true }\npub fn uncovered() -> bool { true }\n",
+    )
+    .expect("coverage fixture source must be written");
+    fixture
+}
+
+fn write_shared_coverage_fixture(root: &Path) -> PathBuf {
+    let fixture = root.join("shared-coverage-fixture");
+    let package = fixture.join("checked");
+    fs::create_dir_all(package.join("src"))
+        .expect("shared coverage fixture source directory must be created");
+    fs::create_dir_all(package.join("tests"))
+        .expect("shared coverage fixture test directory must be created");
+    fs::write(
+        fixture.join("Cargo.toml"),
+        "[workspace]\nmembers = [\"checked\"]\nresolver = \"2\"\n",
+    )
+    .expect("shared coverage fixture workspace manifest must be written");
+    fs::write(
+        package.join("Cargo.toml"),
+        "[package]\nname = \"shared-coverage-checked\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .expect("shared coverage fixture package manifest must be written");
+    fs::write(
+        package.join("src").join("lib.rs"),
+        "pub fn first() -> bool { true }\npub fn second() -> bool { true }\npub fn shared() -> bool { true }\n",
+    )
+    .expect("shared coverage fixture source must be written");
+    fs::write(
+        package.join("tests").join("left.rs"),
+        "#[test]\nfn shared() {}\n",
+    )
+    .expect("shared coverage left test must be written");
+    fs::write(
+        package.join("tests").join("right.rs"),
+        "#[test]\nfn shared() {}\n",
+    )
+    .expect("shared coverage right test must be written");
     fixture
 }
 

@@ -15,9 +15,9 @@ Schema is [schema/mutarust.schema.json](../schema/mutarust.schema.json).
 
 All fields are optional. A Boolean field defaults to `false`. An omitted score
 has no score gate. An omitted list is empty. The current command uses silent
-mode, mutator selection, source selection, and the total-score policy. Later
-feature changes use the stored report and covered-score settings. The command
-does not silently change a user setting to a different value.
+mode, mutator selection, source selection, total-score policy, and
+covered-score policy. The command does not silently change a user setting to a
+different value.
 
 | Field | Type | Purpose |
 | --- | --- | --- |
@@ -52,8 +52,9 @@ to `disable_mutators`; it does not replace that list. Do not use `--silent`
 and `--no-silent` together.
 
 Mutarust checks the total-score policy after a normal mutation run. A result
-below `min_msi` returns exit value 4. The covered-score policy takes effect
-with the later coverage feature.
+below `min_msi` returns exit value 4. With `--coverage`, Mutarust also checks
+the covered-score policy after the total-score policy. A positive
+`min_covered_msi` without `--coverage` returns exit value 4.
 
 ## Source Selection
 

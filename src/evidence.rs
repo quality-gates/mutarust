@@ -4,6 +4,7 @@ use crate::Mutation;
 
 pub(crate) struct MutationEvidence {
     pub(crate) source: PathBuf,
+    pub(crate) line: usize,
     pub(crate) stable_id: StableMutantId,
     pub(crate) diff: String,
 }
@@ -55,6 +56,7 @@ pub(crate) fn mutation_evidence(
     let diff = unified_diff(&source_name, &changes);
     Ok(MutationEvidence {
         source,
+        line: changes.first_line,
         stable_id,
         diff,
     })
