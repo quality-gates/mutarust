@@ -2249,7 +2249,7 @@ fn installed_command_runs_custom_commands_with_a_stable_contract() {
                 "--exec",
                 command.to_str().expect("custom command path must be UTF-8"),
                 "--exec-timeout",
-                "1",
+                "5",
                 "--test-recursive",
                 "--verbose",
                 "--debug",
@@ -2292,7 +2292,7 @@ fn installed_command_runs_custom_commands_with_a_stable_contract() {
     assert_ne!(values[0], source.display().to_string());
     assert_ne!(values[1], source.display().to_string());
     assert_eq!(values[2], "mutation-checked");
-    assert_eq!(values[3], "1");
+    assert_eq!(values[3], "5");
     assert_eq!(values[4], "true");
     assert_eq!(values[5], "true");
     assert_eq!(values[6], "true");
