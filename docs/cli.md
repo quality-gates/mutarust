@@ -83,6 +83,27 @@ Use `--match REGEXP` to limit mutations to functions with matching names. Use
 scope. See the [configuration guide](config.md#source-selection) for these
 rules and for the file-local mutation-disable annotations.
 
+## Git Changed-Line Selection
+
+Use `--git-diff-lines` to mutate only production source lines changed from a
+Git comparison base. Mutarust compares the base with the current work tree. It
+includes committed, staged, and unstaged tracked changes. It selects lines in
+added Rust source files and changed lines in renamed Rust source files. An
+untracked file and a pure rename have no Git changed-line scope. It does not
+select deleted lines.
+
+Use `--git-diff-base REF` to set the base ref. This option requires
+`--git-diff-lines`. Without this option, Mutarust uses the default branch from
+`origin/HEAD`. If Git has no `origin/HEAD`, Mutarust uses `master`. Mutarust
+stops with an error if it cannot find the Git repository, resolve the base ref,
+or read the Git comparison. It does not use a wider source scope after a Git
+error. Each selected source must be inside that Git repository.
+
+If the current branch and the base branch have a merge base, Mutarust compares
+that merge base with the current work tree. If they have no merge base,
+Mutarust compares the base ref directly. A run with no changed mutable lines
+succeeds. It reports zero mutants and does not run tests.
+
 ## Execution Modes and Cargo Controls
 
 Use `--dry-run` to list the selected mutant count without writing mutation

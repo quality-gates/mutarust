@@ -5,8 +5,8 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use mutarust::{
-    CommandSettings, Configuration, CoverageControls, ExecutionControls, Registry, TestExecution,
-    WorkerLimit,
+    CommandSettings, Configuration, CoverageControls, ExecutionControls, GitDiffControls, Registry,
+    TestExecution, WorkerLimit,
 };
 
 fn main() -> ExitCode {
@@ -56,7 +56,7 @@ fn print_help() -> io::Result<()> {
     )?;
     writeln!(
         stdout,
-        "      --coverage        Collect LLVM line coverage before mutation\n      --per-test        Run mapped tests for each covered mutant"
+        "      --coverage        Collect LLVM line coverage before mutation\n      --per-test        Run mapped tests for each covered mutant\n      --git-diff-lines  Mutate Git changed lines only\n      --git-diff-base REF  Set Git base; default origin/HEAD, then master"
     )
 }
 
@@ -136,6 +136,7 @@ fn parse_value_option(
         "--workers" => value().and_then(|value| set_workers(command, value)),
         "--test-flags" => value().and_then(|value| set_test_flags(command, value)),
         "--exec" => value().and_then(|value| set_custom_command(command, value)),
+        "--git-diff-base" => value().and_then(|value| set_git_diff_base(command, value)),
         _ => return parse_policy_value_option(command, argument, next),
     })
 }
@@ -198,6 +199,7 @@ fn parse_execution_switch(command: &mut RunCommand, argument: &str) -> Option<Re
         "--do-not-remove-tmp-folder" => set_keep_temporary(command),
         "--coverage" => set_coverage(command),
         "--per-test" => set_per_test_coverage(command),
+        "--git-diff-lines" => set_git_diff_lines(command),
         _ => return None,
     })
 }
@@ -205,6 +207,24 @@ fn parse_execution_switch(command: &mut RunCommand, argument: &str) -> Option<Re
 fn set_dry_run(command: &mut RunCommand) -> Result<(), String> {
     command.execution.dry_run = true;
     Ok(())
+}
+
+fn set_git_diff_lines(command: &mut RunCommand) -> Result<(), String> {
+    if command.execution.git_diff_lines {
+        Err("--git-diff-lines can only be used once".to_owned())
+    } else {
+        command.execution.git_diff_lines = true;
+        Ok(())
+    }
+}
+
+fn set_git_diff_base(command: &mut RunCommand, base: String) -> Result<(), String> {
+    if command.execution.git_diff_base.is_some() {
+        Err("--git-diff-base can only be used once".to_owned())
+    } else {
+        command.execution.git_diff_base = Some(base);
+        Ok(())
+    }
 }
 
 fn set_no_exec(command: &mut RunCommand) -> Result<(), String> {
@@ -407,6 +427,10 @@ fn execution_controls(command: &RunCommand) -> ExecutionControls {
         coverage: CoverageControls {
             enabled: command.execution.coverage,
             per_test: command.execution.per_test_coverage,
+        },
+        git_diff: GitDiffControls {
+            enabled: command.execution.git_diff_lines,
+            base: command.execution.git_diff_base.clone(),
         },
     }
 }
@@ -657,6 +681,8 @@ struct ExecutionOptions {
     cargo_flags: Option<Vec<String>>,
     coverage: bool,
     per_test_coverage: bool,
+    git_diff_lines: bool,
+    git_diff_base: Option<String>,
 }
 
 impl Default for RunCommand {
@@ -687,6 +713,7 @@ fn validation_error(command: &RunCommand) -> Option<&'static str> {
         .or_else(|| dry_run_control_error(command))
         .or_else(|| cargo_control_error(command))
         .or_else(|| coverage_control_error(command))
+        .or_else(|| git_diff_control_error(command))
 }
 
 fn dry_run_control_error(command: &RunCommand) -> Option<&'static str> {
@@ -807,4 +834,9 @@ fn coverage_control_error(command: &RunCommand) -> Option<&'static str> {
     ]
     .into_iter()
     .find_map(|(invalid, message)| invalid.then_some(message))
+}
+
+fn git_diff_control_error(command: &RunCommand) -> Option<&'static str> {
+    (!command.execution.git_diff_lines && command.execution.git_diff_base.is_some())
+        .then_some("--git-diff-base requires --git-diff-lines")
 }

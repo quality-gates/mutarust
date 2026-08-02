@@ -18,6 +18,7 @@ use std::sync::atomic::AtomicBool;
 use crate::coverage::{CoverageMap, PerTestCoverageMap, TestIdentity, TestTarget, parse_lcov};
 use crate::evidence::{MutationEvidence, StableMutantId, mutation_evidence};
 use crate::filter::{SourceFilter, SourceFilters};
+use crate::git::ChangedLines;
 use crate::{Mutation, Mutator, Registry, SourceError, find_rust_sources};
 
 static NEXT_TEMPORARY_WORKSPACE: AtomicU64 = AtomicU64::new(0);
@@ -273,7 +274,7 @@ impl TestExecution {
 }
 
 /// Execution controls that apply to a complete mutation run.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct ExecutionControls {
     /// Lists generated mutants without writing files or running tests.
     pub dry_run: bool,
@@ -287,6 +288,17 @@ pub struct ExecutionControls {
     pub workers: WorkerLimit,
     /// Selects LLVM coverage collection and per-test selection.
     pub coverage: CoverageControls,
+    /// Selects mutations from lines changed from a Git comparison base.
+    pub git_diff: GitDiffControls,
+}
+
+/// Git changed-line controls that apply to a complete mutation run.
+#[derive(Clone, Debug, Default)]
+pub struct GitDiffControls {
+    /// Limits mutations to changed production lines.
+    pub enabled: bool,
+    /// Sets the Git base ref. The default is `origin/HEAD`, then `master`.
+    pub base: Option<String>,
 }
 
 /// LLVM coverage controls that apply to a complete mutation run.
@@ -485,8 +497,23 @@ pub fn run_mutation_tests_with_controls(
         .lock()
         .map_err(|_| run_error("could not start mutation run after a previous panic"))?;
     let _interrupt_guard = prepare_interrupt_handling()?;
-    let mut plan = selected_mutation_plan(mutation_plan(targets, registry, filters)?, stable_id)?;
+    let changed_lines = controls
+        .git_diff
+        .enabled
+        .then(|| ChangedLines::load(controls.git_diff.base.as_deref()))
+        .transpose()
+        .map_err(run_error)?;
+    let mut plan = selected_mutation_plan(
+        mutation_plan(targets, registry, filters, changed_lines.as_ref())?,
+        stable_id,
+    )?;
     stop_if_interrupted()?;
+    if controls.git_diff.enabled && plan.candidates.is_empty() {
+        return Ok(MutationRun {
+            results: Vec::new(),
+            has_coverage: false,
+        });
+    }
     if controls.dry_run {
         return Ok(MutationRun {
             results: plan.candidates.iter().map(generated_result).collect(),
@@ -949,7 +976,7 @@ fn test_candidates_in_parallel(
         for _ in 0..workers {
             let candidates = Arc::clone(&candidates);
             let execution = execution.clone();
-            let controls = *controls;
+            let controls = controls.clone();
             handles.push(
                 scope.spawn(move || test_mutation_worker(candidates, timeout, execution, controls)),
             );
@@ -1325,6 +1352,7 @@ fn mutation_plan(
     targets: &[String],
     registry: &Registry,
     filters: &SourceFilters,
+    changed_lines: Option<&ChangedLines>,
 ) -> Result<MutationPlan, RunError> {
     let sources = find_rust_sources(targets).map_err(source_error)?;
     if sources.is_empty() {
@@ -1338,6 +1366,9 @@ fn mutation_plan(
         let source = fs::canonicalize(&source).map_err(|error| {
             run_error(format!("could not resolve {}: {error}", source.display()))
         })?;
+        if let Some(lines) = changed_lines {
+            lines.validate_source(&source).map_err(run_error)?;
+        }
         if !filters.allows_source_before_workspace(&source) {
             continue;
         }
@@ -1349,14 +1380,14 @@ fn mutation_plan(
             .map_err(|error| run_error(format!("could not read {}: {error}", source.display())))?;
         let source_filter = filters.for_source(&source, &text).map_err(run_error)?;
         workspaces.push(workspace.clone());
-        add_source_candidates(
-            &mut candidates,
-            registry,
-            &workspace,
-            &source,
-            &text,
-            &source_filter,
-        )?;
+        let scope = CandidateScope {
+            workspace: &workspace,
+            source: &source,
+            text: &text,
+            filter: &source_filter,
+            changed_lines,
+        };
+        add_source_candidates(&mut candidates, registry, &scope)?;
     }
     deduplicate_candidates(&mut candidates);
     Ok(MutationPlan {
@@ -2034,42 +2065,56 @@ fn source_error(error: SourceError) -> RunError {
     run_error(error.to_string())
 }
 
+struct CandidateScope<'a> {
+    workspace: &'a Workspace,
+    source: &'a Path,
+    text: &'a str,
+    filter: &'a SourceFilter,
+    changed_lines: Option<&'a ChangedLines>,
+}
+
 fn add_source_candidates(
     candidates: &mut Vec<MutationCandidate>,
     registry: &Registry,
-    workspace: &Workspace,
-    source: &Path,
-    text: &str,
-    filter: &SourceFilter,
+    scope: &CandidateScope<'_>,
 ) -> Result<(), RunError> {
     for name in registry.names() {
         let mutator = registry
             .get(name)
             .expect("registered mutator name must resolve to a mutator");
-        add_mutator_candidates(candidates, workspace, source, name, mutator, text, filter)?;
+        add_mutator_candidates(candidates, name, mutator, scope)?;
     }
     Ok(())
 }
 
 fn add_mutator_candidates(
     candidates: &mut Vec<MutationCandidate>,
-    workspace: &Workspace,
-    source: &Path,
     name: &str,
     mutator: &dyn Mutator,
-    text: &str,
-    filter: &SourceFilter,
+    scope: &CandidateScope<'_>,
 ) -> Result<(), RunError> {
-    for mutation in mutator.mutations(text) {
+    for mutation in mutator.mutations(scope.text) {
         let (range, _) = mutation.identity();
-        if !filter.allows_mutation(name, &range) {
+        if !scope.filter.allows_mutation(name, &range) {
             continue;
         }
-        let evidence = mutation_evidence(&workspace.source_root, source, name, &mutation, text)
-            .map_err(run_error)?;
+        let evidence = mutation_evidence(
+            &scope.workspace.source_root,
+            scope.source,
+            name,
+            &mutation,
+            scope.text,
+        )
+        .map_err(run_error)?;
+        if scope
+            .changed_lines
+            .is_some_and(|lines| !lines.includes(scope.source, evidence.line))
+        {
+            continue;
+        }
         candidates.push(MutationCandidate {
-            workspace: workspace.clone(),
-            source: source.to_path_buf(),
+            workspace: scope.workspace.clone(),
+            source: scope.source.to_path_buf(),
             mutator: name.to_owned(),
             mutation,
             evidence,
