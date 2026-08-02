@@ -24,7 +24,7 @@ mutarust --print-ast src/lib.rs
 See the [command guide](docs/cli.md) for target rules, the
 [mutator reference](docs/mutators.md) for the stable Rust operators, the
 [configuration guide](docs/config.md) for YAML mutation policy, and the
-[JSON report schemas](docs/json-outputs.md) for machine-readable results.
+[report schemas](docs/json-outputs.md) for JSON, HTML, and agent-ready results.
 
 ## License
 

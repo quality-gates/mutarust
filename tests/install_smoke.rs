@@ -1697,6 +1697,191 @@ fn installed_command_reports_stable_evidence_and_enforces_total_score() {
 }
 
 #[test]
+fn installed_command_writes_html_and_agentic_reports() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_mutation_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    let config = fixture.join("mutarust.yml");
+    fs::write(
+        &config,
+        "html_output: true\nenable_mutators:\n  - conditional/bool-literal\n",
+    )
+    .expect("html report configuration must be written");
+    let html_report = fixture.join("mutarust-report.html");
+    let agentic_report = fixture.join("mutarust-agentic.json");
+
+    let without_reports = Command::new(command_path(&install))
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start without html or agentic options");
+    assert!(
+        without_reports.status.success(),
+        "a run without report options must succeed: {}",
+        String::from_utf8_lossy(&without_reports.stderr)
+    );
+    assert!(
+        !html_report.exists() && !agentic_report.exists(),
+        "html and agentic reports must be written only when enabled"
+    );
+
+    let output = Command::new(command_path(&install))
+        .args([
+            "--config",
+            config.to_str().expect("config path must be UTF-8"),
+            "--logger-agentic-json",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start with html and agentic reports");
+    assert!(
+        output.status.success(),
+        "html and agentic report run must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let html = fs::read_to_string(&html_report).expect("html report must be readable");
+    assert!(
+        html.contains("<!DOCTYPE html>"),
+        "html must be a document: {html}"
+    );
+    assert!(
+        html.contains("Total Mutants"),
+        "html must show run counts: {html}"
+    );
+    assert!(html.contains("MSI"), "html must show total score: {html}");
+    assert!(
+        html.contains("Covered MSI"),
+        "html must show covered score: {html}"
+    );
+    assert!(
+        html.contains("Per-mutator results") && html.contains("conditional/bool-literal"),
+        "html must show per-mutator results: {html}"
+    );
+    assert!(
+        html.contains("checked/src/lib.rs") && html.contains("Diff:"),
+        "html must show escaped-mutant evidence: {html}"
+    );
+    assert!(
+        !html.contains("http://") && !html.contains("https://") && !html.contains("<link "),
+        "html must not load external assets: {html}"
+    );
+
+    let agentic = read_json_object(&agentic_report);
+    assert!(
+        agentic["generated_at"]
+            .as_str()
+            .expect("generated_at")
+            .ends_with('Z'),
+        "agentic report must include generation time: {agentic}"
+    );
+    assert_eq!(agentic["msi"], 0.5);
+    assert_eq!(agentic["escaped_count"], 1);
+    assert!(
+        agentic["reminder"]
+            .as_str()
+            .expect("reminder")
+            .contains("public API"),
+        "agentic report must include an interpretation reminder: {agentic}"
+    );
+    let mutant = &agentic["mutants"][0];
+    assert_eq!(mutant["file"], "checked/src/lib.rs");
+    assert_eq!(mutant["line"], 2);
+    assert_eq!(mutant["mutator"], "conditional/bool-literal");
+    assert!(
+        mutant["id"]
+            .as_str()
+            .expect("id")
+            .chars()
+            .all(|ch| ch.is_ascii_hexdigit()),
+        "escaped mutant must include a stable ID: {mutant}"
+    );
+    assert!(
+        mutant["diff"]
+            .as_str()
+            .expect("diff")
+            .contains("checked/src/lib.rs"),
+        "escaped mutant must include a diff: {mutant}"
+    );
+    assert_eq!(mutant["context_start_line"], 1);
+    assert!(
+        mutant["context_lines"]
+            .as_array()
+            .expect("context_lines")
+            .iter()
+            .any(|line| line.as_str().unwrap_or_default().contains("unchecked")),
+        "escaped mutant must include source context: {mutant}"
+    );
+    assert!(
+        mutant["test_files"]
+            .as_array()
+            .expect("test_files")
+            .iter()
+            .any(|path| path == "checked/tests/mutation.rs"),
+        "escaped mutant must include nearby test files: {mutant}"
+    );
+    assert!(
+        mutant["description"]
+            .as_str()
+            .expect("description")
+            .contains("Changes:")
+            || mutant["description"]
+                .as_str()
+                .expect("description")
+                .contains("boolean"),
+        "escaped mutant must include a description: {mutant}"
+    );
+    assert!(
+        mutant["kill_hint"]
+            .as_str()
+            .expect("kill_hint")
+            .contains("test"),
+        "escaped mutant must include a test hint: {mutant}"
+    );
+    validate_agentic_report_schema(&agentic);
+
+    let empty_config = fixture.join("empty-html-agentic.yml");
+    fs::write(
+        &empty_config,
+        "html_output: true\nenable_mutators:\n  - conditional/bool-literal\nignore_source_lines:\n  - '.*'\n",
+    )
+    .expect("empty report configuration must be written");
+    let _ = fs::remove_file(&html_report);
+    let _ = fs::remove_file(&agentic_report);
+    let empty_output = Command::new(command_path(&install))
+        .args([
+            "--config",
+            empty_config.to_str().expect("config path must be UTF-8"),
+            "--logger-agentic-json",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start for empty html and agentic reports");
+    assert!(
+        empty_output.status.success(),
+        "empty html and agentic report run must succeed: {}",
+        String::from_utf8_lossy(&empty_output.stderr)
+    );
+    let empty_html = fs::read_to_string(&html_report).expect("empty html report must be readable");
+    assert!(
+        empty_html.contains("No escaped mutants."),
+        "empty html report must stay self-contained: {empty_html}"
+    );
+    let empty_agentic = read_json_object(&agentic_report);
+    assert_eq!(empty_agentic["escaped_count"], 0);
+    assert!(
+        empty_agentic["mutants"]
+            .as_array()
+            .expect("mutants")
+            .is_empty()
+    );
+    validate_agentic_report_schema(&empty_agentic);
+}
+
+#[test]
 fn installed_command_writes_full_and_compact_json_reports() {
     let root = smoke_root();
     let install = install_command(&root);
@@ -1991,6 +2176,15 @@ fn report_mutant_ids(report: &serde_json::Value) -> Vec<String> {
 
 fn validate_compact_summary_schema(summary: &serde_json::Value) {
     validate_against_published_schema(summary, published_summary_schema(), "compact summary");
+}
+
+fn validate_agentic_report_schema(report: &serde_json::Value) {
+    validate_against_published_schema(report, published_agentic_schema(), "agentic report");
+}
+
+fn published_agentic_schema() -> serde_json::Value {
+    serde_json::from_str(include_str!("../schema/agentic.schema.json"))
+        .expect("agentic schema must be valid JSON")
 }
 
 fn validate_full_report_schema(report: &serde_json::Value) {

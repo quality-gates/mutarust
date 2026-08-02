@@ -21,7 +21,7 @@
       "default": false
     },
     "html_output": {
-      "description": "Request an HTML report.",
+      "description": "Write the HTML report to mutarust-report.html.",
       "type": "boolean",
       "default": false
     },

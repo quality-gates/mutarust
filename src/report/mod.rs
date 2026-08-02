@@ -1,9 +1,19 @@
+mod agentic;
+mod hints;
+mod html;
+
 use std::fs;
 use std::path::Path;
 
 use serde::Serialize;
 
 use crate::{MutationResult, MutationRun, MutationState, MutatorSummary, VERSION};
+
+pub use agentic::{
+    AGENTIC_REMINDER, AGENTIC_REPORT_FILE_NAME, AgenticMutant, AgenticReport, AgenticReportInput,
+    agentic_report, write_agentic_report,
+};
+pub use html::{HTML_REPORT_FILE_NAME, html_report, write_html_report};
 
 /// File name for the full JSON mutation report.
 pub const FULL_REPORT_FILE_NAME: &str = "report.json";
@@ -183,7 +193,7 @@ pub fn compact_summary(run: &MutationRun) -> ReportStats {
     }
 }
 
-fn mutator_stats(summaries: Vec<MutatorSummary>) -> Vec<ReportMutatorStats> {
+pub(super) fn mutator_stats(summaries: Vec<MutatorSummary>) -> Vec<ReportMutatorStats> {
     summaries
         .into_iter()
         .map(|summary| ReportMutatorStats {
