@@ -1077,8 +1077,8 @@ impl<'ast> Visit<'ast> for ContextVisitor<'_> {
     fn visit_arm(&mut self, arm: &'ast syn::Arm) {
         let bindings = pattern_bindings(std::iter::once(&arm.pat));
         with_context_bindings(self, None, bindings, |visitor| {
-            if let Some((_, guard)) = &arm.guard {
-                visitor.visit_expr(guard);
+            if let syn::Pat::Guard(pattern) = &arm.pat {
+                visitor.visit_expr(&pattern.guard);
             }
             visitor.visit_expr(&arm.body);
         });
