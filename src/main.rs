@@ -5,7 +5,8 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use mutarust::{
-    CommandSettings, Configuration, ExecutionControls, Registry, TestExecution, WorkerLimit,
+    CommandSettings, Configuration, CoverageControls, ExecutionControls, Registry, TestExecution,
+    WorkerLimit,
 };
 
 fn main() -> ExitCode {
@@ -52,6 +53,10 @@ fn print_help() -> io::Result<()> {
     writeln!(
         stdout,
         "\nOptions:\n  -h, --help           Print help\n  -V, --version        Print version\n      --config FILE     Read mutation policy from a YAML file\n      --list-files      List selected Rust production source files\n      --list-mutators   List available mutators\n      --exec COMMAND    Run a custom command for each mutant\n      --exec-timeout    Stop each test command after this many seconds\n      --timeout         Alias for --exec-timeout\n      --timeout-coefficient FACTOR  Set an adaptive Cargo timeout\n      --test-flags FLAGS  Add shell-quoted Cargo test flags\n      --test-recursive  Select all Cargo workspace packages\n      --workers COUNT   Run this many Cargo mutation jobs\n      --dry-run         List mutants without writing files or running tests\n      --no-exec         Write mutants without running tests\n      --do-not-remove-tmp-folder  Keep mutation workspaces\n      --match REGEXP    Mutate only functions with matching names\n      --verbose         Tell a custom command to produce verbose output\n      --debug           Tell a custom command to produce debug output\n      --silent          Hide mutant status output\n      --no-silent       Print mutant status output\n      --no-diffs        Hide escaped-mutant source diffs\n      --run-mutant-id ID  Run one mutant without score gates\n      --min-msi         Set the minimum mutation score percentage\n      --min-covered-msi Set the minimum covered-code score percentage\n      --enable NAME     Select a mutator name or group pattern\n      --disable NAME    Disable a mutator name or group pattern"
+    )?;
+    writeln!(
+        stdout,
+        "      --coverage        Collect LLVM line coverage before mutation\n      --per-test        Run mapped tests for each covered mutant"
     )
 }
 
@@ -191,6 +196,8 @@ fn parse_execution_switch(command: &mut RunCommand, argument: &str) -> Option<Re
         "--dry-run" => set_dry_run(command),
         "--no-exec" => set_no_exec(command),
         "--do-not-remove-tmp-folder" => set_keep_temporary(command),
+        "--coverage" => set_coverage(command),
+        "--per-test" => set_per_test_coverage(command),
         _ => return None,
     })
 }
@@ -208,6 +215,24 @@ fn set_no_exec(command: &mut RunCommand) -> Result<(), String> {
 fn set_keep_temporary(command: &mut RunCommand) -> Result<(), String> {
     command.execution.keep_temporary = true;
     Ok(())
+}
+
+fn set_coverage(command: &mut RunCommand) -> Result<(), String> {
+    if command.execution.coverage {
+        Err("--coverage can be supplied only once".to_owned())
+    } else {
+        command.execution.coverage = true;
+        Ok(())
+    }
+}
+
+fn set_per_test_coverage(command: &mut RunCommand) -> Result<(), String> {
+    if command.execution.per_test_coverage {
+        Err("--per-test can be supplied only once".to_owned())
+    } else {
+        command.execution.per_test_coverage = true;
+        Ok(())
+    }
 }
 
 fn set_run_mutant_id(command: &mut RunCommand, value: String) -> Result<(), String> {
@@ -379,6 +404,10 @@ fn execution_controls(command: &RunCommand) -> ExecutionControls {
         keep_temporary: command.execution.keep_temporary,
         timeout_coefficient: command.execution.timeout_coefficient,
         workers: command.execution.workers.unwrap_or_default(),
+        coverage: CoverageControls {
+            enabled: command.execution.coverage,
+            per_test: command.execution.per_test_coverage,
+        },
     }
 }
 
@@ -417,7 +446,7 @@ fn finish_mutation_run(
     Ok(if one_mutant {
         ExitCode::SUCCESS
     } else {
-        total_score_gate(run, configuration.min_msi)
+        score_gates(run, configuration)
     })
 }
 
@@ -490,6 +519,13 @@ fn print_mutation_results(
         "Mutation score: {:.2}%",
         run.mutation_score() * 100.0
     )?;
+    if run.has_coverage() {
+        writeln!(
+            stdout,
+            "Covered-code mutation score: {:.2}%",
+            run.covered_mutation_score() * 100.0
+        )?;
+    }
     writeln!(stdout, "Per-mutator results:")?;
     writeln!(stdout, "Mutator | Killed | Escaped | Skipped | Total")?;
     for summary in run.mutator_summaries() {
@@ -528,6 +564,37 @@ fn total_score_gate(run: &mutarust::MutationRun, minimum: Option<u8>) -> ExitCod
     if score < f64::from(minimum) {
         write_error(&format!(
             "mutation score {score:.2}% is below the required {}%",
+            minimum
+        ));
+        ExitCode::from(4)
+    } else {
+        ExitCode::SUCCESS
+    }
+}
+
+fn score_gates(run: &mutarust::MutationRun, configuration: &Configuration) -> ExitCode {
+    let total = total_score_gate(run, configuration.min_msi);
+    if total != ExitCode::SUCCESS {
+        return total;
+    }
+    covered_score_gate(run, configuration.min_covered_msi)
+}
+
+fn covered_score_gate(run: &mutarust::MutationRun, minimum: Option<u8>) -> ExitCode {
+    let Some(minimum) = minimum else {
+        return ExitCode::SUCCESS;
+    };
+    if minimum == 0 {
+        return ExitCode::SUCCESS;
+    }
+    if !run.has_coverage() {
+        write_error("covered-code mutation score requires --coverage");
+        return ExitCode::from(4);
+    }
+    let score = run.covered_mutation_score() * 100.0;
+    if score < f64::from(minimum) {
+        write_error(&format!(
+            "covered-code mutation score {score:.2}% is below the required {}%",
             minimum
         ));
         ExitCode::from(4)
@@ -588,6 +655,8 @@ struct ExecutionOptions {
     timeout_coefficient: Option<f64>,
     workers: Option<WorkerLimit>,
     cargo_flags: Option<Vec<String>>,
+    coverage: bool,
+    per_test_coverage: bool,
 }
 
 impl Default for RunCommand {
@@ -617,6 +686,7 @@ fn validation_error(command: &RunCommand) -> Option<&'static str> {
     run_mode_error(command)
         .or_else(|| dry_run_control_error(command))
         .or_else(|| cargo_control_error(command))
+        .or_else(|| coverage_control_error(command))
 }
 
 fn dry_run_control_error(command: &RunCommand) -> Option<&'static str> {
@@ -645,6 +715,14 @@ fn dry_run_control_error(command: &RunCommand) -> Option<&'static str> {
         (
             execution.dry_run && command.recursive_tests,
             "--dry-run cannot be used with --test-recursive",
+        ),
+        (
+            execution.dry_run && execution.coverage,
+            "--dry-run cannot be used with --coverage",
+        ),
+        (
+            execution.dry_run && execution.per_test_coverage,
+            "--dry-run cannot be used with --per-test",
         ),
     ]
     .into_iter()
@@ -701,6 +779,30 @@ fn cargo_control_error(command: &RunCommand) -> Option<&'static str> {
         (
             command.recursive_tests && execution.no_exec,
             "--test-recursive cannot be used with --no-exec",
+        ),
+    ]
+    .into_iter()
+    .find_map(|(invalid, message)| invalid.then_some(message))
+}
+
+fn coverage_control_error(command: &RunCommand) -> Option<&'static str> {
+    let execution = &command.execution;
+    [
+        (
+            execution.coverage && command.custom_command.is_some(),
+            "--coverage requires the Cargo test command",
+        ),
+        (
+            execution.per_test_coverage && command.custom_command.is_some(),
+            "--per-test requires the Cargo test command",
+        ),
+        (
+            execution.coverage && execution.no_exec,
+            "--coverage cannot be used with --no-exec",
+        ),
+        (
+            execution.per_test_coverage && execution.no_exec,
+            "--per-test cannot be used with --no-exec",
         ),
     ]
     .into_iter()

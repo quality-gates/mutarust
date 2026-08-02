@@ -10,11 +10,12 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use cargo_metadata::{Metadata, MetadataCommand};
+use cargo_metadata::{Metadata, MetadataCommand, Target, TargetKind};
 
 #[cfg(any(unix, windows))]
 use std::sync::atomic::AtomicBool;
 
+use crate::coverage::{CoverageMap, PerTestCoverageMap, TestIdentity, TestTarget, parse_lcov};
 use crate::evidence::{MutationEvidence, StableMutantId, mutation_evidence};
 use crate::filter::{SourceFilter, SourceFilters};
 use crate::{Mutation, Mutator, Registry, SourceError, find_rust_sources};
@@ -30,6 +31,7 @@ pub const DEFAULT_TEST_TIMEOUT: Duration = Duration::from_secs(60);
 /// A complete mutation test run.
 pub struct MutationRun {
     results: Vec<MutationResult>,
+    has_coverage: bool,
 }
 
 impl MutationRun {
@@ -76,6 +78,24 @@ impl MutationRun {
         } else {
             scored as f64 / self.total() as f64
         }
+    }
+
+    /// Returns the covered-code mutation score as a ratio from zero to one.
+    pub fn covered_mutation_score(&self) -> f64 {
+        if !self.has_coverage {
+            return 0.0;
+        }
+        let covered = self.total().saturating_sub(self.not_covered());
+        if covered == 0 {
+            0.0
+        } else {
+            (self.killed() + self.errored() + self.skipped()) as f64 / covered as f64
+        }
+    }
+
+    /// Returns true when this run collected a valid normal coverage map.
+    pub fn has_coverage(&self) -> bool {
+        self.has_coverage
     }
 
     /// Returns sorted result counts for each mutator.
@@ -265,6 +285,17 @@ pub struct ExecutionControls {
     pub timeout_coefficient: Option<f64>,
     /// Limits the number of concurrent Cargo mutation jobs.
     pub workers: WorkerLimit,
+    /// Selects LLVM coverage collection and per-test selection.
+    pub coverage: CoverageControls,
+}
+
+/// LLVM coverage controls that apply to a complete mutation run.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CoverageControls {
+    /// Collects line coverage and skips mutants on uncovered source lines.
+    pub enabled: bool,
+    /// Runs only tests that cover the mutated source line when possible.
+    pub per_test: bool,
 }
 
 /// A positive limit for concurrent Cargo mutation jobs.
@@ -454,13 +485,16 @@ pub fn run_mutation_tests_with_controls(
         .lock()
         .map_err(|_| run_error("could not start mutation run after a previous panic"))?;
     let _interrupt_guard = prepare_interrupt_handling()?;
-    let plan = selected_mutation_plan(mutation_plan(targets, registry, filters)?, stable_id)?;
+    let mut plan = selected_mutation_plan(mutation_plan(targets, registry, filters)?, stable_id)?;
     stop_if_interrupted()?;
     if controls.dry_run {
         return Ok(MutationRun {
             results: plan.candidates.iter().map(generated_result).collect(),
+            has_coverage: false,
         });
     }
+    let coverage = collect_coverage(&plan.workspaces, timeout, execution, controls)?;
+    apply_coverage_selection(&mut plan.candidates, &coverage);
     let timeout = if controls.no_exec || !execution.uses_cargo() {
         timeout
     } else {
@@ -471,7 +505,391 @@ pub fn run_mutation_tests_with_controls(
         )
     };
     let results = test_candidates(plan.candidates, timeout, execution, controls)?;
-    Ok(MutationRun { results })
+    Ok(MutationRun {
+        results,
+        has_coverage: coverage.has_normal_coverage(),
+    })
+}
+
+#[derive(Default)]
+struct CoverageSelection {
+    normal: Option<CoverageMap>,
+    per_test: Option<PerTestCoverageMap>,
+}
+
+impl CoverageSelection {
+    fn has_normal_coverage(&self) -> bool {
+        self.normal.is_some()
+    }
+}
+
+fn apply_coverage_selection(candidates: &mut [MutationCandidate], coverage: &CoverageSelection) {
+    for candidate in candidates {
+        candidate.test_selection = coverage.normal.as_ref().map_or_else(
+            || selected_tests(candidate, coverage.per_test.as_ref()),
+            |normal| normal_coverage_selection(candidate, normal, coverage.per_test.as_ref()),
+        );
+    }
+}
+
+fn normal_coverage_selection(
+    candidate: &MutationCandidate,
+    normal: &CoverageMap,
+    per_test: Option<&PerTestCoverageMap>,
+) -> CandidateTestSelection {
+    if normal.covers(&candidate.source, candidate.evidence.line) {
+        selected_tests(candidate, per_test)
+    } else {
+        CandidateTestSelection::NotCovered
+    }
+}
+
+fn selected_tests(
+    candidate: &MutationCandidate,
+    per_test: Option<&PerTestCoverageMap>,
+) -> CandidateTestSelection {
+    per_test
+        .and_then(|coverage| coverage.tests_for(&candidate.source, candidate.evidence.line))
+        .filter(|tests| !tests.is_empty())
+        .map_or(
+            CandidateTestSelection::FullSuite,
+            CandidateTestSelection::Tests,
+        )
+}
+
+fn collect_coverage(
+    workspaces: &[Workspace],
+    timeout: Duration,
+    execution: &TestExecution,
+    controls: &ExecutionControls,
+) -> Result<CoverageSelection, RunError> {
+    if !controls.coverage.enabled && !controls.coverage.per_test {
+        return Ok(CoverageSelection::default());
+    }
+    if !execution.uses_cargo() {
+        return Err(run_error("LLVM coverage requires the Cargo test command"));
+    }
+    let mut selection = CoverageSelection::default();
+    if controls.coverage.enabled {
+        selection.normal = Some(collect_normal_coverage(workspaces, timeout, execution)?);
+    }
+    if controls.coverage.per_test {
+        selection.per_test = Some(collect_per_test_coverage(workspaces, timeout, execution)?);
+    }
+    Ok(selection)
+}
+
+fn collect_normal_coverage(
+    workspaces: &[Workspace],
+    timeout: Duration,
+    execution: &TestExecution,
+) -> Result<CoverageMap, RunError> {
+    let mut coverage = CoverageMap::default();
+    for workspace in coverage_workspaces(workspaces, execution.recursive) {
+        stop_if_interrupted()?;
+        coverage.add(collect_llvm_profile(workspace, timeout, execution, None)?);
+    }
+    Ok(coverage)
+}
+
+fn collect_per_test_coverage(
+    workspaces: &[Workspace],
+    timeout: Duration,
+    execution: &TestExecution,
+) -> Result<PerTestCoverageMap, RunError> {
+    let mut coverage = PerTestCoverageMap::default();
+    for workspace in coverage_workspaces(workspaces, execution.recursive) {
+        for test in list_cargo_tests(workspace, timeout, execution)? {
+            stop_if_interrupted()?;
+            let profile = collect_llvm_profile(workspace, timeout, execution, Some(&test))?;
+            coverage.add(profile, &test);
+        }
+    }
+    Ok(coverage)
+}
+
+fn coverage_workspaces(workspaces: &[Workspace], recursive: bool) -> Vec<&Workspace> {
+    let mut scopes = BTreeSet::new();
+    workspaces
+        .iter()
+        .filter(|workspace| {
+            let scope = if recursive {
+                &workspace.root
+            } else {
+                &workspace.manifest
+            };
+            scopes.insert(scope.clone())
+        })
+        .collect()
+}
+
+fn collect_llvm_profile(
+    workspace: &Workspace,
+    timeout: Duration,
+    execution: &TestExecution,
+    test: Option<&TestIdentity>,
+) -> Result<crate::coverage::CoverageProfile, RunError> {
+    let temporary = TemporaryWorkspace::create()?;
+    let result = (|| {
+        let copied_workspace = copy_workspace(workspace, temporary.path())?;
+        let copied_manifest = copied_path(workspace, temporary.path(), &workspace.manifest)?;
+        let profile = temporary.path().join("coverage.lcov");
+        run_llvm_cov_command(
+            &copied_workspace,
+            &copied_manifest,
+            temporary.path(),
+            &profile,
+            timeout,
+            execution,
+            test,
+        )?;
+        parse_lcov(&profile, &copied_workspace)
+            .and_then(|profile| {
+                profile.restore_workspace_paths(temporary.path(), &workspace.layout_root)
+            })
+            .map_err(run_error)
+    })();
+    temporary.finish(result, false)
+}
+
+fn run_llvm_cov_command(
+    workspace_root: &Path,
+    manifest: &Path,
+    temporary: &Path,
+    profile: &Path,
+    timeout: Duration,
+    execution: &TestExecution,
+    test: Option<&TestIdentity>,
+) -> Result<(), RunError> {
+    let diagnostics = coverage_diagnostic_file(temporary)?;
+    let diagnostic_stdout = diagnostics.try_clone().map_err(|error| {
+        run_error(format!(
+            "could not prepare LLVM coverage diagnostics: {error}"
+        ))
+    })?;
+    let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let mut command = Command::new(cargo);
+    command.arg("llvm-cov");
+    if test.is_some() {
+        command.arg("test");
+    }
+    command
+        .args(["--manifest-path"])
+        .arg(manifest)
+        .args(["--lcov", "--output-path"])
+        .arg(profile)
+        .current_dir(workspace_root)
+        .env_remove("CARGO_TARGET_DIR")
+        .env(
+            "CARGO_LLVM_COV_TARGET_DIR",
+            temporary.join("llvm-cov-target"),
+        )
+        .env("CARGO_LLVM_COV_BUILD_DIR", temporary.join("llvm-cov-build"))
+        .stdout(Stdio::from(diagnostic_stdout))
+        .stderr(Stdio::from(diagnostics));
+    if execution.recursive && test.is_none() {
+        command.arg("--workspace");
+    }
+    if let Some(test) = test {
+        append_test_target(&mut command, test);
+        command.args(&execution.cargo_flags);
+        command.args(["--", "--exact", &test.name]);
+    }
+    stop_if_interrupted()?;
+    configure_process_group(&mut command);
+    let mut child = ProcessChild::new(command.spawn().map_err(|error| {
+        run_error(format!(
+            "could not run cargo llvm-cov: {error}; install cargo-llvm-cov to use coverage"
+        ))
+    })?);
+    match wait_for_process(&mut child, timeout)? {
+        ProcessOutcome::Exited(status) if status.success() => Ok(()),
+        ProcessOutcome::Exited(_) => Err(llvm_coverage_command_error(temporary)),
+        ProcessOutcome::TimedOut => Err(run_error(format!(
+            "LLVM coverage command timed out after {} seconds",
+            timeout.as_secs()
+        ))),
+    }
+}
+
+fn coverage_diagnostic_file(temporary: &Path) -> Result<fs::File, RunError> {
+    let path = temporary.join("llvm-cov-stderr");
+    fs::File::create(&path).map_err(|error| {
+        run_error(format!(
+            "could not create LLVM coverage diagnostics: {error}"
+        ))
+    })
+}
+
+fn llvm_coverage_command_error(temporary: &Path) -> RunError {
+    let detail = fs::read_to_string(temporary.join("llvm-cov-stderr")).unwrap_or_default();
+    run_error(format!(
+        "could not collect LLVM coverage: {}; install cargo-llvm-cov and llvm-tools-preview",
+        cargo_detail(detail)
+    ))
+}
+
+fn list_cargo_tests(
+    workspace: &Workspace,
+    timeout: Duration,
+    execution: &TestExecution,
+) -> Result<Vec<TestIdentity>, RunError> {
+    let temporary = TemporaryWorkspace::create()?;
+    let result = (|| {
+        let copied_workspace = copy_workspace(workspace, temporary.path())?;
+        let copied_manifest = copied_path(workspace, temporary.path(), &workspace.manifest)?;
+        let mut tests = BTreeSet::new();
+        for test in cargo_test_targets(workspace, execution.recursive)? {
+            stop_if_interrupted()?;
+            tests.extend(list_cargo_test_target(
+                &copied_workspace,
+                &copied_manifest,
+                temporary.path(),
+                timeout,
+                execution,
+                &test,
+            )?);
+        }
+        Ok(tests.into_iter().collect())
+    })();
+    temporary.finish(result, false)
+}
+
+fn list_cargo_test_target(
+    workspace_root: &Path,
+    manifest: &Path,
+    temporary: &Path,
+    timeout: Duration,
+    execution: &TestExecution,
+    target: &TestIdentity,
+) -> Result<Vec<TestIdentity>, RunError> {
+    let output = temporary.join("test-list");
+    let diagnostics = coverage_diagnostic_file(temporary)?;
+    let output_file = fs::File::create(&output)
+        .map_err(|error| run_error(format!("could not create Cargo test list: {error}")))?;
+    let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let mut command = Command::new(cargo);
+    command
+        .args(["test", "--manifest-path"])
+        .arg(manifest)
+        .args(["--target-dir"])
+        .arg(temporary.join("test-list-target"))
+        .current_dir(workspace_root)
+        .env_remove("CARGO_TARGET_DIR")
+        .stdout(Stdio::from(output_file))
+        .stderr(Stdio::from(diagnostics));
+    append_test_target(&mut command, target);
+    command.args(&execution.cargo_flags);
+    command.args(["--", "--list"]);
+    stop_if_interrupted()?;
+    configure_process_group(&mut command);
+    let mut child = ProcessChild::new(command.spawn().map_err(|error| {
+        run_error(format!(
+            "could not run cargo test for per-test coverage: {error}"
+        ))
+    })?);
+    match wait_for_process(&mut child, timeout)? {
+        ProcessOutcome::Exited(status) if status.success() => {
+            parse_cargo_test_list(&output, target)
+        }
+        ProcessOutcome::Exited(_) => Err(llvm_coverage_command_error(temporary)),
+        ProcessOutcome::TimedOut => Err(run_error(format!(
+            "Cargo test listing timed out after {} seconds",
+            timeout.as_secs()
+        ))),
+    }
+}
+
+fn parse_cargo_test_list(
+    path: &Path,
+    target: &TestIdentity,
+) -> Result<Vec<TestIdentity>, RunError> {
+    let output = fs::read_to_string(path)
+        .map_err(|error| run_error(format!("could not read Cargo test list: {error}")))?;
+    let mut tests = BTreeSet::new();
+    for line in output.lines() {
+        if let Some(name) = line.strip_suffix(": test") {
+            if name.is_empty() {
+                return Err(run_error("Cargo test list has an empty test name"));
+            }
+            tests.insert(TestIdentity {
+                package: target.package.clone(),
+                target: target.target.clone(),
+                name: name.to_owned(),
+            });
+        }
+    }
+    Ok(tests.into_iter().collect())
+}
+
+fn cargo_test_targets(
+    workspace: &Workspace,
+    recursive: bool,
+) -> Result<Vec<TestIdentity>, RunError> {
+    let metadata = metadata_for_directory(&workspace.root, &workspace.manifest)?;
+    let packages = if recursive {
+        metadata.workspace_packages()
+    } else {
+        metadata
+            .packages
+            .iter()
+            .filter(|package| package.manifest_path.as_std_path() == workspace.manifest)
+            .collect()
+    };
+    let mut targets = BTreeSet::new();
+    for package in packages {
+        for target in &package.targets {
+            if let Some(target) = cargo_test_target(target) {
+                targets.insert(TestIdentity {
+                    package: package.name.to_string(),
+                    target,
+                    name: String::new(),
+                });
+            }
+        }
+    }
+    Ok(targets.into_iter().collect())
+}
+
+fn cargo_test_target(target: &Target) -> Option<TestTarget> {
+    if !target.test || !target.required_features.is_empty() {
+        return None;
+    }
+    if target.kind.contains(&TargetKind::Test) {
+        Some(TestTarget::Integration(target.name.clone()))
+    } else if target.kind.contains(&TargetKind::Lib) || target.kind.contains(&TargetKind::ProcMacro)
+    {
+        Some(TestTarget::Library)
+    } else if target.kind.contains(&TargetKind::Bin) {
+        Some(TestTarget::Binary(target.name.clone()))
+    } else if target.kind.contains(&TargetKind::Example) {
+        Some(TestTarget::Example(target.name.clone()))
+    } else if target.kind.contains(&TargetKind::Bench) {
+        Some(TestTarget::Benchmark(target.name.clone()))
+    } else {
+        None
+    }
+}
+
+fn append_test_target(command: &mut Command, test: &TestIdentity) {
+    command.args(["--package", &test.package]);
+    match &test.target {
+        TestTarget::Library => {
+            command.arg("--lib");
+        }
+        TestTarget::Binary(name) => {
+            command.args(["--bin", name]);
+        }
+        TestTarget::Example(name) => {
+            command.args(["--example", name]);
+        }
+        TestTarget::Integration(name) => {
+            command.args(["--test", name]);
+        }
+        TestTarget::Benchmark(name) => {
+            command.args(["--bench", name]);
+        }
+    }
 }
 
 fn test_candidates(
@@ -708,15 +1126,27 @@ mod tests {
             .into_iter()
             .map(test_result)
             .collect(),
+            has_coverage: true,
         };
 
         assert_eq!(run.mutation_score(), 3.0 / 5.0);
+        assert_eq!(run.covered_mutation_score(), 3.0 / 4.0);
         let summaries = run.mutator_summaries();
         assert_eq!(summaries.len(), 1);
         assert_eq!(summaries[0].killed, 2);
         assert_eq!(summaries[0].escaped, 1);
         assert_eq!(summaries[0].skipped, 1);
         assert_eq!(summaries[0].total, 4);
+    }
+
+    #[test]
+    fn covered_score_is_zero_without_a_coverage_map() {
+        let run = MutationRun {
+            results: vec![test_result(MutationState::Killed)],
+            has_coverage: false,
+        };
+
+        assert_eq!(run.covered_mutation_score(), 0.0);
     }
 
     #[test]
@@ -771,6 +1201,7 @@ fn test_clean_workspace(
             CargoAction::Test,
             timeout,
             execution,
+            None,
         )?;
         match outcome.outcome {
             CargoOutcome::Passed => Ok(outcome.duration),
@@ -1642,6 +2073,7 @@ fn add_mutator_candidates(
             mutator: name.to_owned(),
             mutation,
             evidence,
+            test_selection: CandidateTestSelection::FullSuite,
         });
     }
     Ok(())
@@ -1672,6 +2104,9 @@ fn test_candidate_state(
     controls: &ExecutionControls,
 ) -> Result<(MutationState, Option<String>), RunError> {
     stop_if_interrupted()?;
+    if candidate.test_selection == CandidateTestSelection::NotCovered {
+        return Ok((MutationState::NotCovered, None));
+    }
     let temporary = TemporaryWorkspace::create()?;
     let keep_temporary = controls.keep_temporary || controls.no_exec;
     let temporary_path = keep_temporary.then(|| temporary.path().to_path_buf());
@@ -1733,6 +2168,7 @@ fn test_cargo_mutant(
         CargoAction::Compile,
         timeout,
         execution,
+        None,
     )? {
         CargoCommandOutcome {
             outcome: CargoOutcome::Passed,
@@ -1741,6 +2177,7 @@ fn test_cargo_mutant(
             temporary,
             copied_workspace,
             &candidate.workspace,
+            &candidate.test_selection,
             timeout,
             execution,
         ),
@@ -1787,29 +2224,36 @@ fn test_compiled_mutant(
     temporary: &Path,
     copied_workspace: &Path,
     workspace: &Workspace,
+    selection: &CandidateTestSelection,
     timeout: Duration,
     execution: &TestExecution,
 ) -> Result<(MutationState, Option<String>), RunError> {
-    match run_cargo_command(
-        temporary,
-        copied_workspace,
-        workspace,
-        CargoAction::Test,
-        timeout,
-        execution,
-    )? {
-        CargoCommandOutcome {
-            outcome: CargoOutcome::Passed,
-            ..
-        } => Ok((MutationState::Escaped, None)),
-        CargoCommandOutcome {
-            outcome: CargoOutcome::Failed(_),
-            ..
-        } => Ok((MutationState::Killed, None)),
-        CargoCommandOutcome {
-            outcome: CargoOutcome::TimedOut,
-            ..
-        } => Ok((
+    let outcome = match selection {
+        CandidateTestSelection::FullSuite => run_cargo_command(
+            temporary,
+            copied_workspace,
+            workspace,
+            CargoAction::Test,
+            timeout,
+            execution,
+            None,
+        )?,
+        CandidateTestSelection::Tests(tests) => run_selected_cargo_tests(
+            temporary,
+            copied_workspace,
+            workspace,
+            tests,
+            timeout,
+            execution,
+        )?,
+        CandidateTestSelection::NotCovered => {
+            return Ok((MutationState::NotCovered, None));
+        }
+    };
+    match outcome.outcome {
+        CargoOutcome::Passed => Ok((MutationState::Escaped, None)),
+        CargoOutcome::Failed(_) => Ok((MutationState::Killed, None)),
+        CargoOutcome::TimedOut => Ok((
             MutationState::Errored,
             Some(format!(
                 "cargo test timed out after {} seconds",
@@ -1817,6 +2261,34 @@ fn test_compiled_mutant(
             )),
         )),
     }
+}
+
+fn run_selected_cargo_tests(
+    temporary: &Path,
+    copied_workspace: &Path,
+    workspace: &Workspace,
+    tests: &[TestIdentity],
+    timeout: Duration,
+    execution: &TestExecution,
+) -> Result<CargoCommandOutcome, RunError> {
+    for test in tests {
+        let outcome = run_cargo_command(
+            temporary,
+            copied_workspace,
+            workspace,
+            CargoAction::Test,
+            timeout,
+            execution,
+            Some(test),
+        )?;
+        if !matches!(outcome.outcome, CargoOutcome::Passed) {
+            return Ok(outcome);
+        }
+    }
+    Ok(CargoCommandOutcome {
+        outcome: CargoOutcome::Passed,
+        duration: Duration::ZERO,
+    })
 }
 
 fn write_mutant(
@@ -1967,6 +2439,7 @@ fn run_cargo_command(
     action: CargoAction,
     timeout: Duration,
     execution: &TestExecution,
+    test: Option<&TestIdentity>,
 ) -> Result<CargoCommandOutcome, RunError> {
     let manifest = copied_path(workspace, temporary, &workspace.manifest)?;
     let diagnostic_path = temporary.join("cargo-stderr");
@@ -1996,13 +2469,7 @@ fn run_cargo_command(
     if let Some(cargo_home) = &workspace.cargo_home {
         command.env("CARGO_HOME", copied_path(workspace, temporary, cargo_home)?);
     }
-    if matches!(action, CargoAction::Compile) {
-        command.arg("--no-run");
-    }
-    if execution.recursive {
-        command.arg("--workspace");
-    }
-    command.args(&execution.cargo_flags);
+    configure_cargo_test_scope(&mut command, action, execution, test);
     stop_if_interrupted()?;
     configure_process_group(&mut command);
     let mut child = ProcessChild::new(
@@ -2022,6 +2489,27 @@ fn run_cargo_command(
         outcome,
         duration: started.elapsed(),
     })
+}
+
+fn configure_cargo_test_scope(
+    command: &mut Command,
+    action: CargoAction,
+    execution: &TestExecution,
+    test: Option<&TestIdentity>,
+) {
+    if matches!(action, CargoAction::Compile) {
+        command.arg("--no-run");
+    }
+    if execution.recursive && test.is_none() {
+        command.arg("--workspace");
+    }
+    if let Some(test) = test {
+        append_test_target(command, test);
+    }
+    command.args(&execution.cargo_flags);
+    if let Some(test) = test {
+        command.args(["--", "--exact", &test.name]);
+    }
 }
 
 fn run_custom_command(
@@ -2535,6 +3023,14 @@ struct MutationCandidate {
     mutator: String,
     mutation: Mutation,
     evidence: MutationEvidence,
+    test_selection: CandidateTestSelection,
+}
+
+#[derive(Eq, PartialEq)]
+enum CandidateTestSelection {
+    NotCovered,
+    FullSuite,
+    Tests(Vec<TestIdentity>),
 }
 
 #[derive(Clone)]

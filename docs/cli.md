@@ -43,6 +43,37 @@ the full mutant count. The score is zero when no mutant exists.
 Use `--min-msi PERCENT` to require a total mutation score. A failed score gate
 returns exit value 4. A score equal to the required percentage passes.
 
+## LLVM Coverage
+
+Use `--coverage` to collect Rust line coverage before mutation. Mutarust uses
+the Cargo-compatible [`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov)
+tool and its LCOV output. Install the tool and the Rust LLVM tools component
+before use:
+
+```text
+cargo install cargo-llvm-cov
+rustup component add llvm-tools-preview
+```
+
+Mutarust puts coverage build files in private temporary directories and removes
+them before it starts the normal mutation workers. It does not write coverage
+build output to the user Cargo target directory. A source line with no recorded
+coverage gets the `not covered` result. Mutarust does not write that mutant or
+run its tests.
+
+With valid normal coverage, the summary also prints the covered-code mutation
+score. This score is killed, errored, and skipped mutants divided by all mutants
+except `not covered` mutants. Use `--min-covered-msi PERCENT` to require this
+score. A failed covered-score gate returns exit value 4. A positive covered
+score gate without `--coverage` returns exit value 4.
+
+Use `--per-test` to collect one LLVM coverage report for each Cargo test and
+run only the tests that cover the mutated line. This option can be used without
+`--coverage`. A mutant with no per-test mapping runs the full Cargo test suite.
+Per-test collection is sequential so it does not create many instrumented Cargo
+target directories at one time. `--coverage` and `--per-test` cannot be used
+with `--exec`, `--dry-run`, or `--no-exec`.
+
 Use `--run-mutant-id ID` to run one stable mutant ID. This mode prints only
 the selected mutant evidence. It does not print the normal summary or apply
 score gates.
