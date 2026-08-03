@@ -28,6 +28,11 @@ impl MutationChecksum {
         Self(format!("{:x}", md5::compute(lines)))
     }
 
+    #[cfg(test)]
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
+
     fn parse(value: &str) -> Option<Self> {
         if value.len() == 32
             && value

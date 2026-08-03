@@ -132,6 +132,7 @@ pub(crate) struct SourceFilter {
     disabled_functions: FunctionDisables,
     disabled_lines: BTreeMap<usize, Vec<MutatorSelection>>,
     cfg_ranges: Vec<Range<usize>>,
+    test_ranges: Vec<Range<usize>>,
     skip_source: bool,
 }
 
@@ -185,6 +186,7 @@ impl SourceFilter {
             } else {
                 Vec::new()
             },
+            test_ranges: test_source_ranges(text),
             skip_source: filters.skip_without_test && !source_has_unit_tests(text),
         })
     }
@@ -202,6 +204,7 @@ impl SourceFilter {
             && !self.in_ignored_line(range)
             && !self.in_disabled_line(mutator, range)
             && !self.in_conditional_source(range)
+            && !self.in_test_source(range)
     }
 
     fn in_ignored_line(&self, range: &Range<usize>) -> bool {
@@ -222,6 +225,12 @@ impl SourceFilter {
 
     fn in_conditional_source(&self, range: &Range<usize>) -> bool {
         self.cfg_ranges.iter().any(|cfg| ranges_overlap(cfg, range))
+    }
+
+    fn in_test_source(&self, range: &Range<usize>) -> bool {
+        self.test_ranges
+            .iter()
+            .any(|test| ranges_overlap(test, range))
     }
 }
 
@@ -258,6 +267,35 @@ fn conditional_source_ranges(text: &str) -> Vec<Range<usize>> {
     }
     collect_conditional_items(text, &file.items, &mut ranges);
     ranges
+}
+
+fn test_source_ranges(text: &str) -> Vec<Range<usize>> {
+    let Ok(file) = syn::parse_file(text) else {
+        return Vec::new();
+    };
+    let mut ranges = Vec::new();
+    if file.attrs.iter().any(attribute_is_cfg_test) {
+        ranges.push(0..text.len());
+        return ranges;
+    }
+    collect_test_items(text, &file.items, &mut ranges);
+    ranges
+}
+
+fn collect_test_items(text: &str, items: &[syn::Item], ranges: &mut Vec<Range<usize>>) {
+    for item in items {
+        if item_attributes(item).iter().any(attribute_is_cfg_test) {
+            if let Some(range) = item_span_range(text, item) {
+                ranges.push(range);
+            }
+            continue;
+        }
+        if let syn::Item::Mod(module) = item {
+            if let Some((_, nested)) = &module.content {
+                collect_test_items(text, nested, ranges);
+            }
+        }
+    }
 }
 
 fn collect_conditional_items(text: &str, items: &[syn::Item], ranges: &mut Vec<Range<usize>>) {

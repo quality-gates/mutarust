@@ -199,12 +199,54 @@ mod tests {
             evidence.diff,
             "--- checked/src/lib.rs\n+++ checked/src/lib.rs\n@@ -1,1 +1,1 @@\n-pub fn unchecked() -> bool { true }\n+pub fn unchecked() -> bool { false }\n"
         );
+        assert_eq!(
+            evidence.blacklist_checksum.as_str(),
+            format!(
+                "{:x}",
+                md5::compute(
+                    "-pub fn unchecked() -> bool { true }\n+pub fn unchecked() -> bool { false }\n"
+                )
+            )
+        );
+    }
+
+    #[test]
+    fn evidence_keeps_shared_prefix_and_suffix_out_of_the_diff() {
+        let source = "fn first() {}\npub fn unchecked() -> bool { true }\nfn last() {}\n";
+        let start = source.find("true").expect("fixture must contain true");
+        let mutation = Mutation::new(start..start + 4, "false");
+        let evidence = mutation_evidence(
+            Path::new("workspace"),
+            Path::new("workspace/checked/src/lib.rs"),
+            "conditional/bool-literal",
+            &mutation,
+            source,
+        )
+        .expect("source must be inside the workspace layout");
+
+        assert_eq!(evidence.line, 2);
+        assert_eq!(
+            evidence.diff,
+            "--- checked/src/lib.rs\n+++ checked/src/lib.rs\n@@ -2,1 +2,1 @@\n-pub fn unchecked() -> bool { true }\n+pub fn unchecked() -> bool { false }\n"
+        );
+        assert_eq!(
+            evidence.blacklist_checksum.as_str(),
+            format!(
+                "{:x}",
+                md5::compute(
+                    "-pub fn unchecked() -> bool { true }\n+pub fn unchecked() -> bool { false }\n"
+                )
+            )
+        );
     }
 
     #[test]
     fn stable_mutant_id_requires_lower_case_md5_hexadecimal() {
         assert!(StableMutantId::parse(&"a".repeat(32)).is_some());
         assert!(StableMutantId::parse(&"f".repeat(32)).is_some());
+        assert!(StableMutantId::parse("0123456789abcdef0123456789abcdef").is_some());
+        assert!(StableMutantId::parse(&"a".repeat(31)).is_none());
+        assert!(StableMutantId::parse(&"a".repeat(33)).is_none());
         assert!(StableMutantId::parse(&"g".repeat(32)).is_none());
         assert!(StableMutantId::parse(&"A".repeat(32)).is_none());
     }
