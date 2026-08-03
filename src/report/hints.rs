@@ -54,6 +54,10 @@ const MUTATOR_DESCRIPTIONS: &[(&str, &str)] = &[
         "Replaces a Some(...) argument with None, bypassing an optional value",
     ),
     (
+        "expression/error-guard",
+        "Collapses a Result or Option presence check in an if condition to a boolean constant",
+    ),
+    (
         "expression/errorf-wrap",
         "Removes a standard error source link so the returned error no longer preserves its cause",
     ),
@@ -64,6 +68,10 @@ const MUTATOR_DESCRIPTIONS: &[(&str, &str)] = &[
     (
         "expression/recover-clear",
         "Makes a supported panic catch resume the panic instead of recovering",
+    ),
+    (
+        "expression/remove",
+        "Replaces a logical && or || operand with true or false so that operand no longer matters",
     ),
     (
         "expression/string-literal",
@@ -172,6 +180,10 @@ const KILL_HINTS: &[(&str, &str)] = &[
         "Write a test that passes None where Some was required and asserts the function handles the missing value",
     ),
     (
+        "expression/error-guard",
+        "Write tests that enter both the error and success paths and assert the distinct outcomes a caller would see",
+    ),
+    (
         "expression/errorf-wrap",
         "Write a test that asserts the returned error still exposes its cause through the public API",
     ),
@@ -182,6 +194,10 @@ const KILL_HINTS: &[(&str, &str)] = &[
     (
         "expression/recover-clear",
         "Write a test that triggers the panic and asserts the recovery behaviour a caller would observe",
+    ),
+    (
+        "expression/remove",
+        "Write tests where each logical operand alone changes the result, so replacing either operand with a constant fails",
     ),
     (
         "expression/string-literal",

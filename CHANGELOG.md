@@ -6,6 +6,10 @@ This file records important user changes.
 
 ### Added
 
+- Mutago v2.7.7 parity table and the final two expression mutators
+  (`expression/remove`, `expression/error-guard`).
+- Working `skip_without_test` and `skip_with_cfg` configuration policies.
+- `--html-output` and `--ignore-msi-with-no-mutations` command options.
 - Cargo package foundation.
 - Installed command smoke test.
 - Rust production-source discovery and `--list-files`.

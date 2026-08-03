@@ -34,9 +34,11 @@ fn builtin_mutator_names_match_completed_mutago_groups() {
             "conditional/not",
             "expression/comparison",
             "expression/context-nil",
+            "expression/error-guard",
             "expression/errorf-wrap",
             "expression/logical",
             "expression/recover-clear",
+            "expression/remove",
             "expression/string-literal",
             "loop/break",
             "loop/condition",
@@ -249,6 +251,54 @@ fn expression_string_literal_empties_direct_comparison_operands() {
             source.replacen("\"expected\"", "\"\"", 1),
             source.replacen("\"other\"", "\"\"", 1),
         ]
+    );
+}
+
+#[test]
+fn expression_remove_replaces_logical_operands_with_constants() {
+    let source = "fn terms(a: bool, b: bool, c: bool) { if a && b {} else if (c && a) || b {} }";
+
+    assert_eq!(
+        changed_sources("expression/remove", source),
+        vec![
+            source.replacen("a && b", "true && b", 1),
+            source.replacen("a && b", "a && true", 1),
+            source.replacen("(c && a) || b", "false || b", 1),
+            source.replacen("(c && a) || b", "(c && a) || false", 1),
+            source.replacen("c && a", "true && a", 1),
+            source.replacen("c && a", "c && true", 1),
+        ]
+    );
+    assert!(
+        changed_sources(
+            "expression/remove",
+            "fn bits(a: u8, b: u8) { let _ = a & b; }"
+        )
+        .is_empty(),
+        "bitwise operators are not logical terms"
+    );
+}
+
+#[test]
+fn expression_error_guard_collapses_result_and_option_checks() {
+    let source = "fn guards(result: Result<(), ()>, option: Option<()>) { if result.is_err() {} if result.is_ok() {} if option.is_none() {} if option.is_some() {} let _ = result.is_err(); }";
+
+    assert_eq!(
+        changed_sources("expression/error-guard", source),
+        vec![
+            source.replacen("result.is_err()", "false", 1),
+            source.replacen("result.is_ok()", "true", 1),
+            source.replacen("option.is_none()", "false", 1),
+            source.replacen("option.is_some()", "true", 1),
+        ]
+    );
+    assert!(
+        changed_sources(
+            "expression/error-guard",
+            "fn other(flag: bool) { if flag {} while value.is_err() {} }"
+        )
+        .is_empty(),
+        "non-if conditions and unknown receivers stay unchanged"
     );
 }
 

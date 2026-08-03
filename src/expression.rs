@@ -153,6 +153,109 @@ impl BoolLiteralVisitor<'_> {
 
 pub(crate) struct StringLiteralMutator;
 
+pub(crate) struct RemoveTermMutator;
+
+pub(crate) struct ErrorGuardMutator;
+
+impl Mutator for RemoveTermMutator {
+    fn name(&self) -> &str {
+        "expression/remove"
+    }
+
+    fn mutations(&self, source: &str) -> Vec<Mutation> {
+        let Ok(file) = syn::parse_file(source) else {
+            return Vec::new();
+        };
+        let mut visitor = RemoveTermVisitor {
+            source,
+            mutations: Vec::new(),
+        };
+        visitor.visit_file(&file);
+        visitor.mutations
+    }
+}
+
+struct RemoveTermVisitor<'a> {
+    source: &'a str,
+    mutations: Vec<Mutation>,
+}
+
+impl<'ast> Visit<'ast> for RemoveTermVisitor<'_> {
+    skip_non_expression_syntax!();
+
+    fn visit_expr_binary(&mut self, expression: &'ast ExprBinary) {
+        let replacement = match expression.op {
+            BinOp::And(_) => Some("true"),
+            BinOp::Or(_) => Some("false"),
+            _ => None,
+        };
+        if let Some(replacement) = replacement {
+            self.replace_operand(&expression.left, replacement);
+            self.replace_operand(&expression.right, replacement);
+        }
+        visit::visit_expr_binary(self, expression);
+    }
+}
+
+impl RemoveTermVisitor<'_> {
+    fn replace_operand(&mut self, expression: &Expr, replacement: &str) {
+        if let Some(range) = span_range(self.source, expression.span()) {
+            self.mutations.push(Mutation::new(range, replacement));
+        }
+    }
+}
+
+impl Mutator for ErrorGuardMutator {
+    fn name(&self) -> &str {
+        "expression/error-guard"
+    }
+
+    fn mutations(&self, source: &str) -> Vec<Mutation> {
+        let Ok(file) = syn::parse_file(source) else {
+            return Vec::new();
+        };
+        let mut visitor = ErrorGuardVisitor {
+            source,
+            mutations: Vec::new(),
+        };
+        visitor.visit_file(&file);
+        visitor.mutations
+    }
+}
+
+struct ErrorGuardVisitor<'a> {
+    source: &'a str,
+    mutations: Vec<Mutation>,
+}
+
+impl<'ast> Visit<'ast> for ErrorGuardVisitor<'_> {
+    skip_non_expression_syntax!();
+
+    fn visit_expr_if(&mut self, expression: &'ast ExprIf) {
+        self.add_guard(&expression.cond);
+        visit::visit_expr_if(self, expression);
+    }
+}
+
+impl ErrorGuardVisitor<'_> {
+    fn add_guard(&mut self, expression: &Expr) {
+        let Expr::MethodCall(call) = expression else {
+            return;
+        };
+        if !call.args.is_empty() {
+            return;
+        }
+        let replacement = match call.method.to_string().as_str() {
+            "is_err" | "is_none" => "false",
+            "is_ok" | "is_some" => "true",
+            _ => return,
+        };
+        if let Some(range) = span_range(self.source, call.span()) {
+            self.mutations.push(Mutation::new(range, replacement));
+        }
+    }
+}
+
 impl Mutator for StringLiteralMutator {
     fn name(&self) -> &str {
         "expression/string-literal"

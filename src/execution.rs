@@ -1529,6 +1529,9 @@ fn mutation_plan(
         let text = fs::read_to_string(&source)
             .map_err(|error| run_error(format!("could not read {}: {error}", source.display())))?;
         let source_filter = filters.for_source(&source, &text).map_err(run_error)?;
+        if source_filter.skips_source() {
+            continue;
+        }
         workspaces.push(workspace.clone());
         let scope = CandidateScope {
             workspace: &workspace,

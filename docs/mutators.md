@@ -21,9 +21,11 @@ changes macro token input only for the documented Tokio selection forms.
 | `conditional/not` | Remove direct unary `!` from a condition or logical operand |
 | `expression/comparison` | `<` to `<=`, `<=` to `<`, `>` to `>=`, and `>=` to `>` |
 | `expression/context-nil` | Replace a direct `Some(value)` argument with `::core::option::Option::None` |
+| `expression/error-guard` | Replace `is_err()` or `is_none()` in an `if` condition with `false`, and `is_ok()` or `is_some()` with `true` |
 | `expression/errorf-wrap` | Replace a supported standard error source link with `::core::option::Option::None` |
 | `expression/logical` | `&&` to `||`, and `||` to `&&` |
 | `expression/recover-clear` | Make a supported standard panic catch resume the panic |
+| `expression/remove` | Replace a left or right operand of `&&` with `true`, or of `||` with `false` |
 | `expression/string-literal` | Change a direct, nonempty string operand of `==` or `!=` to `""` |
 | `loop/break` | Change `break` to `continue`, or `continue` to `break` |
 | `loop/condition` | Replace a `while` or `while let` condition with `false` |
@@ -76,6 +78,16 @@ that a local item shadows. A replacement that Cargo cannot type-check is
 `Skipped` before tests run. For a custom test command, Mutarust runs a candidate
 only when a concrete local function parameter proves the option type. It marks
 other candidates `Skipped` because the custom command selects its own compiler.
+
+`expression/remove` changes a direct left or right operand of `&&` or `||`. It
+replaces an `&&` operand with `true` and an `||` operand with `false`. It does
+not change bitwise operators.
+
+`expression/error-guard` changes a zero-argument method call used as a direct
+`if` condition. It replaces `is_err()` and `is_none()` with `false`. It
+replaces `is_ok()` and `is_some()` with `true`. It does not change these calls
+outside an `if` condition. This is the Rust adaptation of Mutago
+`expression/error-guard`, which collapses `err != nil` and `err == nil` guards.
 
 `statement/return` accepts an explicit `return value;` in a function, method,
 trait default method, or closure with an explicit return type. It supports

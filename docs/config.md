@@ -21,8 +21,8 @@ different value.
 
 | Field | Type | Purpose |
 | --- | --- | --- |
-| `skip_without_test` | Boolean | Set the skip-without-test policy. |
-| `skip_with_cfg` | Boolean | Set the conditional-compilation policy. |
+| `skip_without_test` | Boolean | Skip production source files that have no `#[cfg(test)]` unit tests. |
+| `skip_with_cfg` | Boolean | Skip mutations inside production items gated by a non-test `#[cfg(...)]`. |
 | `json_output` | Boolean | Write the full report to `report.json`. |
 | `html_output` | Boolean | Write the HTML report to `mutarust-report.html`. |
 | `silent_mode` | Boolean | Hide status output for individual mutants. |
@@ -38,6 +38,14 @@ group pattern with a final `*`, such as `conditional/*`, or `*` for all
 mutators.
 
 `skip_with_cfg` is the Rust adaptation of Mutago `skip_with_build_tags`.
+When true, Mutarust does not create a mutation whose changed range is inside a
+production item with a non-test `#[cfg(...)]` attribute. A crate-level
+`#![cfg(...)]` attribute excludes the whole file. `#[cfg(test)]` does not
+trigger this policy.
+
+`skip_without_test` is the Rust adaptation of Mutago `skip_without_test`.
+When true, Mutarust excludes a production source file that has no
+`#[cfg(test)]` item in that file.
 
 ## Command Priority
 
