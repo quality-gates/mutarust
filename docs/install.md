@@ -1,20 +1,27 @@
 # Install
 
-Install a released version with Cargo:
+## Requirements
+
+- Rust 1.85 or later
+- Cargo
+
+## Install a released version
 
 ```text
 cargo install mutarust
 ```
 
-For a source checkout, run:
+## Install from a source checkout
 
 ```text
 cargo install --path .
 ```
 
-Check the installed command:
+## Check the installed command
 
 ```text
 mutarust --help
 mutarust --version
 ```
+
+See [Quick Start](quickstart.md) for the first mutation run.

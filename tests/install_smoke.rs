@@ -102,9 +102,319 @@ fn installed_command_lists_builtin_mutators() {
         String::from_utf8(output.stdout)
             .expect("mutator list must be UTF-8")
             .trim(),
-        "arithmetic/assign_invert\narithmetic/assignment\narithmetic/base\narithmetic/bitwise\narithmetic/negate\nbranch/case\nbranch/else\nbranch/if\ncomposite/field-clear\nconcurrency/goroutine-remove\nconditional/bool-literal\nconditional/negated\nconditional/not\nexpression/comparison\nexpression/context-nil\nexpression/logical\nexpression/string-literal\nloop/break\nloop/condition\nloop/range_break\nnumbers/decrementer\nnumbers/float-negate\nnumbers/incrementer\nselect/case-remove\nselect/default-remove\nstatement/remove\nstatement/remove-self-assign\nstatement/return",
+        "arithmetic/assign_invert\narithmetic/assignment\narithmetic/base\narithmetic/bitwise\narithmetic/negate\nbranch/case\nbranch/else\nbranch/if\ncomposite/field-clear\nconcurrency/goroutine-remove\nconditional/bool-literal\nconditional/negated\nconditional/not\nexpression/comparison\nexpression/context-nil\nexpression/error-guard\nexpression/errorf-wrap\nexpression/logical\nexpression/recover-clear\nexpression/remove\nexpression/string-literal\nloop/break\nloop/condition\nloop/range_break\nnumbers/decrementer\nnumbers/float-negate\nnumbers/incrementer\nselect/case-remove\nselect/default-remove\nstatement/defer-remove\nstatement/remove\nstatement/remove-self-assign\nstatement/return",
         "the built-in mutator list must be stable and sorted"
     );
+}
+
+#[test]
+fn installed_command_prints_help_with_no_arguments() {
+    let root = smoke_root();
+    let install = install_command(&root);
+
+    let output = Command::new(command_path(&install))
+        .output()
+        .expect("installed mutarust must start");
+
+    assert!(output.status.success(), "no-argument help must succeed");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Mutation testing for Rust"),
+        "no-argument help must identify the command purpose"
+    );
+    assert!(
+        stdout.contains("--print-ast"),
+        "help must document syntax-tree mode"
+    );
+}
+
+#[test]
+fn installed_command_prints_parsed_syntax_trees() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = root.join("print-ast");
+    fs::create_dir_all(fixture.join("src")).expect("print-ast fixture must be created");
+    fs::write(
+        fixture.join("Cargo.toml"),
+        "[package]\nname = \"print_ast\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .expect("print-ast manifest must be written");
+    let source = fixture.join("src").join("lib.rs");
+    fs::write(&source, "pub fn ready() -> bool { true }\n")
+        .expect("print-ast source must be written");
+    let source_before = fs::read(&source).expect("print-ast source must be readable");
+
+    let output = Command::new(command_path(&install))
+        .arg("--print-ast")
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start for --print-ast");
+
+    assert!(
+        output.status.success(),
+        "--print-ast must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("print-ast output must be UTF-8");
+    let absolute = source
+        .canonicalize()
+        .unwrap_or(source.clone())
+        .display()
+        .to_string();
+    assert!(
+        stdout.starts_with(&format!("{absolute}\n")),
+        "print-ast must identify the source path first"
+    );
+    assert!(
+        stdout.contains("Item::Fn") && stdout.contains("sym: ready"),
+        "print-ast must show the parsed Rust syntax"
+    );
+    assert!(
+        stdout.ends_with("\n\n") || stdout.contains("\n\n"),
+        "print-ast must separate each source with a blank line"
+    );
+    assert_eq!(
+        fs::read(&source).expect("print-ast source must remain readable"),
+        source_before,
+        "print-ast must not change the user working tree"
+    );
+    assert!(
+        output.stderr.is_empty(),
+        "print-ast must not run tests or print command errors"
+    );
+}
+
+#[test]
+fn installed_command_prints_bash_completion_for_documented_options() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let command = command_path(&install);
+
+    let all = Command::new(&command)
+        .env("GO_FLAGS_COMPLETION", "1")
+        .output()
+        .expect("completion with no arguments must start");
+    assert_eq!(
+        all.status.code(),
+        Some(2),
+        "bash completion must use the mutago completion exit value"
+    );
+    let all_stdout = String::from_utf8(all.stdout).expect("completion output must be UTF-8");
+    let help = Command::new(&command)
+        .arg("--help")
+        .output()
+        .expect("help for completion parity must start");
+    assert!(
+        help.status.success(),
+        "help must succeed for completion parity"
+    );
+    let help_stdout = String::from_utf8(help.stdout).expect("help output must be UTF-8");
+    for option in all_stdout.lines().filter(|line| line.starts_with('-')) {
+        assert!(
+            help_stdout.contains(option),
+            "completion option {option} must appear in documented help"
+        );
+    }
+    assert!(
+        all_stdout.lines().any(|line| line == "[TARGET]..."),
+        "completion must advertise target arguments"
+    );
+    for option in [
+        "--help",
+        "--list-files",
+        "--print-ast",
+        "--list-mutators",
+        "--config",
+        "--dry-run",
+        "--git-diff-base",
+    ] {
+        assert!(
+            all_stdout.lines().any(|line| line == option),
+            "completion must include documented option {option}: {all_stdout}"
+        );
+    }
+
+    let prefix = Command::new(&command)
+        .env("GO_FLAGS_COMPLETION", "1")
+        .arg("--li")
+        .output()
+        .expect("prefixed completion must start");
+    assert_eq!(prefix.status.code(), Some(2));
+    let prefix_stdout =
+        String::from_utf8(prefix.stdout).expect("prefixed completion output must be UTF-8");
+    assert_eq!(
+        prefix_stdout.lines().collect::<Vec<_>>(),
+        vec!["--list-files", "--list-mutators"],
+        "prefix completion must match documented list options only"
+    );
+}
+
+#[test]
+fn installed_command_information_modes_match_on_terminal_and_pipe() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = root.join("info-modes");
+    fs::create_dir_all(fixture.join("src")).expect("info-mode fixture must be created");
+    fs::write(
+        fixture.join("Cargo.toml"),
+        "[package]\nname = \"info_modes\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .expect("info-mode manifest must be written");
+    let source = fixture.join("src").join("lib.rs");
+    fs::write(&source, "pub fn ready() -> bool { true }\n")
+        .expect("info-mode source must be written");
+    let source_before = fs::read(&source).expect("info-mode source must be readable");
+    let command = command_path(&install);
+
+    struct InformationMode<'a> {
+        args: &'a [&'a str],
+        env: Option<(&'a str, &'a str)>,
+    }
+
+    let modes = [
+        InformationMode {
+            args: &[],
+            env: None,
+        },
+        InformationMode {
+            args: &["--help"],
+            env: None,
+        },
+        InformationMode {
+            args: &["--list-mutators"],
+            env: None,
+        },
+        InformationMode {
+            args: &["--list-files", "src/lib.rs"],
+            env: None,
+        },
+        InformationMode {
+            args: &["--print-ast", "src/lib.rs"],
+            env: None,
+        },
+        InformationMode {
+            args: &[],
+            env: Some(("GO_FLAGS_COMPLETION", "1")),
+        },
+    ];
+
+    for mode in &modes {
+        let piped = run_information_mode(&command, &fixture, mode.args, mode.env, false);
+        let terminal = run_information_mode(&command, &fixture, mode.args, mode.env, true);
+        assert_eq!(
+            piped.status_code, terminal.status_code,
+            "mode {:?} env {:?} must keep the same exit value on a pipe and a terminal",
+            mode.args, mode.env
+        );
+        if mode.env.is_some() {
+            assert_eq!(piped.status_code, Some(2), "completion must exit 2");
+        } else {
+            assert_eq!(
+                piped.status_code,
+                Some(0),
+                "information mode {:?} must succeed",
+                mode.args
+            );
+        }
+        assert_eq!(
+            normalize_info_output(&piped.stdout),
+            normalize_info_output(&terminal.stdout),
+            "mode {:?} must print the same text on a pipe and a terminal",
+            mode.args
+        );
+        assert!(
+            !normalize_info_output(&piped.stdout).is_empty(),
+            "mode {:?} must print information output",
+            mode.args
+        );
+    }
+
+    assert_eq!(
+        fs::read(&source).expect("info-mode source must remain readable"),
+        source_before,
+        "information modes must not change the user working tree"
+    );
+}
+
+struct InformationModeOutput {
+    status_code: Option<i32>,
+    stdout: String,
+}
+
+fn run_information_mode(
+    command: &Path,
+    cwd: &Path,
+    args: &[&str],
+    env: Option<(&str, &str)>,
+    terminal: bool,
+) -> InformationModeOutput {
+    let output = if terminal {
+        run_on_terminal(command, cwd, args, env)
+    } else {
+        let mut process = Command::new(command);
+        process.args(args).current_dir(cwd);
+        apply_information_mode_env(&mut process, env);
+        process.output().expect("information mode must start")
+    };
+    InformationModeOutput {
+        status_code: output.status.code(),
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+    }
+}
+
+fn run_on_terminal(
+    command: &Path,
+    cwd: &Path,
+    args: &[&str],
+    env: Option<(&str, &str)>,
+) -> std::process::Output {
+    let mut process = if cfg!(target_os = "linux") {
+        let mut command_line = shell_quote(&command.display().to_string());
+        for arg in args {
+            command_line.push(' ');
+            command_line.push_str(&shell_quote(arg));
+        }
+        let mut process = Command::new("script");
+        // `-e` returns the child exit value. Without it, Linux `script` exits 0.
+        process.args(["-q", "-e", "-c", &command_line, "/dev/null"]);
+        process
+    } else {
+        let mut process = Command::new("script");
+        process.arg("-q").arg("/dev/null").arg(command).args(args);
+        process
+    };
+    process.current_dir(cwd);
+    apply_information_mode_env(&mut process, env);
+    process
+        .output()
+        .expect("terminal information mode must start")
+}
+
+fn apply_information_mode_env(process: &mut Command, env: Option<(&str, &str)>) {
+    // Isolate completion from the host so a pipe and a terminal start equal.
+    process.env_remove("GO_FLAGS_COMPLETION");
+    if let Some((key, value)) = env {
+        process.env(key, value);
+    }
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+fn normalize_info_output(text: &str) -> String {
+    let mut output = String::new();
+    for character in text.replace("\r\n", "\n").replace('\r', "\n").chars() {
+        match character {
+            '\u{08}' => {
+                output.pop();
+            }
+            '\u{04}' => {}
+            other => output.push(other),
+        }
+    }
+    output
 }
 
 #[test]
@@ -258,12 +568,14 @@ fn installed_command_classifies_expression_fixture_mutants() {
     );
     let stdout = String::from_utf8(output.stdout).expect("expression output must be UTF-8");
     assert!(
-        stdout.contains("Killed: 16")
+        stdout.contains("Killed: 22")
             && stdout.contains("Escaped: 1")
             && stdout.contains("Errored: 0")
-            && stdout.contains("Total: 17")
+            && stdout.contains("Total: 23")
             && stdout.contains("conditional/negated | 2 | 0 | 0 | 2")
             && stdout.contains("expression/comparison | 0 | 1 | 0 | 1")
+            && stdout.contains("expression/remove | 4 | 0 | 0 | 4")
+            && stdout.contains("expression/error-guard | 1 | 0 | 0 | 1")
             && stdout.contains("numbers/decrementer | 2 | 0 | 0 | 2")
             && stdout.contains("numbers/incrementer | 2 | 0 | 0 | 2"),
         "the fixture must classify every valid expression mutant: {stdout}"
@@ -508,6 +820,114 @@ fn assert_concurrency_selection_oracle(fixture: &Path, source: &[u8], stdout: &s
     assert_eq!(actual.join("\n") + "\n", expected);
 }
 
+#[test]
+fn installed_command_classifies_error_panic_and_cleanup_fixture_mutants() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_error_panic_cleanup_fixture(&root);
+    let source = fixture.join("src").join("lib.rs");
+    let source_before = fs::read(&source).expect("error fixture source must be readable");
+
+    let output = Command::new(command_path(&install))
+        .args([
+            "--workers",
+            "1",
+            "--enable",
+            "expression/errorf-wrap",
+            "--enable",
+            "expression/recover-clear",
+            "--enable",
+            "statement/defer-remove",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start for the error fixture");
+
+    assert!(
+        output.status.success(),
+        "error fixture run must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("error output must be UTF-8");
+    assert!(
+        stdout.contains("Killed: 3")
+            && stdout.contains("Escaped: 3")
+            && stdout.contains("Errored: 0")
+            && stdout.contains("Skipped: 1")
+            && stdout.contains("Total: 7")
+            && stdout.contains("expression/errorf-wrap | 1 | 1 | 0 | 2")
+            && stdout.contains("expression/recover-clear | 1 | 1 | 0 | 2")
+            && stdout.contains("statement/defer-remove | 1 | 1 | 1 | 3"),
+        "the fixture must classify each error, panic, and cleanup mutant: {stdout}"
+    );
+    assert_eq!(
+        stable_mutant_ids(&stdout),
+        vec![
+            "ba130386994e969a61fba20bd9efea6e",
+            "e07eaab28c22849c0ac5787dd7e2436f",
+            "2609b2967ac366d27b8373d14d364564",
+            "4e8e6f23d4ebd7340d39c685fe7ef120",
+            "1632a5d983edb4bea3aa4ab94bba802f",
+            "c125416f1e975c22130fd3329ec65797",
+            "0628e52a8c0aca297e73279f220b0588",
+        ],
+        "the error fixture IDs must stay stable: {stdout}"
+    );
+    assert!(
+        stdout.contains("-        ::std::option::Option::Some(&self.cause)")
+            && stdout.contains("+        ::core::option::Option::None")
+            && stdout.contains("-    ::std::panic::catch_unwind(|| 7).is_ok()")
+            && stdout.contains("+    match ::std::panic::catch_unwind(|| 7)")
+            && stdout.contains("-    ::core::mem::drop(cleanup);"),
+        "the error fixture must show readable diffs: {stdout}"
+    );
+    assert_error_panic_cleanup_oracle(&fixture, &source_before, &stdout);
+    assert_eq!(
+        fs::read(&source).expect("error fixture source must remain readable"),
+        source_before
+    );
+    assert!(
+        !fixture.join("target").exists(),
+        "the error fixture must not get a Cargo target directory"
+    );
+}
+
+fn assert_error_panic_cleanup_oracle(fixture: &Path, source: &[u8], stdout: &str) {
+    let expected = fs::read_to_string(fixture.join("expected-mutants.txt"))
+        .expect("expected error mutants must be readable");
+    let results = mutation_results(stdout);
+    let source = String::from_utf8(source.to_vec()).expect("error source must be UTF-8");
+    let registry = mutarust::Registry::builtins();
+    let names = [
+        "expression/errorf-wrap",
+        "expression/recover-clear",
+        "statement/defer-remove",
+    ];
+    let mut actual = Vec::new();
+    let mut state_index = 0;
+    for name in names {
+        for mutation in registry.get(name).unwrap().mutations(&source) {
+            let (range, replacement) = mutation.identity();
+            let original = source
+                .get(range)
+                .expect("error mutation range must be valid");
+            let (state, result_name) = results
+                .get(state_index)
+                .expect("each error mutant must have a state");
+            assert_eq!(*result_name, name, "result order must match plan order");
+            actual.push(format!(
+                "{name} :: {} :: {} :: {state}",
+                original.replace('\n', "\\n"),
+                replacement.replace('\n', "\\n")
+            ));
+            state_index += 1;
+        }
+    }
+    assert_eq!(state_index, results.len());
+    assert_eq!(actual.join("\n") + "\n", expected);
+}
+
 #[cfg(unix)]
 #[test]
 fn custom_command_skips_a_value_mutant_that_does_not_compile() {
@@ -674,6 +1094,196 @@ fn installed_command_reads_yaml_configuration_and_command_options_take_priority(
     assert!(
         disabled_output.contains("Killed: 0") && disabled_output.contains("Escaped: 0"),
         "a command mutator denylist must change the configuration selection: {disabled_output}"
+    );
+}
+
+#[test]
+fn installed_command_excludes_cfg_test_modules_from_mutation() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_mutation_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    fs::write(
+        &source,
+        "pub fn checked() -> bool { let value = true; value }\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn keeps_checked() {\n        let expected = true;\n        assert_eq!(super::checked(), expected);\n    }\n}\n",
+    )
+    .expect("cfg(test) fixture source must be written");
+
+    let output = Command::new(command_path(&install))
+        .args(["--enable", "conditional/bool-literal", "--dry-run"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start for cfg(test) exclusion");
+
+    assert!(
+        output.status.success(),
+        "cfg(test) exclusion must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("cfg(test) output must be UTF-8");
+    assert!(
+        stdout.contains("Total: 1 mutation(s) would be generated"),
+        "#[cfg(test)] modules must not contribute mutants: {stdout}"
+    );
+}
+
+#[test]
+fn installed_command_applies_skip_without_test_and_skip_with_cfg() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_mutation_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    fs::write(
+        &source,
+        "pub fn checked() -> bool { let value = true; value }\n\n#[cfg(feature = \"extra\")]\npub fn gated() -> bool { let value = true; value }\n",
+    )
+    .expect("skip policy source must be written");
+    let without_tests = fixture.join("skip-without-test.yml");
+    fs::write(
+        &without_tests,
+        "skip_without_test: true\nenable_mutators:\n  - conditional/bool-literal\n",
+    )
+    .expect("skip_without_test configuration must be written");
+    let without_tests_run = Command::new(command_path(&install))
+        .args(["--config"])
+        .arg(&without_tests)
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start with skip_without_test");
+    assert!(
+        without_tests_run.status.success(),
+        "skip_without_test must succeed: {}",
+        String::from_utf8_lossy(&without_tests_run.stderr)
+    );
+    let without_tests_stdout = String::from_utf8(without_tests_run.stdout)
+        .expect("skip_without_test output must be UTF-8");
+    assert!(
+        without_tests_stdout.contains("Total: 0"),
+        "a source without #[cfg(test)] must produce no mutants: {without_tests_stdout}"
+    );
+
+    fs::write(
+        &source,
+        "pub fn checked() -> bool { let value = true; value }\n\n#[cfg(feature = \"extra\")]\npub fn gated() -> bool { let value = true; value }\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn keeps_checked() {\n        assert!(super::checked());\n    }\n}\n",
+    )
+    .expect("skip_with_cfg source must be written");
+    let with_cfg = fixture.join("skip-with-cfg.yml");
+    fs::write(
+        &with_cfg,
+        "skip_with_cfg: true\nenable_mutators:\n  - conditional/bool-literal\n",
+    )
+    .expect("skip_with_cfg configuration must be written");
+    let with_cfg_run = Command::new(command_path(&install))
+        .args(["--config"])
+        .arg(&with_cfg)
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start with skip_with_cfg");
+    assert!(
+        with_cfg_run.status.success(),
+        "skip_with_cfg must succeed: {}",
+        String::from_utf8_lossy(&with_cfg_run.stderr)
+    );
+    let with_cfg_stdout =
+        String::from_utf8(with_cfg_run.stdout).expect("skip_with_cfg output must be UTF-8");
+    assert!(
+        with_cfg_stdout.contains("Total: 1") && with_cfg_stdout.contains("Killed: 1"),
+        "skip_with_cfg must keep unguarded mutants and drop cfg-gated ones: {with_cfg_stdout}"
+    );
+}
+
+#[test]
+fn installed_command_ignore_msi_with_no_mutations_and_html_output_flag() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_mutation_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    fs::write(&source, "pub fn checked() -> bool { true }\n")
+        .expect("no-mutant source must be written");
+
+    let failed_gate = Command::new(command_path(&install))
+        .args(["--enable", "conditional/bool-literal", "--min-msi", "75"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start with an empty score gate");
+    assert_eq!(
+        failed_gate.status.code(),
+        Some(4),
+        "zero mutants with a positive min-msi must fail: {}",
+        String::from_utf8_lossy(&failed_gate.stderr)
+    );
+
+    let ignored = Command::new(command_path(&install))
+        .args([
+            "--enable",
+            "conditional/bool-literal",
+            "--min-msi",
+            "75",
+            "--ignore-msi-with-no-mutations",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start with ignore-msi-with-no-mutations");
+    assert!(
+        ignored.status.success(),
+        "ignore-msi-with-no-mutations must pass with zero mutants: {}",
+        String::from_utf8_lossy(&ignored.stderr)
+    );
+
+    fs::write(
+        &source,
+        "pub fn checked() -> bool { let value = true; value }\n",
+    )
+    .expect("html output source must be written");
+    let html = Command::new(command_path(&install))
+        .args([
+            "--enable",
+            "conditional/bool-literal",
+            "--html-output",
+            "--silent",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start with --html-output");
+    assert!(
+        html.status.success(),
+        "--html-output must succeed: {}",
+        String::from_utf8_lossy(&html.stderr)
+    );
+    assert!(
+        fixture.join("mutarust-report.html").is_file(),
+        "--html-output must write mutarust-report.html"
+    );
+
+    let covered_config = fixture.join("covered-msi.yml");
+    fs::write(
+        &covered_config,
+        "min_covered_msi: 80\nenable_mutators:\n  - conditional/bool-literal\n",
+    )
+    .expect("covered-msi configuration must be written");
+    let covered_gate = Command::new(command_path(&install))
+        .args(["--config"])
+        .arg(&covered_config)
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start with configured min_covered_msi");
+    assert_eq!(
+        covered_gate.status.code(),
+        Some(4),
+        "configured min_covered_msi without --coverage must return exit value 4: {}",
+        String::from_utf8_lossy(&covered_gate.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&covered_gate.stderr).contains("covered-code mutation score"),
+        "configured min_covered_msi must name the covered-code gate: {}",
+        String::from_utf8_lossy(&covered_gate.stderr)
     );
 }
 
@@ -1008,14 +1618,89 @@ fn package_contains_the_configuration_contract() {
     let package = package_crate(&root.join("package-target"));
 
     for file in [
-        "docs/config.md",
-        "schema/mutarust.schema.json",
+        "LICENSE",
+        "README.md",
+        "CHANGELOG.md",
         "mutarust.yml.example",
+        "docs/config.md",
+        "docs/cli.md",
+        "docs/install.md",
+        "docs/quickstart.md",
+        "docs/mutators.md",
+        "docs/json-outputs.md",
+        "docs/custom-mutators.md",
+        "docs/ci.md",
+        "docs/release.md",
+        "docs/glossary.md",
+        "schema/mutarust.schema.json",
+        "schema/report.schema.json",
+        "schema/summary.schema.json",
+        "schema/agentic.schema.json",
+        "schema/gitlab.schema.json",
+        "scripts/mutarust-bash_completion.sh",
     ] {
         assert!(
             package.join(file).is_file(),
             "the package must contain {file}"
         );
+    }
+
+    for path in [
+        ".agents",
+        ".serena",
+        "skills-lock.json",
+        "githooks",
+        "docs/agents",
+        "AGENTS.md",
+        "CLAUDE.md",
+    ] {
+        assert!(
+            !package.join(path).exists(),
+            "the package must exclude non-user path {path}"
+        );
+    }
+
+    let version = env!("CARGO_PKG_VERSION");
+    let manifest = fs::read_to_string(package.join("Cargo.toml"))
+        .expect("packaged Cargo.toml must be readable");
+    // The dependency tables repeat keys such as `version`, so a whole-file
+    // search can pass on a dependency instead of the package itself.
+    let package_section = manifest_section(&manifest, "[package]");
+    for required in [
+        "license = \"MIT\"".to_owned(),
+        "repository = \"https://github.com/quality-gates/mutarust\"".to_owned(),
+        "homepage = \"https://github.com/quality-gates/mutarust\"".to_owned(),
+        "documentation = \"https://quality-gates.github.io/mutarust/\"".to_owned(),
+        format!("version = \"{version}\""),
+        "\"mutation-testing\"".to_owned(),
+        "\"testing\"".to_owned(),
+        "\"rust\"".to_owned(),
+        "\"development-tools::testing\"".to_owned(),
+        "\"command-line-utilities\"".to_owned(),
+    ] {
+        assert!(
+            package_section.contains(&required),
+            "the packaged [package] metadata must include {required}"
+        );
+    }
+
+    let changelog = fs::read_to_string(package.join("CHANGELOG.md"))
+        .expect("packaged CHANGELOG.md must be readable");
+    assert!(
+        changelog.contains(&format!("## {version}")),
+        "the packaged change log must record the {version} release"
+    );
+}
+
+/// Returns the lines of one top-level Cargo manifest table, without its header.
+fn manifest_section<'a>(manifest: &'a str, header: &str) -> &'a str {
+    let body = manifest
+        .split_once(&format!("\n{header}\n"))
+        .unwrap_or_else(|| panic!("the packaged manifest must have a {header} table"))
+        .1;
+    match body.find("\n[") {
+        Some(end) => &body[..end],
+        None => body,
     }
 }
 
@@ -1275,6 +1960,1108 @@ fn installed_command_reports_stable_evidence_and_enforces_total_score() {
             && !one_mutant_stdout.contains("Mutation score:")
             && !one_mutant_stdout.contains("Per-mutator results:"),
         "one-mutant execution must show one evidence result without a summary or score gate: {one_mutant_stdout}"
+    );
+}
+
+#[test]
+fn installed_command_writes_html_and_agentic_reports() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_mutation_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    let config = fixture.join("mutarust.yml");
+    fs::write(
+        &config,
+        "html_output: true\nenable_mutators:\n  - conditional/bool-literal\n",
+    )
+    .expect("html report configuration must be written");
+    let html_report = fixture.join("mutarust-report.html");
+    let agentic_report = fixture.join("mutarust-agentic.json");
+
+    let without_reports = Command::new(command_path(&install))
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start without html or agentic options");
+    assert!(
+        without_reports.status.success(),
+        "a run without report options must succeed: {}",
+        String::from_utf8_lossy(&without_reports.stderr)
+    );
+    assert!(
+        !html_report.exists() && !agentic_report.exists(),
+        "html and agentic reports must be written only when enabled"
+    );
+
+    let output = Command::new(command_path(&install))
+        .args([
+            "--config",
+            config.to_str().expect("config path must be UTF-8"),
+            "--logger-agentic-json",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start with html and agentic reports");
+    assert!(
+        output.status.success(),
+        "html and agentic report run must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let html = fs::read_to_string(&html_report).expect("html report must be readable");
+    assert!(
+        html.contains("<!DOCTYPE html>"),
+        "html must be a document: {html}"
+    );
+    assert!(
+        html.contains("Total Mutants"),
+        "html must show run counts: {html}"
+    );
+    assert!(
+        html.contains("Mutation score"),
+        "html must show total score: {html}"
+    );
+    assert!(
+        html.contains("Covered-code mutation score"),
+        "html must show covered score: {html}"
+    );
+    assert!(
+        html.contains("Per-mutator results") && html.contains("conditional/bool-literal"),
+        "html must show per-mutator results: {html}"
+    );
+    assert!(
+        html.contains("checked/src/lib.rs") && html.contains("Diff:"),
+        "html must show escaped-mutant evidence: {html}"
+    );
+    assert!(
+        !html.contains("http://") && !html.contains("https://") && !html.contains("<link "),
+        "html must not load external assets: {html}"
+    );
+
+    let agentic = read_json_object(&agentic_report);
+    assert!(
+        agentic["generated_at"]
+            .as_str()
+            .expect("generated_at")
+            .ends_with('Z'),
+        "agentic report must include generation time: {agentic}"
+    );
+    assert_eq!(agentic["msi"], 0.5);
+    assert_eq!(agentic["escaped_count"], 1);
+    assert!(
+        agentic["reminder"]
+            .as_str()
+            .expect("reminder")
+            .contains("public API"),
+        "agentic report must include an interpretation reminder: {agentic}"
+    );
+    let mutant = &agentic["mutants"][0];
+    assert_eq!(mutant["file"], "checked/src/lib.rs");
+    assert_eq!(mutant["line"], 2);
+    assert_eq!(mutant["mutator"], "conditional/bool-literal");
+    assert!(
+        mutant["id"]
+            .as_str()
+            .expect("id")
+            .chars()
+            .all(|ch| ch.is_ascii_hexdigit()),
+        "escaped mutant must include a stable ID: {mutant}"
+    );
+    assert!(
+        mutant["diff"]
+            .as_str()
+            .expect("diff")
+            .contains("checked/src/lib.rs"),
+        "escaped mutant must include a diff: {mutant}"
+    );
+    assert_eq!(mutant["context_start_line"], 1);
+    assert!(
+        mutant["context_lines"]
+            .as_array()
+            .expect("context_lines")
+            .iter()
+            .any(|line| line.as_str().unwrap_or_default().contains("unchecked")),
+        "escaped mutant must include source context: {mutant}"
+    );
+    assert!(
+        mutant["test_files"]
+            .as_array()
+            .expect("test_files")
+            .iter()
+            .any(|path| path == "checked/tests/mutation.rs"),
+        "escaped mutant must include nearby test files: {mutant}"
+    );
+    assert!(
+        mutant["description"]
+            .as_str()
+            .expect("description")
+            .contains("Changes:")
+            || mutant["description"]
+                .as_str()
+                .expect("description")
+                .contains("boolean"),
+        "escaped mutant must include a description: {mutant}"
+    );
+    assert!(
+        mutant["kill_hint"]
+            .as_str()
+            .expect("kill_hint")
+            .contains("test"),
+        "escaped mutant must include a test hint: {mutant}"
+    );
+    validate_agentic_report_schema(&agentic);
+
+    let empty_config = fixture.join("empty-html-agentic.yml");
+    fs::write(
+        &empty_config,
+        "html_output: true\nenable_mutators:\n  - conditional/bool-literal\nignore_source_lines:\n  - '.*'\n",
+    )
+    .expect("empty report configuration must be written");
+    let _ = fs::remove_file(&html_report);
+    let _ = fs::remove_file(&agentic_report);
+    let empty_output = Command::new(command_path(&install))
+        .args([
+            "--config",
+            empty_config.to_str().expect("config path must be UTF-8"),
+            "--logger-agentic-json",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start for empty html and agentic reports");
+    assert!(
+        empty_output.status.success(),
+        "empty html and agentic report run must succeed: {}",
+        String::from_utf8_lossy(&empty_output.stderr)
+    );
+    let empty_html = fs::read_to_string(&html_report).expect("empty html report must be readable");
+    assert!(
+        empty_html.contains("No escaped mutants."),
+        "empty html report must stay self-contained: {empty_html}"
+    );
+    let empty_agentic = read_json_object(&agentic_report);
+    assert_eq!(empty_agentic["escaped_count"], 0);
+    assert!(
+        empty_agentic["mutants"]
+            .as_array()
+            .expect("mutants")
+            .is_empty()
+    );
+    validate_agentic_report_schema(&empty_agentic);
+}
+
+#[test]
+fn installed_command_emits_github_and_gitlab_ci_results() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_mutation_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    let config = fixture.join("mutarust.yml");
+    fs::write(&config, "enable_mutators:\n  - conditional/bool-literal\n")
+        .expect("CI report configuration must be written");
+    let report_config = fixture.join("ci-report.yml");
+    fs::write(
+        &report_config,
+        "json_output: true\nenable_mutators:\n  - conditional/bool-literal\n",
+    )
+    .expect("CI JSON report configuration must be written");
+    let gitlab_report = fixture.join("mutarust-gitlab.json");
+    let full_report = fixture.join("report.json");
+
+    let without_ci = Command::new(command_path(&install))
+        .args([
+            "--config",
+            config.to_str().expect("config path must be UTF-8"),
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start without CI loggers");
+    assert!(
+        without_ci.status.success(),
+        "a run without CI loggers must succeed: {}",
+        String::from_utf8_lossy(&without_ci.stderr)
+    );
+    let without_stdout =
+        String::from_utf8(without_ci.stdout).expect("stdout without CI loggers must be UTF-8");
+    assert!(
+        !without_stdout.contains("::warning ") && !gitlab_report.exists(),
+        "CI results must be written only when enabled"
+    );
+
+    let output = Command::new(command_path(&install))
+        .args([
+            "--config",
+            report_config
+                .to_str()
+                .expect("report config path must be UTF-8"),
+            "--logger-github",
+            "--logger-gitlab",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start with CI loggers");
+    assert!(
+        output.status.success(),
+        "CI logger run must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout).expect("CI logger stdout must be UTF-8");
+    let warnings = stdout
+        .lines()
+        .filter(|line| line.starts_with("::warning "))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        warnings.len(),
+        1,
+        "GitHub output must warn only for escaped mutants: {stdout}"
+    );
+    let warning = warnings[0];
+    assert!(
+        warning.contains("file=checked/src/lib.rs")
+            && warning.contains("line=2")
+            && warning.contains("title=Mutant escaped (conditional/bool-literal)")
+            && warning.contains("::Escaped mutation at checked/src/lib.rs:2"),
+        "GitHub annotation must use repository-relative paths and correct lines: {warning}"
+    );
+
+    let gitlab = read_json_array(&gitlab_report);
+    assert_eq!(
+        gitlab
+            .as_array()
+            .expect("GitLab report must be an array")
+            .len(),
+        1,
+        "GitLab report must list one escaped mutant: {gitlab}"
+    );
+    let finding = &gitlab[0];
+    assert_eq!(finding["type"], "issue");
+    assert_eq!(finding["check_name"], "conditional/bool-literal");
+    assert_eq!(finding["severity"], "minor");
+    assert_eq!(finding["location"]["path"], "checked/src/lib.rs");
+    assert_eq!(finding["location"]["lines"]["begin"], 2);
+    assert!(
+        finding["description"]
+            .as_str()
+            .expect("description")
+            .contains("Escaped mutant (conditional/bool-literal) at checked/src/lib.rs:2"),
+        "GitLab description must name the escaped mutant: {finding}"
+    );
+    let fingerprint = finding["fingerprint"]
+        .as_str()
+        .expect("fingerprint")
+        .to_owned();
+    let full = read_json_object(&full_report);
+    assert_eq!(
+        fingerprint,
+        full["escaped"][0]["id"].as_str().expect("escaped id"),
+        "GitLab fingerprint must match the stable escaped mutant ID: {finding}"
+    );
+    validate_gitlab_report_schema(&gitlab);
+
+    let special = fixture.join("checked").join("src").join("a%b,c:d.rs");
+    fs::write(
+        &special,
+        "pub fn special() -> bool { let value = true; value }\n",
+    )
+    .expect("special-character source must be written");
+    let special_output = Command::new(command_path(&install))
+        .args([
+            "--config",
+            config.to_str().expect("config path must be UTF-8"),
+            "--logger-github",
+            "--exec",
+            "false",
+        ])
+        .arg(&special)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start for special-character annotations");
+    assert!(
+        special_output.status.success(),
+        "special-character annotation run must succeed: {}",
+        String::from_utf8_lossy(&special_output.stderr)
+    );
+    let special_stdout =
+        String::from_utf8(special_output.stdout).expect("special stdout must be UTF-8");
+    let special_warning = special_stdout
+        .lines()
+        .find(|line| line.starts_with("::warning "))
+        .expect("special-character source must emit a GitHub warning");
+    assert!(
+        special_warning.contains("file=checked/src/a%25b%2Cc%3Ad.rs")
+            && special_warning.contains("::Escaped mutation at checked/src/a%25b,c:d.rs:1"),
+        "special characters in GitHub annotations must be escaped: {special_warning}"
+    );
+    let _ = fs::remove_file(&special);
+
+    let empty_config = fixture.join("empty-ci.yml");
+    fs::write(
+        &empty_config,
+        "enable_mutators:\n  - conditional/bool-literal\nignore_source_lines:\n  - '.*'\n",
+    )
+    .expect("empty CI configuration must be written");
+    let _ = fs::remove_file(&gitlab_report);
+    let empty_output = Command::new(command_path(&install))
+        .args([
+            "--config",
+            empty_config.to_str().expect("config path must be UTF-8"),
+            "--logger-github",
+            "--logger-gitlab",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start for empty CI output");
+    assert!(
+        empty_output.status.success(),
+        "empty CI run must succeed: {}",
+        String::from_utf8_lossy(&empty_output.stderr)
+    );
+    let empty_stdout =
+        String::from_utf8(empty_output.stdout).expect("empty CI stdout must be UTF-8");
+    assert!(
+        !empty_stdout.contains("::warning "),
+        "a no-mutant run must emit no GitHub warnings: {empty_stdout}"
+    );
+    let empty_gitlab = read_json_array(&gitlab_report);
+    assert_eq!(
+        empty_gitlab
+            .as_array()
+            .expect("empty GitLab report must be an array"),
+        &Vec::<serde_json::Value>::new()
+    );
+    validate_gitlab_report_schema(&empty_gitlab);
+
+    let no_escape_config = fixture.join("no-escape-ci.yml");
+    fs::write(
+        &no_escape_config,
+        "enable_mutators:\n  - conditional/bool-literal\n",
+    )
+    .expect("no-escape CI configuration must be written");
+    let _ = fs::remove_file(&gitlab_report);
+    let no_escape_output = Command::new(command_path(&install))
+        .args([
+            "--config",
+            no_escape_config
+                .to_str()
+                .expect("no-escape config path must be UTF-8"),
+            "--match",
+            "^checked$",
+            "--logger-github",
+            "--logger-gitlab",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start for no-escape CI output");
+    assert!(
+        no_escape_output.status.success(),
+        "no-escape CI run must succeed: {}",
+        String::from_utf8_lossy(&no_escape_output.stderr)
+    );
+    let no_escape_stdout =
+        String::from_utf8(no_escape_output.stdout).expect("no-escape CI stdout must be UTF-8");
+    assert!(
+        !no_escape_stdout.contains("::warning "),
+        "a no-escape run must emit no GitHub warnings: {no_escape_stdout}"
+    );
+    let no_escape_gitlab = read_json_array(&gitlab_report);
+    assert_eq!(
+        no_escape_gitlab
+            .as_array()
+            .expect("no-escape GitLab report must be an array"),
+        &Vec::<serde_json::Value>::new()
+    );
+    validate_gitlab_report_schema(&no_escape_gitlab);
+
+    let git_fixture = git_mutation_fixture(&root, "ci-changed-lines", "main");
+    write_git_source(
+        &git_fixture,
+        "src/lib.rs",
+        "pub fn kept() -> bool { let value = true; value }\npub fn changed() -> bool { let value = true; value }\n",
+    );
+    fs::create_dir_all(git_fixture.join("tests")).expect("Git CI tests must be created");
+    fs::write(
+        git_fixture.join("tests").join("mutation.rs"),
+        "#[test]\nfn detects_kept() {\n    assert!(ci_changed_lines::kept());\n}\n",
+    )
+    .expect("Git CI test must be written");
+    commit_all(&git_fixture, "base");
+    run_git(&git_fixture, &["switch", "-c", "feature"]);
+    write_git_source(
+        &git_fixture,
+        "src/lib.rs",
+        "pub fn kept() -> bool { let value = true; value }\npub fn changed() -> bool { let value = false; value }\n",
+    );
+    let changed_source = git_fixture.join("src").join("lib.rs");
+    let changed_config = git_fixture.join("mutarust.yml");
+    fs::write(
+        &changed_config,
+        "enable_mutators:\n  - conditional/bool-literal\n",
+    )
+    .expect("changed-line CI configuration must be written");
+    let changed_gitlab = git_fixture.join("mutarust-gitlab.json");
+    let changed_output = Command::new(command_path(&install))
+        .args([
+            "--config",
+            changed_config
+                .to_str()
+                .expect("changed config path must be UTF-8"),
+            "--git-diff-lines",
+            "--git-diff-base",
+            "main",
+            "--logger-github",
+            "--logger-gitlab",
+            "--exec",
+            "false",
+        ])
+        .arg(&changed_source)
+        .current_dir(&git_fixture)
+        .output()
+        .expect("installed mutarust must start for changed-line CI output");
+    assert!(
+        changed_output.status.success(),
+        "changed-line CI run must succeed: {}",
+        String::from_utf8_lossy(&changed_output.stderr)
+    );
+    let changed_stdout =
+        String::from_utf8(changed_output.stdout).expect("changed-line stdout must be UTF-8");
+    let changed_warnings = changed_stdout
+        .lines()
+        .filter(|line| line.starts_with("::warning "))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        changed_warnings.len(),
+        1,
+        "changed-line runs must report only selected-scope findings: {changed_stdout}"
+    );
+    assert!(
+        changed_warnings[0].contains("line=2"),
+        "changed-line GitHub finding must use the changed line: {}",
+        changed_warnings[0]
+    );
+    let changed_findings = read_json_array(&changed_gitlab);
+    assert_eq!(
+        changed_findings
+            .as_array()
+            .expect("changed GitLab report must be an array")
+            .len(),
+        1
+    );
+    assert_eq!(changed_findings[0]["location"]["lines"]["begin"], 2);
+    assert_eq!(changed_findings[0]["location"]["path"], "src/lib.rs");
+}
+
+#[test]
+fn installed_command_writes_full_and_compact_json_reports() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_mutation_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    let config = fixture.join("mutarust.yml");
+    fs::write(
+        &config,
+        "json_output: true\nenable_mutators:\n  - conditional/bool-literal\n",
+    )
+    .expect("report configuration must be written");
+    let full_report = fixture.join("report.json");
+    let compact_summary = fixture.join("mutarust-summary.json");
+
+    let without_reports = Command::new(command_path(&install))
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start without report options");
+    assert!(
+        without_reports.status.success(),
+        "a run without report options must succeed: {}",
+        String::from_utf8_lossy(&without_reports.stderr)
+    );
+    assert!(
+        !full_report.exists() && !compact_summary.exists(),
+        "reports must be written only when enabled"
+    );
+
+    let output = Command::new(command_path(&install))
+        .args([
+            "--config",
+            config.to_str().expect("config path must be UTF-8"),
+            "--logger-summary-json",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start with JSON reports");
+    assert!(
+        output.status.success(),
+        "JSON report run must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let full = read_json_object(&full_report);
+    assert_eq!(full["metadata"]["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(full["metadata"]["hasCoverage"], false);
+    assert_eq!(full["metadata"]["oneMutant"], false);
+    assert_eq!(full["stats"]["totalMutantsCount"], 2);
+    assert_eq!(full["stats"]["killedCount"], 1);
+    assert_eq!(full["stats"]["escapedCount"], 1);
+    assert_eq!(full["stats"]["msi"], 0.5);
+    assert_eq!(full["stats"]["coveredCodeMsi"], 0.0);
+    assert!(full["stats"]["msi"].as_f64().expect("msi") <= 1.0);
+    assert_eq!(
+        full["killed"][0]["mutator"]["originalFilePath"],
+        "checked/src/lib.rs"
+    );
+    assert_eq!(full["killed"][0]["mutator"]["originalStartLine"], 1);
+    assert_eq!(
+        full["escaped"][0]["mutator"]["originalFilePath"],
+        "checked/src/lib.rs"
+    );
+    assert_eq!(full["escaped"][0]["mutator"]["originalStartLine"], 2);
+    let ids = [
+        full["killed"][0]["id"]
+            .as_str()
+            .expect("killed id")
+            .to_owned(),
+        full["escaped"][0]["id"]
+            .as_str()
+            .expect("escaped id")
+            .to_owned(),
+    ];
+    assert!(
+        ids.contains(&"4582b234c128077507b7558eb62c337e".to_owned())
+            && ids.contains(&"c2b28e81b2cc0af0ff4a6a1225106223".to_owned()),
+        "full report must include stable mutant IDs: {full}"
+    );
+    assert!(
+        full["escaped"][0]["diff"]
+            .as_str()
+            .expect("escaped diff")
+            .contains("checked/src/lib.rs"),
+        "full report diffs must keep repository-relative paths: {full}"
+    );
+    assert!(
+        full["mutatorStats"]
+            .as_array()
+            .expect("mutatorStats")
+            .iter()
+            .any(|entry| entry["name"] == "conditional/bool-literal"),
+        "full report must include mutator stats: {full}"
+    );
+    validate_full_report_schema(&full);
+    validate_compact_summary_schema(&full["stats"]);
+
+    let summary = read_json_object(&compact_summary);
+    assert_eq!(summary["totalMutantsCount"], 2);
+    assert_eq!(summary["killedCount"], 1);
+    assert_eq!(summary["escapedCount"], 1);
+    assert_eq!(summary["msi"], 0.5);
+    assert_eq!(summary["coveredCodeMsi"], 0.0);
+    validate_compact_summary_schema(&summary);
+
+    let empty_config = fixture.join("empty-report.yml");
+    fs::write(
+        &empty_config,
+        "json_output: true\nenable_mutators:\n  - conditional/bool-literal\nignore_source_lines:\n  - '.*'\n",
+    )
+    .expect("empty-run configuration must be written");
+    let empty_run = Command::new(command_path(&install))
+        .args([
+            "--config",
+            empty_config.to_str().expect("config path must be UTF-8"),
+            "--logger-summary-json",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start for an empty report run");
+    assert!(
+        empty_run.status.success(),
+        "empty report run must succeed: {}",
+        String::from_utf8_lossy(&empty_run.stderr)
+    );
+    let empty = read_json_object(&full_report);
+    assert_eq!(empty["stats"]["totalMutantsCount"], 0);
+    assert_eq!(empty["stats"]["msi"], 0.0);
+    assert!(empty["escaped"].as_array().expect("escaped").is_empty());
+    assert!(empty["killed"].as_array().expect("killed").is_empty());
+    assert!(empty["errored"].as_array().expect("errored").is_empty());
+    assert!(empty.get("notCovered").is_none());
+    assert!(empty.get("generated").is_none());
+    validate_full_report_schema(&empty);
+
+    let selected_id = "4582b234c128077507b7558eb62c337e";
+    let one_mutant = Command::new(command_path(&install))
+        .args([
+            "--config",
+            config.to_str().expect("config path must be UTF-8"),
+            "--logger-summary-json",
+            "--run-mutant-id",
+            selected_id,
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start for one-mutant reports");
+    assert!(
+        one_mutant.status.success(),
+        "one-mutant report run must succeed: {}",
+        String::from_utf8_lossy(&one_mutant.stderr)
+    );
+    let one = read_json_object(&full_report);
+    assert_eq!(one["metadata"]["oneMutant"], true);
+    assert_eq!(one["stats"]["totalMutantsCount"], 1);
+    let one_ids = report_mutant_ids(&one);
+    assert_eq!(one_ids, vec![selected_id.to_owned()]);
+    validate_full_report_schema(&one);
+
+    let coverage_fixture = write_coverage_fixture(&root);
+    let coverage_source = coverage_fixture.join("checked").join("src").join("lib.rs");
+    let coverage_config = coverage_fixture.join("mutarust.yml");
+    fs::write(
+        &coverage_config,
+        "json_output: true\nenable_mutators:\n  - conditional/bool-literal\n",
+    )
+    .expect("coverage report configuration must be written");
+    let coverage_report = coverage_fixture.join("report.json");
+    let fake_cargo = root.join("json-report-coverage-cargo");
+    let temporary_root = root.join("json-report-coverage-temporary");
+    fs::create_dir(&temporary_root).expect("coverage temporary root must be created");
+    write_json_report_coverage_cargo(&fake_cargo);
+    let coverage_run = Command::new(command_path(&install))
+        .args([
+            "--config",
+            coverage_config
+                .to_str()
+                .expect("coverage config path must be UTF-8"),
+            "--logger-summary-json",
+            "--coverage",
+            "--per-test",
+            "--workers",
+            "1",
+        ])
+        .arg(&coverage_source)
+        .current_dir(&coverage_fixture)
+        .env("CARGO", &fake_cargo)
+        .env("MUTARUST_REAL_CARGO", env!("CARGO"))
+        .env("MUTARUST_COVERAGE_SOURCE", &coverage_source)
+        .env("TMPDIR", &temporary_root)
+        .output()
+        .expect("installed mutarust must start for coverage reports");
+    assert!(
+        coverage_run.status.success(),
+        "coverage report run must succeed: {}",
+        String::from_utf8_lossy(&coverage_run.stderr)
+    );
+    let covered = read_json_object(&coverage_report);
+    assert_eq!(covered["metadata"]["hasCoverage"], true);
+    assert_eq!(covered["stats"]["notCoveredCount"], 1);
+    assert_eq!(covered["stats"]["killedCount"], 1);
+    assert_eq!(covered["stats"]["escapedCount"], 1);
+    assert_eq!(covered["stats"]["msi"], 1.0 / 3.0);
+    assert_eq!(covered["stats"]["coveredCodeMsi"], 0.5);
+    assert_eq!(
+        covered["notCovered"].as_array().expect("notCovered").len(),
+        1
+    );
+    assert_eq!(
+        covered["notCovered"][0]["mutator"]["originalFilePath"],
+        "checked/src/lib.rs"
+    );
+    assert_eq!(covered["notCovered"][0]["mutator"]["originalStartLine"], 3);
+    validate_full_report_schema(&covered);
+    validate_compact_summary_schema(&read_json_object(
+        &coverage_fixture.join("mutarust-summary.json"),
+    ));
+
+    let baseline = fixture.join("mutarust-baseline.json");
+    let _ = fs::remove_file(&full_report);
+    let _ = fs::remove_file(&compact_summary);
+    let baseline_update = Command::new(command_path(&install))
+        .args([
+            "--config",
+            config.to_str().expect("config path must be UTF-8"),
+            "--logger-summary-json",
+            "--baseline",
+            baseline.to_str().expect("baseline path must be UTF-8"),
+            "--update-baseline",
+            "--exec",
+            "false",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start for baseline report form");
+    assert!(
+        baseline_update.status.success(),
+        "baseline update must succeed: {}",
+        String::from_utf8_lossy(&baseline_update.stderr)
+    );
+    assert!(
+        baseline.exists() && !full_report.exists() && !compact_summary.exists(),
+        "baseline update must write the baseline and must not write JSON reports"
+    );
+}
+
+fn write_json_report_coverage_cargo(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+
+    // Match the coverage smoke harness: normal map leaves line 3 uncovered and
+    // per-test maps cover only the matching test for lines 1 and 2.
+    fs::write(
+        path,
+        "#!/bin/sh\nif [ \"$1\" = \"metadata\" ]; then\n  exec \"$MUTARUST_REAL_CARGO\" \"$@\"\nfi\nif [ \"$1\" = \"llvm-cov\" ]; then\n  output=\n  while [ \"$#\" -gt 0 ]; do\n    if [ \"$1\" = \"--output-path\" ]; then\n      output=$2\n      break\n    fi\n    shift\n  done\n  case \" $* \" in\n    *\" --exact detects_detected \"*) data='DA:1,1' ;;\n    *\" --exact detects_escaped \"*) data='DA:2,1' ;;\n    *) data='DA:1,1\\nDA:2,1\\nDA:3,0' ;;\n  esac\n  printf 'SF:%s\\n%b\\nend_of_record\\n' \"$MUTARUST_COVERAGE_SOURCE\" \"$data\" > \"$output\"\n  exit 0\nfi\ncase \" $* \" in\n  *\" --list \"*) printf 'detects_detected: test\\ndetects_escaped: test\\n'; exit 0 ;;\nesac\nif ! grep -q false checked/src/lib.rs 2>/dev/null; then\n  exit 0\nfi\nif grep -q 'pub fn detected() -> bool { let value = false; value }' checked/src/lib.rs; then\n  mutant=detected\nelif grep -q 'pub fn escaped() -> bool { let value = false; value }' checked/src/lib.rs; then\n  mutant=escaped\nelif grep -q 'pub fn uncovered() -> bool { let value = false; value }' checked/src/lib.rs; then\n  mutant=uncovered\nelse\n  exit 94\nfi\ncase \" $* \" in\n  *\" --no-run \"*) exit 0 ;;\n  *\" --exact detects_detected \"*) exit 1 ;;\n  *\" --exact detects_escaped \"*) exit 0 ;;\n  *) exit 93 ;;\nesac\n",
+    )
+    .expect("coverage Cargo command must be written");
+    fs::set_permissions(path, fs::Permissions::from_mode(0o755))
+        .expect("coverage Cargo command must be executable");
+}
+
+fn read_json_object(path: &Path) -> serde_json::Value {
+    let text = fs::read_to_string(path)
+        .unwrap_or_else(|error| panic!("{} must be readable: {error}", path.display()));
+    serde_json::from_str(&text)
+        .unwrap_or_else(|error| panic!("{} must be valid JSON: {error}\n{text}", path.display()))
+}
+
+fn read_json_array(path: &Path) -> serde_json::Value {
+    let value = read_json_object(path);
+    assert!(
+        value.is_array(),
+        "{} must be a JSON array: {value}",
+        path.display()
+    );
+    value
+}
+
+fn validate_gitlab_report_schema(report: &serde_json::Value) {
+    validate_against_published_schema(
+        report,
+        published_gitlab_schema(),
+        "GitLab Code Quality report",
+    );
+}
+
+fn published_gitlab_schema() -> serde_json::Value {
+    serde_json::from_str(include_str!("../schema/gitlab.schema.json"))
+        .expect("GitLab schema must be valid JSON")
+}
+
+fn report_mutant_ids(report: &serde_json::Value) -> Vec<String> {
+    [
+        "escaped",
+        "killed",
+        "skipped",
+        "errored",
+        "notCovered",
+        "generated",
+    ]
+    .into_iter()
+    .flat_map(|key| {
+        report
+            .get(key)
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|mutant| mutant["id"].as_str().map(str::to_owned))
+    })
+    .collect()
+}
+
+fn validate_compact_summary_schema(summary: &serde_json::Value) {
+    validate_against_published_schema(summary, published_summary_schema(), "compact summary");
+}
+
+fn validate_agentic_report_schema(report: &serde_json::Value) {
+    validate_against_published_schema(report, published_agentic_schema(), "agentic report");
+}
+
+fn published_agentic_schema() -> serde_json::Value {
+    serde_json::from_str(include_str!("../schema/agentic.schema.json"))
+        .expect("agentic schema must be valid JSON")
+}
+
+fn validate_full_report_schema(report: &serde_json::Value) {
+    validate_against_published_schema(report, published_full_report_schema(), "full report");
+    for key in [
+        "escaped",
+        "killed",
+        "errored",
+        "skipped",
+        "notCovered",
+        "generated",
+    ] {
+        let Some(mutants) = report.get(key) else {
+            continue;
+        };
+        for mutant in mutants.as_array().expect("{key} must be an array") {
+            let path = mutant["mutator"]["originalFilePath"]
+                .as_str()
+                .expect("originalFilePath");
+            assert!(
+                !path.is_empty() && !path.contains('\\') && !path.starts_with('/'),
+                "source paths must be repository-relative with / separators: {mutant}"
+            );
+        }
+    }
+}
+
+fn validate_against_published_schema(
+    instance: &serde_json::Value,
+    schema: serde_json::Value,
+    label: &str,
+) {
+    if let Err(error) = jsonschema::validate(&schema, instance) {
+        panic!("{label} must match the published schema: {error}\n{instance}");
+    }
+}
+
+fn published_summary_schema() -> serde_json::Value {
+    serde_json::from_str(include_str!("../schema/summary.schema.json"))
+        .expect("summary schema must be valid JSON")
+}
+
+fn published_full_report_schema() -> serde_json::Value {
+    let mut schema: serde_json::Value =
+        serde_json::from_str(include_str!("../schema/report.schema.json"))
+            .expect("report schema must be valid JSON");
+    // Resolve the published relative $ref for offline validation.
+    schema["properties"]["stats"] = published_summary_schema();
+    schema
+}
+
+#[test]
+fn installed_command_filters_result_output_by_quiet_mode_and_output_statuses() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_mutation_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+
+    let run = |arguments: &[&str]| {
+        Command::new(command_path(&install))
+            .args(arguments)
+            .arg(&source)
+            .current_dir(&fixture)
+            .output()
+            .expect("installed mutarust must start")
+    };
+    let stdout_of = |arguments: &[&str]| {
+        let output = run(arguments);
+        assert!(
+            output.status.success(),
+            "run with {arguments:?} must succeed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).expect("mutation output must be UTF-8")
+    };
+
+    let quiet = stdout_of(&["--quiet"]);
+    assert!(
+        quiet.contains("escaped ") && !quiet.contains("killed "),
+        "--quiet must show only escaped mutants: {quiet}"
+    );
+    assert!(
+        quiet.contains("Killed: 1") && quiet.contains("Escaped: 1"),
+        "--quiet must still show the run summary: {quiet}"
+    );
+
+    let killed_only = stdout_of(&["--output-statuses", "k"]);
+    assert!(
+        killed_only.contains("killed ") && !killed_only.contains("escaped "),
+        "--output-statuses k must show only killed mutants: {killed_only}"
+    );
+
+    let both = stdout_of(&["--output-statuses", "ke"]);
+    assert!(
+        both.contains("killed ") && both.contains("escaped "),
+        "--output-statuses ke must show killed and escaped mutants: {both}"
+    );
+
+    let overrides_quiet = stdout_of(&["--quiet", "--output-statuses", "k"]);
+    assert!(
+        overrides_quiet.contains("killed ") && !overrides_quiet.contains("escaped "),
+        "--output-statuses must override --quiet: {overrides_quiet}"
+    );
+
+    let silent_overrides = stdout_of(&["--silent", "--output-statuses", "e"]);
+    assert!(
+        !silent_overrides.contains("killed ") && !silent_overrides.contains("escaped "),
+        "--silent must override --output-statuses: {silent_overrides}"
+    );
+    assert!(
+        silent_overrides.contains("Killed: 1") && silent_overrides.contains("Escaped: 1"),
+        "--silent must still show the run summary: {silent_overrides}"
+    );
+
+    let quiet_no_diffs = stdout_of(&["--quiet", "--no-diffs"]);
+    assert!(
+        quiet_no_diffs.contains("escaped ") && !quiet_no_diffs.contains("@@ -"),
+        "--no-diffs must still hide the diff of a visible escaped mutant: {quiet_no_diffs}"
+    );
+
+    let statuses_no_diffs = stdout_of(&["--output-statuses", "e", "--no-diffs"]);
+    assert!(
+        statuses_no_diffs.contains("escaped ") && !statuses_no_diffs.contains("@@ -"),
+        "--no-diffs must combine with --output-statuses: {statuses_no_diffs}"
+    );
+
+    for (arguments, error) in [
+        (
+            vec!["--output-statuses", ""],
+            "--output-statuses requires only these letters",
+        ),
+        (
+            vec!["--output-statuses", "z"],
+            "--output-statuses requires only these letters",
+        ),
+        (
+            vec!["--output-statuses", "k", "--output-statuses", "e"],
+            "--output-statuses can be supplied only once",
+        ),
+    ] {
+        let output = run(&arguments);
+        assert_eq!(
+            output.status.code(),
+            Some(3),
+            "invalid --output-statuses value must be rejected: {arguments:?}"
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains(error),
+            "--output-statuses error must explain the problem: {arguments:?}"
+        );
+    }
+}
+
+#[test]
+fn installed_command_reports_verbose_and_debug_diagnostics_without_secrets() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_mutation_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    let secret_value = "sekrit-token-value-should-not-leak";
+
+    let plain = Command::new(command_path(&install))
+        .arg(&source)
+        .current_dir(&fixture)
+        .env("MUTARUST_TEST_SECRET", secret_value)
+        .output()
+        .expect("installed mutarust must start");
+    assert!(plain.status.success());
+    let plain_stdout = String::from_utf8(plain.stdout).expect("plain output must be UTF-8");
+    assert!(
+        !plain_stdout.contains("Mutate ") && !plain_stdout.contains("Running with"),
+        "a plain run must not show verbose diagnostics: {plain_stdout}"
+    );
+    assert!(
+        !plain_stdout.contains('\r') && !plain_stdout.contains('\u{1b}'),
+        "non-terminal output must contain no terminal control sequences: {plain_stdout:?}"
+    );
+    let plain_stderr = String::from_utf8_lossy(&plain.stderr);
+    assert!(
+        !plain_stderr.contains('\r') && !plain_stderr.contains('\u{1b}'),
+        "non-terminal standard error must contain no terminal control sequences: {plain_stderr}"
+    );
+
+    let verbose = Command::new(command_path(&install))
+        .args(["--verbose", "--workers", "1"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .env("MUTARUST_TEST_SECRET", secret_value)
+        .output()
+        .expect("installed mutarust must start with --verbose");
+    assert!(
+        verbose.status.success(),
+        "verbose run must succeed: {}",
+        String::from_utf8_lossy(&verbose.stderr)
+    );
+    let verbose_stdout = String::from_utf8(verbose.stdout).expect("verbose output must be UTF-8");
+    assert!(
+        verbose_stdout.contains("Mutate ")
+            && verbose_stdout.contains("at line")
+            && verbose_stdout.contains("Running with 1 parallel worker(s)"),
+        "--verbose must show the mutated source, line, and worker count: {verbose_stdout}"
+    );
+    assert!(
+        !verbose_stdout.contains("Mutator conditional/bool-literal")
+            && !verbose_stdout.contains("Result "),
+        "--verbose without --debug must not show mutator or per-result debug lines: {verbose_stdout}"
+    );
+    assert!(
+        !verbose_stdout.contains(secret_value) && !verbose_stdout.contains("MUTARUST_TEST_SECRET"),
+        "--verbose must never print inherited environment values: {verbose_stdout}"
+    );
+
+    let debug = Command::new(command_path(&install))
+        .args([
+            "--debug",
+            "--workers",
+            "1",
+            "--test-flags",
+            "--package mutation-checked",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .env("MUTARUST_TEST_SECRET", secret_value)
+        .output()
+        .expect("installed mutarust must start with --debug");
+    assert!(
+        debug.status.success(),
+        "debug run must succeed: {}",
+        String::from_utf8_lossy(&debug.stderr)
+    );
+    let debug_stdout = String::from_utf8(debug.stdout).expect("debug output must be UTF-8");
+    assert!(
+        debug_stdout.contains("Mutate ")
+            && debug_stdout.contains("Running with 1 parallel worker(s)")
+            && debug_stdout.contains("Mutator conditional/bool-literal")
+            && debug_stdout.contains("Run cargo test --package mutation-checked")
+            && debug_stdout.contains("Result "),
+        "--debug must show the documented mutation, mutator, command, and result details: {debug_stdout}"
+    );
+    assert!(
+        !debug_stdout.contains(secret_value) && !debug_stdout.contains("MUTARUST_TEST_SECRET"),
+        "--debug must never print inherited environment values: {debug_stdout}"
+    );
+
+    let debug_silent = Command::new(command_path(&install))
+        .args(["--debug", "--silent", "--workers", "1"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start with --debug --silent");
+    assert!(
+        debug_silent.status.success(),
+        "debug-silent run must succeed: {}",
+        String::from_utf8_lossy(&debug_silent.stderr)
+    );
+    let debug_silent_stdout =
+        String::from_utf8(debug_silent.stdout).expect("debug-silent output must be UTF-8");
+    assert!(
+        !debug_silent_stdout.contains("Result "),
+        "--debug with --silent must not show per-mutant result lines: {debug_silent_stdout}"
+    );
+
+    let debug_quiet = Command::new(command_path(&install))
+        .args(["--debug", "--quiet", "--workers", "1"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start with --debug --quiet");
+    assert!(
+        debug_quiet.status.success(),
+        "debug-quiet run must succeed: {}",
+        String::from_utf8_lossy(&debug_quiet.stderr)
+    );
+    let debug_quiet_stdout =
+        String::from_utf8(debug_quiet.stdout).expect("debug-quiet output must be UTF-8");
+    assert!(
+        debug_quiet_stdout.contains("Result escaped for")
+            && !debug_quiet_stdout.contains("Result killed for"),
+        "--debug with --quiet must show only escaped per-mutant result lines: {debug_quiet_stdout}"
     );
 }
 
@@ -1811,6 +3598,38 @@ fn installed_command_runs_external_source_with_local_dependency_and_configuratio
         fs::read_to_string(source).expect("external source must remain readable"),
         "pub fn checked() -> bool { let value = true; value }\npub fn unchecked() -> bool { let value = true; value }\npub fn configured() -> bool { cfg!(config_check) }\npub fn local_value() -> u8 { local_support::value() }\n",
         "the mutation run must not change the external user source"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn installed_command_copies_workspace_symbolic_links() {
+    use std::os::unix::fs::symlink;
+
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_mutation_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    fs::write(fixture.join("AGENTS.md"), "agents\n").expect("agents guide must be written");
+    symlink("AGENTS.md", fixture.join("CLAUDE.md"))
+        .expect("workspace symbolic link must be created");
+
+    let output = Command::new(command_path(&install))
+        .args(["--enable", "conditional/bool-literal"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start");
+
+    assert!(
+        output.status.success(),
+        "a workspace with a symbolic link must mutate: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("mutation output must be UTF-8");
+    assert!(
+        stdout.contains("Killed:") && stdout.contains("Total:"),
+        "symbolic-link workspaces must complete mutation results: {stdout}"
     );
 }
 
@@ -2694,6 +4513,61 @@ fn installed_command_rejects_incompatible_execution_controls() {
 
 #[cfg(unix)]
 #[test]
+fn installed_command_passes_test_flags_to_coverage_collection() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_coverage_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    let fake_cargo = root.join("coverage-flags-cargo");
+    let record = root.join("coverage-flags-record");
+    let temporary_root = root.join("coverage-flags-temporary");
+    fs::create_dir(&temporary_root).expect("coverage flags temporary root must be created");
+    fs::write(
+        &fake_cargo,
+        "#!/bin/sh\nif [ \"$1\" = \"metadata\" ]; then\n  exec \"$MUTARUST_REAL_CARGO\" \"$@\"\nfi\nif [ \"$1\" = \"llvm-cov\" ]; then\n  printf '%s\\n' \"$*\" >> \"$MUTARUST_COVERAGE_RECORD\"\n  output=\n  while [ \"$#\" -gt 0 ]; do\n    if [ \"$1\" = \"--output-path\" ]; then\n      output=$2\n      break\n    fi\n    shift\n  done\n  printf 'SF:%s\\nDA:1,1\\nDA:2,1\\nDA:3,0\\nend_of_record\\n' \"$MUTARUST_COVERAGE_SOURCE\" > \"$output\"\n  exit 0\nfi\nif ! grep -q false checked/src/lib.rs 2>/dev/null; then\n  exit 0\nfi\nexit 1\n",
+    )
+    .expect("coverage flags Cargo command must be written");
+    fs::set_permissions(&fake_cargo, fs::Permissions::from_mode(0o755))
+        .expect("coverage flags Cargo command must be executable");
+
+    let output = Command::new(command_path(&install))
+        .args([
+            "--coverage",
+            "--test-flags",
+            "--lib",
+            "--enable",
+            "conditional/bool-literal",
+            "--workers",
+            "1",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .env("CARGO", &fake_cargo)
+        .env("MUTARUST_REAL_CARGO", env!("CARGO"))
+        .env("MUTARUST_COVERAGE_SOURCE", &source)
+        .env("MUTARUST_COVERAGE_RECORD", &record)
+        .env("TMPDIR", &temporary_root)
+        .output()
+        .expect("installed mutarust must collect coverage with test flags");
+
+    assert!(
+        output.status.success(),
+        "coverage with --test-flags must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let records = fs::read_to_string(&record).expect("llvm-cov argument records must exist");
+    assert!(
+        records.lines().any(|line| {
+            line.contains("llvm-cov") && line.contains("--lib") && !line.contains("--exact")
+        }),
+        "normal coverage collection must receive --test-flags: {records}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn installed_command_collects_coverage_and_selects_covering_tests() {
     use std::os::unix::fs::PermissionsExt;
 
@@ -3465,7 +5339,7 @@ fn packaged_library_builds_a_custom_mutator() {
     .expect("downstream manifest must be written");
     fs::write(
         downstream.join("src").join("main.rs"),
-        "use mutarust::{Mutation, Mutator, Registry, RegistryBuilder};\n\nstruct Custom;\nstruct Invalid;\n\nimpl Mutator for Custom {\n    fn name(&self) -> &str { \"custom/no-op\" }\n\n    fn mutations(&self, _source: &str) -> Vec<Mutation> { Vec::new() }\n}\n\nimpl Mutator for Invalid {\n    fn name(&self) -> &str { \"Custom\" }\n\n    fn mutations(&self, _source: &str) -> Vec<Mutation> { Vec::new() }\n}\n\nfn mutate(registry: &Registry, source: &str) -> String {\n    let mutation = registry.get(\"conditional/bool-literal\").expect(\"built-in mutator must exist\").mutations(source).pop().expect(\"boolean must mutate\");\n    mutation.apply(source).expect(\"mutation must apply\")\n}\n\nfn main() {\n    let registry = RegistryBuilder::with_builtins().register(Custom).expect(\"custom mutator must register\").build();\n    assert_eq!(registry.names().collect::<Vec<_>>(), vec![\"arithmetic/assign_invert\", \"arithmetic/assignment\", \"arithmetic/base\", \"arithmetic/bitwise\", \"arithmetic/negate\", \"branch/case\", \"branch/else\", \"branch/if\", \"composite/field-clear\", \"concurrency/goroutine-remove\", \"conditional/bool-literal\", \"conditional/negated\", \"conditional/not\", \"custom/no-op\", \"expression/comparison\", \"expression/context-nil\", \"expression/logical\", \"expression/string-literal\", \"loop/break\", \"loop/condition\", \"loop/range_break\", \"numbers/decrementer\", \"numbers/float-negate\", \"numbers/incrementer\", \"select/case-remove\", \"select/default-remove\", \"statement/remove\", \"statement/remove-self-assign\", \"statement/return\"]);\n    let duplicate = RegistryBuilder::new().register(Custom).expect(\"first custom mutator must register\").register(Custom).err().expect(\"duplicate must fail\");\n    assert_eq!(duplicate.to_string(), \"duplicate mutator name: custom/no-op\");\n    let invalid = RegistryBuilder::new().register(Invalid).err().expect(\"invalid name must fail\");\n    assert_eq!(invalid.to_string(), \"invalid mutator name: Custom\");\n    assert_eq!(mutate(&registry, \"fn enabled() -> bool { let enabled = true; enabled }\"), \"fn enabled() -> bool { let enabled = false; enabled }\");\n    assert_eq!(mutate(&registry, \"fn enabled() -> bool { let label = \\\"é\\\"; let enabled = true; enabled }\"), \"fn enabled() -> bool { let label = \\\"é\\\"; let enabled = false; enabled }\");\n    assert!(registry.get(\"conditional/bool-literal\").unwrap().mutations(\"fn check() { assert!(true); }\").is_empty());\n    println!(\"custom mutator works\");\n}\n",
+        "use mutarust::{Mutation, Mutator, Registry, RegistryBuilder};\n\nstruct Custom;\nstruct Invalid;\n\nimpl Mutator for Custom {\n    fn name(&self) -> &str { \"custom/no-op\" }\n\n    fn mutations(&self, _source: &str) -> Vec<Mutation> { Vec::new() }\n}\n\nimpl Mutator for Invalid {\n    fn name(&self) -> &str { \"Custom\" }\n\n    fn mutations(&self, _source: &str) -> Vec<Mutation> { Vec::new() }\n}\n\nfn mutate(registry: &Registry, source: &str) -> String {\n    let mutation = registry.get(\"conditional/bool-literal\").expect(\"built-in mutator must exist\").mutations(source).pop().expect(\"boolean must mutate\");\n    mutation.apply(source).expect(\"mutation must apply\")\n}\n\nfn main() {\n    let registry = RegistryBuilder::with_builtins().register(Custom).expect(\"custom mutator must register\").build();\n    assert_eq!(registry.names().collect::<Vec<_>>(), vec![\"arithmetic/assign_invert\", \"arithmetic/assignment\", \"arithmetic/base\", \"arithmetic/bitwise\", \"arithmetic/negate\", \"branch/case\", \"branch/else\", \"branch/if\", \"composite/field-clear\", \"concurrency/goroutine-remove\", \"conditional/bool-literal\", \"conditional/negated\", \"conditional/not\", \"custom/no-op\", \"expression/comparison\", \"expression/context-nil\", \"expression/error-guard\", \"expression/errorf-wrap\", \"expression/logical\", \"expression/recover-clear\", \"expression/remove\", \"expression/string-literal\", \"loop/break\", \"loop/condition\", \"loop/range_break\", \"numbers/decrementer\", \"numbers/float-negate\", \"numbers/incrementer\", \"select/case-remove\", \"select/default-remove\", \"statement/defer-remove\", \"statement/remove\", \"statement/remove-self-assign\", \"statement/return\"]);\n    let duplicate = RegistryBuilder::new().register(Custom).expect(\"first custom mutator must register\").register(Custom).err().expect(\"duplicate must fail\");\n    assert_eq!(duplicate.to_string(), \"duplicate mutator name: custom/no-op\");\n    let invalid = RegistryBuilder::new().register(Invalid).err().expect(\"invalid name must fail\");\n    assert_eq!(invalid.to_string(), \"invalid mutator name: Custom\");\n    assert_eq!(mutate(&registry, \"fn enabled() -> bool { let enabled = true; enabled }\"), \"fn enabled() -> bool { let enabled = false; enabled }\");\n    assert_eq!(mutate(&registry, \"fn enabled() -> bool { let label = \\\"é\\\"; let enabled = true; enabled }\"), \"fn enabled() -> bool { let label = \\\"é\\\"; let enabled = false; enabled }\");\n    assert!(registry.get(\"conditional/bool-literal\").unwrap().mutations(\"fn check() { assert!(true); }\").is_empty());\n    println!(\"custom mutator works\");\n}\n",
     )
     .expect("downstream source must be written");
 
@@ -4712,6 +6586,35 @@ fn write_concurrency_selection_fixture(root: &Path) -> PathBuf {
         include_str!("fixtures/concurrency-selection/expected-mutants.txt"),
     )
     .expect("expected concurrency mutants must be written");
+    fixture
+}
+
+fn write_error_panic_cleanup_fixture(root: &Path) -> PathBuf {
+    let fixture = root.join("error-panic-cleanup-fixture");
+    fs::create_dir_all(fixture.join("src"))
+        .expect("error fixture source directory must be created");
+    fs::create_dir_all(fixture.join("tests"))
+        .expect("error fixture test directory must be created");
+    fs::write(
+        fixture.join("Cargo.toml"),
+        include_str!("fixtures/error-panic-cleanup/Cargo.toml"),
+    )
+    .expect("error fixture manifest must be written");
+    fs::write(
+        fixture.join("src").join("lib.rs"),
+        include_str!("fixtures/error-panic-cleanup/src/lib.rs"),
+    )
+    .expect("error fixture source must be written");
+    fs::write(
+        fixture.join("tests").join("error_panic_cleanup.rs"),
+        include_str!("fixtures/error-panic-cleanup/tests/error_panic_cleanup.rs"),
+    )
+    .expect("error fixture tests must be written");
+    fs::write(
+        fixture.join("expected-mutants.txt"),
+        include_str!("fixtures/error-panic-cleanup/expected-mutants.txt"),
+    )
+    .expect("expected error mutants must be written");
     fixture
 }
 

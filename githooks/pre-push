@@ -1,0 +1,91 @@
+#!/bin/sh
+# Local mirror of .github/workflows/mutation.yml pull-request mode, scoped to
+# the diff against origin/main. CI keeps a full approved-scope gate for pushes
+# to main. This hook fails on escaped mutants, on a gate miss, and on any
+# missing tool. There are no silent skips.
+#
+# These hooks are not active by default. To enable them, run once:
+#   git config core.hooksPath githooks
+set -eu
+
+ROOT_DIR=$(git rev-parse --show-toplevel)
+cd "$ROOT_DIR"
+
+require_tool() {
+	tool="$1"
+	hint="$2"
+	if ! command -v "$tool" >/dev/null 2>&1; then
+		printf 'FAIL: required tool "%s" not found on PATH.\n  install with: %s\n' "$tool" "$hint" >&2
+		exit 1
+	fi
+}
+
+require_tool cargo "https://rustup.rs/"
+require_tool rustc "https://rustup.rs/"
+
+# Skip only when every pushed ref is a delete. A deleted ref has no diff to
+# mutate.
+ANY_UPDATE=0
+while read -r local_ref local_sha remote_ref remote_sha; do
+	if [ "$local_sha" != "0000000000000000000000000000000000000000" ]; then
+		ANY_UPDATE=1
+	fi
+done
+if [ "$ANY_UPDATE" -eq 0 ]; then
+	echo "pre-push: only ref deletions pushed, nothing to mutate."
+	exit 0
+fi
+
+if ! git rev-parse --verify origin/main >/dev/null 2>&1; then
+	printf 'FAIL: origin/main not found locally. Run: git fetch origin main\n' >&2
+	exit 1
+fi
+
+WORK_DIR=$(mktemp -d)
+MUTARUST_BIN="$WORK_DIR/mutarust"
+trap 'rm -rf "$WORK_DIR"' EXIT
+
+echo "pre-push: building mutarust..."
+if ! cargo build --release --locked; then
+	printf 'FAIL: cargo build --release --locked failed\n' >&2
+	exit 1
+fi
+cp ./target/release/mutarust "$MUTARUST_BIN"
+
+if ! command -v cargo-llvm-cov >/dev/null 2>&1; then
+	printf 'FAIL: required tool "cargo-llvm-cov" not found on PATH.\n  install with: cargo install cargo-llvm-cov --locked\n' >&2
+	exit 1
+fi
+if ! rustup component list --installed | grep -q '^llvm-tools'; then
+	printf 'FAIL: required Rust component "llvm-tools-preview" is not installed.\n  install with: rustup component add llvm-tools-preview\n' >&2
+	exit 1
+fi
+
+echo "pre-push: running mutation testing scoped to the diff against origin/main..."
+# Same approved production scope, timeout, quality gates, and changed-line
+# mode as the pull-request job in .github/workflows/mutation.yml.
+STATUS=0
+"$MUTARUST_BIN" \
+	--coverage \
+	--test-flags "--lib" \
+	--exec-timeout 180 \
+	--workers 8 \
+	--git-diff-lines \
+	--git-diff-base origin/main \
+	--ignore-msi-with-no-mutations \
+	--min-msi 75 \
+	--min-covered-msi 80 \
+	src/report/github.rs \
+	src/report/gitlab.rs \
+	src/evidence.rs \
+	src/progress.rs || STATUS=$?
+
+if [ "$STATUS" -eq 4 ]; then
+	printf '\nFAIL: mutation quality gate not met (escaped mutants in the diff against origin/main).\n' >&2
+	exit 1
+elif [ "$STATUS" -ne 0 ]; then
+	printf '\nFAIL: mutarust exited with status %s (tool error).\n' "$STATUS" >&2
+	exit 1
+fi
+
+printf '\nmutation quality gate passed.\n'

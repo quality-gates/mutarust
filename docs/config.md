@@ -8,8 +8,10 @@ The command reads a relative file name from its current directory.
 mutarust --config mutarust.yml [TARGET]...
 ```
 
-Start with [mutarust.yml.example](../mutarust.yml.example). The published JSON
-Schema is [schema/mutarust.schema.json](../schema/mutarust.schema.json).
+Start with
+[mutarust.yml.example](https://github.com/quality-gates/mutarust/blob/main/mutarust.yml.example).
+The published JSON Schema is
+[schema/mutarust.schema.json](https://github.com/quality-gates/mutarust/blob/main/schema/mutarust.schema.json).
 
 ## Policy Fields
 
@@ -21,10 +23,10 @@ different value.
 
 | Field | Type | Purpose |
 | --- | --- | --- |
-| `skip_without_test` | Boolean | Set the skip-without-test policy. |
-| `skip_with_cfg` | Boolean | Set the conditional-compilation policy. |
-| `json_output` | Boolean | Set the JSON report policy. |
-| `html_output` | Boolean | Set the HTML report policy. |
+| `skip_without_test` | Boolean | Skip production source files that have no `#[cfg(test)]` unit tests. |
+| `skip_with_cfg` | Boolean | Skip mutations inside production items gated by a non-test `#[cfg(...)]`. |
+| `json_output` | Boolean | Write the full report to `report.json`. |
+| `html_output` | Boolean | Write the HTML report to `mutarust-report.html`. |
 | `silent_mode` | Boolean | Hide status output for individual mutants. |
 | `min_msi` | Integer, 0 to 100 | Set the total-score policy. |
 | `min_covered_msi` | Integer, 0 to 100 | Set the covered-score policy. |
@@ -38,6 +40,14 @@ group pattern with a final `*`, such as `conditional/*`, or `*` for all
 mutators.
 
 `skip_with_cfg` is the Rust adaptation of Mutago `skip_with_build_tags`.
+When true, Mutarust does not create a mutation whose changed range is inside a
+production item with a non-test `#[cfg(...)]` attribute. A crate-level
+`#![cfg(...)]` attribute excludes the whole file. `#[cfg(test)]` does not
+trigger this policy.
+
+`skip_without_test` is the Rust adaptation of Mutago `skip_without_test`.
+When true, Mutarust excludes a production source file that has no
+`#[cfg(test)]` item in that file.
 
 ## Command Priority
 
@@ -55,6 +65,13 @@ Mutarust checks the total-score policy after a normal mutation run. A result
 below `min_msi` returns exit value 4. With `--coverage`, Mutarust also checks
 the covered-score policy after the total-score policy. A positive
 `min_covered_msi` without `--coverage` returns exit value 4.
+
+When `json_output` is true, Mutarust writes `report.json` after a completed
+run. When `html_output` is true, Mutarust writes `mutarust-report.html`. Use
+`--logger-summary-json` for the compact `mutarust-summary.json` file and
+`--logger-agentic-json` for `mutarust-agentic.json`. Use `--logger-github` for
+GitHub Actions warnings and `--logger-gitlab` for `mutarust-gitlab.json`. See
+the [report schemas](json-outputs.md).
 
 ## Source Selection
 

@@ -1,16 +1,22 @@
 use std::env;
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
 use mutarust::{
-    Baseline, CommandSettings, Configuration, CoverageControls, ExecutionControls, GitDiffControls,
-    Registry, TestExecution, WorkerLimit,
+    Baseline, CommandSettings, Configuration, CoverageControls, DisplayFilter, ExecutionControls,
+    GitDiffControls, Registry, ReportContext, TestExecution, WorkerLimit, github_annotations,
+    write_agentic_report, write_compact_summary, write_full_report, write_gitlab_report,
+    write_html_report,
 };
 
 fn main() -> ExitCode {
     let arguments = env::args().skip(1).collect::<Vec<_>>();
+
+    if env::var_os("GO_FLAGS_COMPLETION").is_some() {
+        return print_bash_completion(&arguments).map_or(ExitCode::FAILURE, |()| ExitCode::from(2));
+    }
 
     run(parse_command(&arguments)).unwrap_or(ExitCode::FAILURE)
 }
@@ -21,6 +27,7 @@ fn run(command: Command) -> io::Result<ExitCode> {
         Command::Version => print_version().map(|()| ExitCode::SUCCESS),
         Command::ListMutators => list_mutators(),
         Command::ListFiles(targets) => list_files(&targets),
+        Command::PrintAst(targets) => print_ast(&targets),
         Command::Run(command) => run_mutation_tests(*command),
         Command::Invalid(message) => source_error(&message),
     }
@@ -34,30 +41,113 @@ fn parse_command(arguments: &[String]) -> Command {
     match first.as_str() {
         "--help" | "-h" if arguments.len() == 1 => Command::Help,
         "--version" | "-V" if arguments.len() == 1 => Command::Version,
-        "--list-mutators" if arguments.len() == 1 => Command::ListMutators,
-        "--list-mutators" => Command::Invalid(
-            "the --list-mutators command does not accept configuration or mutation options"
-                .to_owned(),
-        ),
-        "--list-files" => parse_list_files(&arguments[1..]),
+        "--list-mutators" => parse_list_mutators(arguments.len()),
+        "--list-files" => parse_target_mode(&arguments[1..], "--list-files", Command::ListFiles),
+        "--print-ast" => parse_target_mode(&arguments[1..], "--print-ast", Command::PrintAst),
         _ => parse_run(arguments),
     }
+}
+
+fn parse_list_mutators(argument_count: usize) -> Command {
+    if argument_count == 1 {
+        Command::ListMutators
+    } else {
+        Command::Invalid(
+            "the --list-mutators command does not accept configuration or mutation options"
+                .to_owned(),
+        )
+    }
+}
+
+fn parse_target_mode(
+    arguments: &[String],
+    name: &str,
+    build: fn(Vec<String>) -> Command,
+) -> Command {
+    if let Some(option) = arguments.iter().find(|argument| argument.starts_with('-')) {
+        return Command::Invalid(format!(
+            "the {name} command does not accept the {option} option"
+        ));
+    }
+    build(arguments.to_vec())
 }
 
 fn print_help() -> io::Result<()> {
     let mut stdout = io::stdout().lock();
     writeln!(
         stdout,
-        "Mutation testing for Rust\n\nUsage:\n  mutarust [OPTIONS] [TARGET]...\n  mutarust --list-files [TARGET]...\n  mutarust --list-mutators"
+        "Mutation testing for Rust\n\nUsage:\n  mutarust [OPTIONS] [TARGET]...\n  mutarust --list-files [TARGET]...\n  mutarust --print-ast [TARGET]...\n  mutarust --list-mutators"
     )?;
     writeln!(
         stdout,
-        "\nOptions:\n  -h, --help           Print help\n  -V, --version        Print version\n      --config FILE     Read mutation policy from a YAML file\n      --list-files      List selected Rust production source files\n      --list-mutators   List available mutators\n      --exec COMMAND    Run a custom command for each mutant\n      --exec-timeout    Stop each test command after this many seconds\n      --timeout         Alias for --exec-timeout\n      --timeout-coefficient FACTOR  Set an adaptive Cargo timeout\n      --test-flags FLAGS  Add shell-quoted Cargo test flags\n      --test-recursive  Select all Cargo workspace packages\n      --workers COUNT   Run this many Cargo mutation jobs\n      --dry-run         List mutants without writing files or running tests\n      --no-exec         Write mutants without running tests\n      --do-not-remove-tmp-folder  Keep mutation workspaces\n      --match REGEXP    Mutate only functions with matching names\n      --verbose         Tell a custom command to produce verbose output\n      --debug           Tell a custom command to produce debug output\n      --silent          Hide mutant status output\n      --no-silent       Print mutant status output\n      --no-diffs        Hide escaped-mutant source diffs\n      --blacklist FILE  Read accepted mutation checksums\n      --baseline FILE   Read escaped-mutant IDs; default mutarust-baseline.json\n      --update-baseline Write current escaped-mutant IDs and exit\n      --fail-on-escaped Fail only for escaped IDs outside the baseline\n      --run-mutant-id ID  Run one mutant without score gates\n      --min-msi         Set the minimum mutation score percentage\n      --min-covered-msi Set the minimum covered-code score percentage\n      --enable NAME     Select a mutator name or group pattern\n      --disable NAME    Disable a mutator name or group pattern"
+        "\nOptions:\n  -h, --help           Print help\n  -V, --version        Print version\n      --config FILE     Read mutation policy from a YAML file\n      --list-files      List selected Rust production source files\n      --print-ast       Print the parsed Rust syntax for selected sources\n      --list-mutators   List available mutators\n      --exec COMMAND    Run a custom command for each mutant\n      --exec-timeout    Stop each test command after this many seconds\n      --timeout         Alias for --exec-timeout\n      --timeout-coefficient FACTOR  Set an adaptive Cargo timeout\n      --test-flags FLAGS  Add shell-quoted Cargo test flags\n      --test-recursive  Select all Cargo workspace packages\n      --workers COUNT   Run this many Cargo mutation jobs\n      --dry-run         List mutants without writing files or running tests\n      --no-exec         Write mutants without running tests\n      --do-not-remove-tmp-folder  Keep mutation workspaces\n      --match REGEXP    Mutate only functions with matching names\n      --verbose         Print mutation location and worker count\n      --debug           Print verbose details plus mutator and test command\n      --silent          Hide mutant status output\n      --no-silent       Print mutant status output\n      --quiet           Show only escaped mutants\n      --output-statuses LETTERS  Show only these states: k e s n x\n      --no-diffs        Hide escaped-mutant source diffs\n      --logger-summary-json  Write compact scores to mutarust-summary.json\n      --logger-agentic-json  Write escaped mutants to mutarust-agentic.json\n      --logger-github   Emit escaped mutants as GitHub Actions warnings\n      --logger-gitlab   Write mutarust-gitlab.json Code Quality findings\n      --blacklist FILE  Read accepted mutation checksums\n      --baseline FILE   Read escaped-mutant IDs; default mutarust-baseline.json\n      --update-baseline Write current escaped-mutant IDs and exit\n      --fail-on-escaped Fail only for escaped IDs outside the baseline\n      --run-mutant-id ID  Run one mutant without score gates\n      --min-msi         Set the minimum mutation score percentage\n      --min-covered-msi Set the minimum covered-code score percentage\n      --enable NAME     Select a mutator name or group pattern\n      --disable NAME    Disable a mutator name or group pattern"
     )?;
     writeln!(
         stdout,
-        "      --coverage        Collect LLVM line coverage before mutation\n      --per-test        Run mapped tests for each covered mutant\n      --git-diff-lines  Mutate Git changed lines only\n      --git-diff-base REF  Set Git base; default origin/HEAD, then master"
+        "      --coverage        Collect LLVM line coverage before mutation\n      --per-test        Run mapped tests for each covered mutant\n      --git-diff-lines  Mutate Git changed lines only\n      --git-diff-base REF  Set Git base; default origin/HEAD, then master\n      --html-output     Write mutarust-report.html\n      --ignore-msi-with-no-mutations  Pass score gates when no mutant exists"
     )
+}
+
+fn print_bash_completion(arguments: &[String]) -> io::Result<()> {
+    let prefix = arguments.last().map(String::as_str).unwrap_or("");
+    let mut stdout = io::stdout().lock();
+    for candidate in bash_completion_candidates() {
+        if candidate.starts_with(prefix) {
+            writeln!(stdout, "{candidate}")?;
+        }
+    }
+    Ok(())
+}
+
+fn bash_completion_candidates() -> &'static [&'static str] {
+    &[
+        "-h",
+        "--help",
+        "-V",
+        "--version",
+        "--config",
+        "--list-files",
+        "--print-ast",
+        "--list-mutators",
+        "--exec",
+        "--exec-timeout",
+        "--timeout",
+        "--timeout-coefficient",
+        "--test-flags",
+        "--test-recursive",
+        "--workers",
+        "--dry-run",
+        "--no-exec",
+        "--do-not-remove-tmp-folder",
+        "--match",
+        "--verbose",
+        "--debug",
+        "--silent",
+        "--no-silent",
+        "--quiet",
+        "--output-statuses",
+        "--no-diffs",
+        "--logger-summary-json",
+        "--logger-agentic-json",
+        "--logger-github",
+        "--logger-gitlab",
+        "--html-output",
+        "--ignore-msi-with-no-mutations",
+        "--blacklist",
+        "--baseline",
+        "--update-baseline",
+        "--fail-on-escaped",
+        "--run-mutant-id",
+        "--min-msi",
+        "--min-covered-msi",
+        "--enable",
+        "--disable",
+        "--coverage",
+        "--per-test",
+        "--git-diff-lines",
+        "--git-diff-base",
+        "[TARGET]...",
+    ]
 }
 
 fn print_version() -> io::Result<()> {
@@ -72,23 +162,42 @@ fn list_mutators() -> io::Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-fn parse_list_files(arguments: &[String]) -> Command {
-    if let Some(option) = arguments.iter().find(|argument| argument.starts_with('-')) {
-        return Command::Invalid(format!(
-            "the --list-files command does not accept the {option} option"
-        ));
-    }
-    Command::ListFiles(arguments.to_vec())
+fn list_files(targets: &[String]) -> io::Result<ExitCode> {
+    with_selected_sources(targets, print_files)
 }
 
-fn list_files(targets: &[String]) -> io::Result<ExitCode> {
+fn print_ast(targets: &[String]) -> io::Result<ExitCode> {
+    with_selected_sources(targets, print_syntax_trees)
+}
+
+fn with_selected_sources(
+    targets: &[String],
+    then: impl FnOnce(&[PathBuf]) -> Result<(), String>,
+) -> io::Result<ExitCode> {
     match mutarust::find_rust_sources(targets) {
         Ok(files) if files.is_empty() => {
             source_error("could not find any suitable Rust source files")
         }
-        Ok(files) => print_files(&files).map(|()| ExitCode::SUCCESS),
+        Ok(files) => match then(&files) {
+            Ok(()) => Ok(ExitCode::SUCCESS),
+            Err(message) => source_error(&message),
+        },
         Err(error) => source_error(&error.to_string()),
     }
+}
+
+fn print_syntax_trees(files: &[PathBuf]) -> Result<(), String> {
+    let mut stdout = io::stdout().lock();
+    for file in files {
+        let text = std::fs::read_to_string(file)
+            .map_err(|error| format!("could not open file {}: {error}", file.display()))?;
+        let syntax = syn::parse_file(&text)
+            .map_err(|error| format!("could not parse file {}: {error}", file.display()))?;
+        writeln!(stdout, "{}", file.display()).map_err(|error| error.to_string())?;
+        writeln!(stdout, "{syntax:#?}").map_err(|error| error.to_string())?;
+        writeln!(stdout).map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }
 
 fn parse_run(arguments: &[String]) -> Command {
@@ -139,7 +248,22 @@ fn parse_value_option(
         "--git-diff-base" => value().and_then(|value| set_git_diff_base(command, value)),
         "--baseline" => value().and_then(|value| set_baseline_path(command, value)),
         "--blacklist" => value().map(|value| add_blacklist(command, value)),
-        _ => return parse_policy_value_option(command, argument, next),
+        _ => {
+            return parse_display_value_option(command, argument, next)
+                .or_else(|| parse_policy_value_option(command, argument, next));
+        }
+    })
+}
+
+fn parse_display_value_option(
+    command: &mut RunCommand,
+    argument: &str,
+    next: Option<&String>,
+) -> Option<Result<(), String>> {
+    let value = || required_value(next, argument);
+    Some(match argument {
+        "--output-statuses" => value().and_then(|value| set_output_statuses(command, value)),
+        _ => return None,
     })
 }
 
@@ -180,30 +304,90 @@ fn parse_switch_option(command: &mut RunCommand, argument: &str) -> Result<(), S
             Ok(())
         }
         "--verbose" => {
-            command.verbose = true;
+            command.output.verbose = true;
             Ok(())
         }
         "--debug" => {
-            command.debug = true;
+            command.output.debug = true;
             Ok(())
         }
-        "--help" | "-h" | "--version" | "-V" | "--list-files" | "--list-mutators" => {
-            Err(format!("cannot use {argument} with mutation options"))
-        }
+        "--help" | "-h" | "--version" | "-V" | "--list-files" | "--print-ast"
+        | "--list-mutators" => Err(format!("cannot use {argument} with mutation options")),
         _ => Err(format!("unknown argument: {argument}")),
     }
 }
 
 fn parse_display_switch(command: &mut RunCommand, argument: &str) -> Option<Result<(), String>> {
+    if let Some(result) = parse_report_switch(command, argument) {
+        return Some(result);
+    }
     Some(match argument {
         "--silent" => set_silent(command, true),
         "--no-silent" => set_silent(command, false),
         "--no-diffs" => {
-            command.no_diffs = true;
+            command.output.no_diffs = true;
+            Ok(())
+        }
+        "--quiet" => {
+            command.output.quiet = true;
             Ok(())
         }
         _ => return None,
     })
+}
+
+fn parse_report_switch(command: &mut RunCommand, argument: &str) -> Option<Result<(), String>> {
+    Some(match argument {
+        "--logger-summary-json" => set_logger_summary_json(command),
+        "--logger-agentic-json" => set_logger_agentic_json(command),
+        "--logger-github" => set_logger_github(command),
+        "--logger-gitlab" => set_logger_gitlab(command),
+        "--html-output" => {
+            command.reports.html_output = true;
+            Ok(())
+        }
+        "--ignore-msi-with-no-mutations" => {
+            command.baseline.ignore_msi_with_no_mutations = true;
+            Ok(())
+        }
+        _ => return None,
+    })
+}
+
+fn set_logger_summary_json(command: &mut RunCommand) -> Result<(), String> {
+    if command.reports.summary_json {
+        Err("--logger-summary-json can be supplied only once".to_owned())
+    } else {
+        command.reports.summary_json = true;
+        Ok(())
+    }
+}
+
+fn set_logger_agentic_json(command: &mut RunCommand) -> Result<(), String> {
+    if command.reports.agentic_json {
+        Err("--logger-agentic-json can be supplied only once".to_owned())
+    } else {
+        command.reports.agentic_json = true;
+        Ok(())
+    }
+}
+
+fn set_logger_github(command: &mut RunCommand) -> Result<(), String> {
+    if command.reports.github {
+        Err("--logger-github can be supplied only once".to_owned())
+    } else {
+        command.reports.github = true;
+        Ok(())
+    }
+}
+
+fn set_logger_gitlab(command: &mut RunCommand) -> Result<(), String> {
+    if command.reports.gitlab {
+        Err("--logger-gitlab can be supplied only once".to_owned())
+    } else {
+        command.reports.gitlab = true;
+        Ok(())
+    }
 }
 
 fn parse_baseline_switch(command: &mut RunCommand, argument: &str) -> Option<Result<(), String>> {
@@ -409,6 +593,21 @@ fn set_silent(command: &mut RunCommand, value: bool) -> Result<(), String> {
     Ok(())
 }
 
+fn set_output_statuses(command: &mut RunCommand, value: String) -> Result<(), String> {
+    if command.output.output_statuses.is_some() {
+        return Err("--output-statuses can be supplied only once".to_owned());
+    }
+    if value.is_empty() || !value.bytes().all(|letter| b"kesnx".contains(&letter)) {
+        return Err(
+            "--output-statuses requires only these letters: k (killed), e (escaped), \
+             s (skipped), n (not covered), x (errored)"
+                .to_owned(),
+        );
+    }
+    command.output.output_statuses = Some(value);
+    Ok(())
+}
+
 fn set_score(score: &mut Option<u8>, value: String, option: &str) -> Result<(), String> {
     let value = value
         .parse::<u8>()
@@ -452,7 +651,7 @@ fn start_mutation_run(
         command.run_mutant_id.as_deref(),
         &filters,
         &execution,
-        &execution_controls(command),
+        &execution_controls(command, configuration.silent_mode),
     )
     .map_err(|error| error.to_string())?;
     Ok((configuration, baseline, run))
@@ -463,18 +662,20 @@ fn test_execution(command: &RunCommand) -> Result<TestExecution, String> {
         Some(custom) => TestExecution::custom(
             custom,
             command.recursive_tests,
-            command.verbose,
-            command.debug,
+            command.output.verbose,
+            command.output.debug,
         )
         .map_err(|error| error.to_string()),
         None => Ok(TestExecution::cargo_with_options(
             command.recursive_tests,
             command.execution.cargo_flags.clone().unwrap_or_default(),
+            command.output.verbose,
+            command.output.debug,
         )),
     }
 }
 
-fn execution_controls(command: &RunCommand) -> ExecutionControls {
+fn execution_controls(command: &RunCommand, silent_mode: bool) -> ExecutionControls {
     ExecutionControls {
         dry_run: command.execution.dry_run,
         no_exec: command.execution.no_exec,
@@ -490,7 +691,35 @@ fn execution_controls(command: &RunCommand) -> ExecutionControls {
             base: command.execution.git_diff_base.clone(),
         },
         blacklist_files: command.execution.blacklist_files.clone(),
+        progress: progress_enabled(command, silent_mode),
+        filter: display_filter(command, silent_mode),
     }
+}
+
+fn display_filter(command: &RunCommand, silent_mode: bool) -> DisplayFilter {
+    DisplayFilter {
+        silent: silent_mode,
+        quiet: command.output.quiet,
+        output_statuses: command.output.output_statuses.clone(),
+    }
+}
+
+/// Decides whether to show a live progress line on standard error.
+///
+/// The progress line needs a real terminal, and it never runs alongside
+/// verbose or debug diagnostics (which share standard output, not standard
+/// error, but redraw at a similar cadence) or modes that print no results.
+fn progress_enabled(command: &RunCommand, silent_mode: bool) -> bool {
+    io::stderr().is_terminal() && progress_allowed(command, silent_mode)
+}
+
+/// The non-terminal conditions for [`progress_enabled`].
+fn progress_allowed(command: &RunCommand, silent_mode: bool) -> bool {
+    !command.output.verbose
+        && !command.output.debug
+        && !silent_mode
+        && !command.execution.no_exec
+        && !command.execution.dry_run
 }
 
 fn configured_registry(
@@ -499,11 +728,13 @@ fn configured_registry(
 ) -> Result<(Registry, mutarust::SourceFilters), String> {
     let mut registry = Registry::builtins();
     let names = registry.names().map(str::to_owned).collect::<Vec<_>>();
-    let filters = mutarust::SourceFilters::new(
+    let filters = mutarust::SourceFilters::with_policies(
         &configuration.exclude_dirs,
         &configuration.ignore_source_lines,
         command.function_match.as_deref(),
         &names,
+        configuration.skip_without_test,
+        configuration.skip_with_cfg,
     )?;
     let selected = configuration
         .select_mutators(&names)
@@ -522,13 +753,23 @@ fn finish_mutation_run(
         return write_baseline(command.baseline.path(), run);
     }
     if command.execution.dry_run {
-        return print_dry_run(run);
+        print_dry_run(run)?;
+        return Ok(write_reports_or_error(command, configuration, run).unwrap_or(ExitCode::SUCCESS));
     }
     if command.execution.no_exec {
-        return print_generated_mutants(run);
+        print_generated_mutants(run)?;
+        return Ok(write_reports_or_error(command, configuration, run).unwrap_or(ExitCode::SUCCESS));
     }
     let one_mutant = command.run_mutant_id.is_some();
-    print_mutation_results(run, configuration.silent_mode, command.no_diffs, one_mutant)?;
+    print_mutation_results(
+        run,
+        display_filter(command, configuration.silent_mode),
+        command.output.no_diffs,
+        one_mutant,
+    )?;
+    if let Some(code) = write_reports_or_error(command, configuration, run) {
+        return Ok(code);
+    }
     Ok(if one_mutant {
         ExitCode::SUCCESS
     } else {
@@ -537,8 +778,66 @@ fn finish_mutation_run(
             configuration,
             baseline,
             command.baseline.fail_on_escaped,
+            command.baseline.ignore_msi_with_no_mutations,
         )
     })
+}
+
+fn write_reports_or_error(
+    command: &RunCommand,
+    configuration: &Configuration,
+    run: &mutarust::MutationRun,
+) -> Option<ExitCode> {
+    let context = ReportContext {
+        one_mutant: command.run_mutant_id.is_some(),
+    };
+    write_report_if(configuration.json_output, || {
+        write_full_report(run, &context)
+    })
+    .or_else(|| {
+        write_report_if(
+            configuration.html_output || command.reports.html_output,
+            || write_html_report(run),
+        )
+    })
+    .or_else(|| write_report_if(command.reports.summary_json, || write_compact_summary(run)))
+    .or_else(|| {
+        write_report_if(command.reports.agentic_json, || {
+            write_agentic_report(run, std::path::Path::new("."))
+        })
+    })
+    .or_else(|| write_github_annotations_if(command.reports.github, run))
+    .or_else(|| write_report_if(command.reports.gitlab, || write_gitlab_report(run)))
+}
+
+fn write_report_if(enabled: bool, write: impl FnOnce() -> Result<(), String>) -> Option<ExitCode> {
+    if !enabled {
+        return None;
+    }
+    match write() {
+        Ok(()) => None,
+        Err(error) => {
+            write_error(&error);
+            Some(ExitCode::from(3))
+        }
+    }
+}
+
+fn write_github_annotations_if(enabled: bool, run: &mutarust::MutationRun) -> Option<ExitCode> {
+    if !enabled {
+        return None;
+    }
+    let annotations = github_annotations(run);
+    if annotations.is_empty() {
+        return None;
+    }
+    match write!(io::stdout().lock(), "{annotations}") {
+        Ok(()) => None,
+        Err(error) => {
+            write_error(&error.to_string());
+            Some(ExitCode::from(3))
+        }
+    }
 }
 
 fn write_baseline(path: &std::path::Path, run: &mutarust::MutationRun) -> io::Result<ExitCode> {
@@ -598,17 +897,18 @@ fn effective_configuration(
 
 fn print_mutation_results(
     run: &mutarust::MutationRun,
-    silent: bool,
+    filter: DisplayFilter,
     no_diffs: bool,
     one_mutant: bool,
 ) -> io::Result<()> {
     let mut stdout = io::stdout().lock();
-    if !silent {
-        for result in run.results() {
-            print_result_details(&mut stdout, result)?;
-            if result.state == mutarust::MutationState::Escaped && !no_diffs {
-                write!(stdout, "{}", result.diff)?;
-            }
+    for result in run.results() {
+        if !filter.shows(result.state) {
+            continue;
+        }
+        print_result_details(&mut stdout, result)?;
+        if result.state == mutarust::MutationState::Escaped && !no_diffs {
+            write!(stdout, "{}", result.diff)?;
         }
     }
     if one_mutant {
@@ -683,7 +983,11 @@ fn score_gates(
     configuration: &Configuration,
     baseline: &Baseline,
     fail_on_escaped: bool,
+    ignore_msi_with_no_mutations: bool,
 ) -> ExitCode {
+    if ignore_msi_with_no_mutations && run.total() == 0 {
+        return ExitCode::SUCCESS;
+    }
     let total = total_score_gate(run, configuration.min_msi);
     if total != ExitCode::SUCCESS {
         return total;
@@ -737,11 +1041,11 @@ fn covered_score_gate(run: &mutarust::MutationRun, minimum: Option<u8>) -> ExitC
     }
 }
 
-fn print_files(files: &[std::path::PathBuf]) -> io::Result<()> {
+fn print_files(files: &[std::path::PathBuf]) -> Result<(), String> {
     let mut stdout = io::stdout().lock();
 
     for file in files {
-        writeln!(stdout, "{}", file.display())?;
+        writeln!(stdout, "{}", file.display()).map_err(|error| error.to_string())?;
     }
 
     Ok(())
@@ -761,6 +1065,7 @@ enum Command {
     Version,
     ListMutators,
     ListFiles(Vec<String>),
+    PrintAst(Vec<String>),
     Run(Box<RunCommand>),
     Invalid(String),
 }
@@ -770,15 +1075,32 @@ struct RunCommand {
     timeout: Duration,
     custom_command: Option<String>,
     recursive_tests: bool,
-    verbose: bool,
-    debug: bool,
     execution: ExecutionOptions,
+    output: OutputOptions,
+    reports: ReportOptions,
     function_match: Option<String>,
     configuration: Option<PathBuf>,
-    no_diffs: bool,
     run_mutant_id: Option<String>,
     baseline: BaselineOptions,
     settings: CommandSettings,
+}
+
+#[derive(Default)]
+struct OutputOptions {
+    verbose: bool,
+    debug: bool,
+    quiet: bool,
+    no_diffs: bool,
+    output_statuses: Option<String>,
+}
+
+#[derive(Default)]
+struct ReportOptions {
+    summary_json: bool,
+    agentic_json: bool,
+    github: bool,
+    gitlab: bool,
+    html_output: bool,
 }
 
 #[derive(Default)]
@@ -786,6 +1108,7 @@ struct BaselineOptions {
     path: Option<PathBuf>,
     update: bool,
     fail_on_escaped: bool,
+    ignore_msi_with_no_mutations: bool,
 }
 
 impl BaselineOptions {
@@ -819,12 +1142,11 @@ impl Default for RunCommand {
             timeout: mutarust::DEFAULT_TEST_TIMEOUT,
             custom_command: None,
             recursive_tests: false,
-            verbose: false,
-            debug: false,
             execution: ExecutionOptions::default(),
+            output: OutputOptions::default(),
             function_match: None,
             configuration: None,
-            no_diffs: false,
+            reports: ReportOptions::default(),
             run_mutant_id: None,
             baseline: BaselineOptions::default(),
             settings: CommandSettings::default(),
@@ -987,4 +1309,41 @@ fn baseline_control_error(command: &RunCommand) -> Option<&'static str> {
     ]
     .into_iter()
     .find_map(|(invalid, message)| invalid.then_some(message))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{RunCommand, progress_allowed};
+
+    #[test]
+    fn progress_is_allowed_only_without_diagnostics_or_result_free_modes() {
+        let command = RunCommand::default();
+        assert!(progress_allowed(&command, false));
+        assert!(!progress_allowed(&command, true), "silent must disable it");
+
+        let mut verbose = RunCommand::default();
+        verbose.output.verbose = true;
+        assert!(
+            !progress_allowed(&verbose, false),
+            "verbose must disable it"
+        );
+
+        let mut debug = RunCommand::default();
+        debug.output.debug = true;
+        assert!(!progress_allowed(&debug, false), "debug must disable it");
+
+        let mut no_exec = RunCommand::default();
+        no_exec.execution.no_exec = true;
+        assert!(
+            !progress_allowed(&no_exec, false),
+            "no-exec must disable it"
+        );
+
+        let mut dry_run = RunCommand::default();
+        dry_run.execution.dry_run = true;
+        assert!(
+            !progress_allowed(&dry_run, false),
+            "dry-run must disable it"
+        );
+    }
 }

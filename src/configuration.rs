@@ -8,9 +8,9 @@ use serde::Deserialize;
 /// The mutation policy read from a Mutarust YAML file.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Configuration {
-    /// Skips a mutant when no selected test covers it.
+    /// Skips production source files that have no `#[cfg(test)]` unit tests.
     pub skip_without_test: bool,
-    /// Skips a mutant in conditionally compiled source.
+    /// Skips mutants in production items gated by a non-test `#[cfg(...)]`.
     pub skip_with_cfg: bool,
     /// Requests a JSON report.
     pub json_output: bool,

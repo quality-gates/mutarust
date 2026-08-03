@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::env;
 use std::fmt;
 use std::fs;
+use std::io::{self, Write};
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -20,6 +21,7 @@ use crate::coverage::{CoverageMap, PerTestCoverageMap, TestIdentity, TestTarget,
 use crate::evidence::{MutationEvidence, StableMutantId, mutation_evidence};
 use crate::filter::{SourceFilter, SourceFilters};
 use crate::git::ChangedLines;
+use crate::progress::{ProgressCounters, ProgressMonitor};
 use crate::{Mutation, Mutator, Registry, SourceError, find_rust_sources};
 
 static NEXT_TEMPORARY_WORKSPACE: AtomicU64 = AtomicU64::new(0);
@@ -37,6 +39,15 @@ pub struct MutationRun {
 }
 
 impl MutationRun {
+    /// Builds a run from completed results for report tests.
+    #[cfg(test)]
+    pub(crate) fn for_test(results: Vec<MutationResult>, has_coverage: bool) -> Self {
+        Self {
+            results,
+            has_coverage,
+        }
+    }
+
     /// Returns the result for each generated mutant.
     pub fn results(&self) -> &[MutationResult] {
         &self.results
@@ -245,12 +256,17 @@ impl TestExecution {
     }
 
     /// Uses the built-in Cargo test command with its selected controls.
-    pub fn cargo_with_options(recursive: bool, cargo_flags: Vec<String>) -> Self {
+    pub fn cargo_with_options(
+        recursive: bool,
+        cargo_flags: Vec<String>,
+        verbose: bool,
+        debug: bool,
+    ) -> Self {
         Self {
             command: TestCommand::Cargo,
             recursive,
-            verbose: false,
-            debug: false,
+            verbose,
+            debug,
             cargo_flags,
         }
     }
@@ -274,6 +290,24 @@ impl TestExecution {
     fn uses_cargo(&self) -> bool {
         matches!(self.command, TestCommand::Cargo)
     }
+
+    /// Describes the configured command for a diagnostic message.
+    ///
+    /// Reports only the configured program and arguments, never the process
+    /// environment, since inherited environment variables may hold secrets.
+    fn command_description(&self) -> String {
+        match &self.command {
+            TestCommand::Cargo => {
+                let mut parts = vec!["cargo".to_owned(), "test".to_owned()];
+                if self.recursive {
+                    parts.push("--workspace".to_owned());
+                }
+                parts.extend(self.cargo_flags.iter().cloned());
+                parts.join(" ")
+            }
+            TestCommand::Custom(command) => command.arguments.join(" "),
+        }
+    }
 }
 
 /// Execution controls that apply to a complete mutation run.
@@ -295,6 +329,49 @@ pub struct ExecutionControls {
     pub git_diff: GitDiffControls,
     /// Reads accepted mutation checksums from these files.
     pub blacklist_files: Vec<PathBuf>,
+    /// Shows a live progress line on standard error while mutants run.
+    pub progress: bool,
+    /// Selects which mutation results the run prints, including under `--debug`.
+    pub filter: DisplayFilter,
+}
+
+/// Selects which mutation results a run prints to standard output.
+///
+/// The precedence, from strongest to weakest, is: `silent` hides every
+/// result; otherwise an explicit `output_statuses` filter decides visibility
+/// per state; otherwise `quiet` shows only escaped mutants; otherwise every
+/// result is visible.
+#[derive(Clone, Debug, Default)]
+pub struct DisplayFilter {
+    pub silent: bool,
+    pub quiet: bool,
+    pub output_statuses: Option<String>,
+}
+
+impl DisplayFilter {
+    pub fn shows(&self, state: MutationState) -> bool {
+        if self.silent {
+            return false;
+        }
+        if let Some(statuses) = &self.output_statuses {
+            return statuses.contains(state_letter(state));
+        }
+        if self.quiet {
+            return state == MutationState::Escaped;
+        }
+        true
+    }
+}
+
+fn state_letter(state: MutationState) -> char {
+    match state {
+        MutationState::Killed => 'k',
+        MutationState::Escaped => 'e',
+        MutationState::Skipped => 's',
+        MutationState::NotCovered => 'n',
+        MutationState::Errored => 'x',
+        MutationState::Generated => 'g',
+    }
 }
 
 /// Git changed-line controls that apply to a complete mutation run.
@@ -543,7 +620,12 @@ pub fn run_mutation_tests_with_controls(
             test_clean_workspaces(&plan.workspaces, timeout, execution)?,
         )
     };
-    let results = test_candidates(plan.candidates, timeout, execution, controls)?;
+    let counters = Arc::new(ProgressCounters::new());
+    let monitor = controls
+        .progress
+        .then(|| ProgressMonitor::start(Arc::clone(&counters)));
+    let results = test_candidates(plan.candidates, timeout, execution, controls, &counters)?;
+    drop(monitor);
     Ok(MutationRun {
         results,
         has_coverage: coverage.has_normal_coverage(),
@@ -733,6 +815,8 @@ fn run_llvm_cov_command(
         append_test_target(&mut command, test);
         command.args(&execution.cargo_flags);
         command.args(["--", "--exact", &test.name]);
+    } else {
+        command.args(&execution.cargo_flags);
     }
     stop_if_interrupted()?;
     configure_process_group(&mut command);
@@ -936,12 +1020,14 @@ fn test_candidates(
     timeout: Duration,
     execution: &TestExecution,
     controls: &ExecutionControls,
+    counters: &Arc<ProgressCounters>,
 ) -> Result<Vec<MutationResult>, RunError> {
     let workers = active_worker_count(candidates.len(), execution, controls);
+    log_worker_count(execution, workers);
     if workers < 2 {
-        return test_candidates_sequential(candidates, timeout, execution, controls);
+        return test_candidates_sequential(candidates, timeout, execution, controls, counters);
     }
-    test_candidates_in_parallel(candidates, workers, timeout, execution, controls)
+    test_candidates_in_parallel(candidates, workers, timeout, execution, controls, counters)
 }
 
 fn active_worker_count(
@@ -961,13 +1047,16 @@ fn test_candidates_sequential(
     timeout: Duration,
     execution: &TestExecution,
     controls: &ExecutionControls,
+    counters: &ProgressCounters,
 ) -> Result<Vec<MutationResult>, RunError> {
     let mut results = Vec::with_capacity(candidates.len());
     for candidate in candidates {
         if mutation_run_was_interrupted() {
             return Err(run_error("mutation run interrupted"));
         }
-        results.push(test_candidate(candidate, timeout, execution, controls));
+        results.push(test_candidate(
+            candidate, timeout, execution, controls, counters,
+        ));
         if mutation_run_was_interrupted() {
             return Err(run_error("mutation run interrupted"));
         }
@@ -981,6 +1070,7 @@ fn test_candidates_in_parallel(
     timeout: Duration,
     execution: &TestExecution,
     controls: &ExecutionControls,
+    counters: &Arc<ProgressCounters>,
 ) -> Result<Vec<MutationResult>, RunError> {
     let candidates = Arc::new(Mutex::new(indexed_candidates(candidates)));
     let indexed_results = thread::scope(|scope| {
@@ -989,9 +1079,10 @@ fn test_candidates_in_parallel(
             let candidates = Arc::clone(&candidates);
             let execution = execution.clone();
             let controls = controls.clone();
-            handles.push(
-                scope.spawn(move || test_mutation_worker(candidates, timeout, execution, controls)),
-            );
+            let counters = Arc::clone(counters);
+            handles.push(scope.spawn(move || {
+                test_mutation_worker(candidates, timeout, execution, controls, &counters)
+            }));
         }
         collect_worker_results(handles)
     })?;
@@ -1014,13 +1105,20 @@ fn test_mutation_worker(
     timeout: Duration,
     execution: TestExecution,
     controls: ExecutionControls,
+    counters: &ProgressCounters,
 ) -> Result<Vec<IndexedResult>, RunError> {
     let mut results = Vec::new();
     while let Some(candidate) = next_candidate(&candidates)? {
         if mutation_run_was_interrupted() {
             break;
         }
-        let result = test_candidate(candidate.candidate, timeout, &execution, &controls);
+        let result = test_candidate(
+            candidate.candidate,
+            timeout,
+            &execution,
+            &controls,
+            counters,
+        );
         results.push(IndexedResult {
             index: candidate.index,
             result,
@@ -1151,7 +1249,46 @@ mod tests {
     use std::path::PathBuf;
     use std::time::Duration;
 
-    use super::{MutationResult, MutationRun, MutationState, adaptive_timeout};
+    use super::{DisplayFilter, MutationResult, MutationRun, MutationState, adaptive_timeout};
+
+    #[test]
+    fn display_filter_honours_silent_quiet_and_every_status_letter() {
+        let silent = DisplayFilter {
+            silent: true,
+            quiet: true,
+            output_statuses: Some("kesnx".to_owned()),
+        };
+        for state in [
+            MutationState::Killed,
+            MutationState::Escaped,
+            MutationState::Skipped,
+            MutationState::NotCovered,
+            MutationState::Errored,
+        ] {
+            assert!(!silent.shows(state), "silent hides {state:?}");
+        }
+
+        let quiet = DisplayFilter {
+            quiet: true,
+            ..DisplayFilter::default()
+        };
+        assert!(quiet.shows(MutationState::Escaped));
+        assert!(!quiet.shows(MutationState::Killed));
+
+        let letters = DisplayFilter {
+            output_statuses: Some("ksnx".to_owned()),
+            quiet: true,
+            ..DisplayFilter::default()
+        };
+        assert!(letters.shows(MutationState::Killed));
+        assert!(letters.shows(MutationState::Skipped));
+        assert!(letters.shows(MutationState::NotCovered));
+        assert!(letters.shows(MutationState::Errored));
+        assert!(
+            !letters.shows(MutationState::Escaped),
+            "output_statuses overrides quiet and can hide escaped"
+        );
+    }
 
     #[test]
     fn mutation_score_uses_the_parity_states() {
@@ -1394,6 +1531,9 @@ fn mutation_plan(
         let text = fs::read_to_string(&source)
             .map_err(|error| run_error(format!("could not read {}: {error}", source.display())))?;
         let source_filter = filters.for_source(&source, &text).map_err(run_error)?;
+        if source_filter.skips_source() {
+            continue;
+        }
         workspaces.push(workspace.clone());
         let scope = CandidateScope {
             workspace: &workspace,
@@ -2154,9 +2294,13 @@ fn test_candidate(
     timeout: Duration,
     execution: &TestExecution,
     controls: &ExecutionControls,
+    counters: &ProgressCounters,
 ) -> MutationResult {
+    log_candidate_start(execution, &candidate);
     let (state, error) = test_candidate_state(&candidate, timeout, execution, controls)
         .unwrap_or_else(|error| (MutationState::Errored, Some(error.to_string())));
+    log_candidate_finish(execution, controls, &candidate, state);
+    counters.record(state);
     MutationResult {
         source: candidate.evidence.source,
         stable_id: candidate.evidence.stable_id.into_string(),
@@ -2166,6 +2310,56 @@ fn test_candidate(
         state,
         error,
     }
+}
+
+/// Prints the mutation about to run under `--verbose` or `--debug`.
+///
+/// `--debug` adds the mutator name and the test command, but never the
+/// command environment, since that may hold secrets inherited from the
+/// caller's shell.
+fn log_candidate_start(execution: &TestExecution, candidate: &MutationCandidate) {
+    if !execution.verbose && !execution.debug {
+        return;
+    }
+    print_diagnostic(format_args!(
+        "Mutate {} at line {}",
+        candidate.source.display(),
+        candidate.evidence.line
+    ));
+    if execution.debug {
+        print_diagnostic(format_args!("Mutator {}", candidate.mutator));
+        print_diagnostic(format_args!("Run {}", execution.command_description()));
+    }
+}
+
+/// Prints the mutation result under `--debug`, honouring the same
+/// silent/quiet/output-statuses filter as the final result summary.
+fn log_candidate_finish(
+    execution: &TestExecution,
+    controls: &ExecutionControls,
+    candidate: &MutationCandidate,
+    state: MutationState,
+) {
+    if !execution.debug || !controls.filter.shows(state) {
+        return;
+    }
+    print_diagnostic(format_args!(
+        "Result {} for {}",
+        state,
+        candidate.evidence.stable_id.as_str()
+    ));
+}
+
+/// Prints the effective worker count under `--verbose` or `--debug`.
+fn log_worker_count(execution: &TestExecution, workers: usize) {
+    if !execution.verbose && !execution.debug {
+        return;
+    }
+    print_diagnostic(format_args!("Running with {workers} parallel worker(s)"));
+}
+
+fn print_diagnostic(message: fmt::Arguments<'_>) {
+    let _ = writeln!(io::stdout().lock(), "{message}");
 }
 
 fn test_candidate_state(
@@ -3071,10 +3265,7 @@ fn copy_entry(workspace: &Workspace, source: &Path, destination: &Path) -> Resul
         .map_err(|error| run_error(format!("could not inspect {}: {error}", source.display())))?
         .file_type();
     if file_type.is_symlink() {
-        return Err(run_error(format!(
-            "could not copy symbolic link in workspace: {}",
-            source.display()
-        )));
+        return copy_symbolic_link(source, destination);
     }
     if file_type.is_dir() {
         fs::create_dir(destination).map_err(|error| {
@@ -3094,6 +3285,53 @@ fn copy_entry(workspace: &Workspace, source: &Path, destination: &Path) -> Resul
             source.display()
         )))
     }
+}
+
+fn copy_symbolic_link(source: &Path, destination: &Path) -> Result<(), RunError> {
+    let target = fs::read_link(source).map_err(|error| {
+        run_error(format!(
+            "could not read symbolic link {}: {error}",
+            source.display()
+        ))
+    })?;
+    create_symbolic_link(&target, destination).map_err(|error| {
+        run_error(format!(
+            "could not copy symbolic link {}: {error}",
+            source.display()
+        ))
+    })
+}
+
+#[cfg(unix)]
+fn create_symbolic_link(target: &Path, destination: &Path) -> io::Result<()> {
+    std::os::unix::fs::symlink(target, destination)
+}
+
+#[cfg(windows)]
+fn create_symbolic_link(target: &Path, destination: &Path) -> io::Result<()> {
+    use std::os::windows::fs::{symlink_dir, symlink_file};
+
+    let absolute = if target.is_absolute() {
+        target.to_path_buf()
+    } else {
+        destination
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(target)
+    };
+    if absolute.is_dir() {
+        symlink_dir(target, destination)
+    } else {
+        symlink_file(target, destination)
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn create_symbolic_link(_target: &Path, _destination: &Path) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "symbolic links are not supported on this platform",
+    ))
 }
 
 struct MutationPlan {

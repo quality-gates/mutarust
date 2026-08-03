@@ -1255,14 +1255,11 @@ mod tests {
         assert!(!mutations[0].requires_compile_validation());
         assert_eq!(
             mutations[0].apply(source),
-            Some(
-                source
-                    .replacen(
-                        "consume(Some(1))",
-                        "consume(::core::option::Option::None)",
-                        1,
-                    )
-            )
+            Some(source.replacen(
+                "consume(Some(1))",
+                "consume(::core::option::Option::None)",
+                1,
+            ))
         );
     }
 }

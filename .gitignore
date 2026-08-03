@@ -1,4 +1,7 @@
 /target/
+/site/
+/.serena/
+skills-lock.json
 mutarust-baseline.json
 mutarust-report.html
 mutarust-summary.json

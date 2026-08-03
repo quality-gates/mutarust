@@ -8,7 +8,13 @@ conditional/negated :: < :: >= :: Killed
 conditional/negated :: == :: != :: Killed
 conditional/not :: ! ::  :: Killed
 expression/comparison :: < :: <= :: Escaped
+expression/error-guard :: result.is_err() :: false :: Killed
 expression/logical :: && :: || :: Killed
+expression/logical :: && :: || :: Killed
+expression/remove :: a :: true :: Killed
+expression/remove :: b :: true :: Killed
+expression/remove :: a :: true :: Killed
+expression/remove :: b :: true :: Killed
 expression/string-literal :: "yes" :: "" :: Killed
 numbers/decrementer :: 2 :: 1 :: Killed
 numbers/decrementer :: 2.5 :: 1.5 :: Killed

@@ -24,12 +24,15 @@ mod configuration;
 mod control_flow;
 mod coverage;
 mod discovery;
+mod error_panic_cleanup;
 mod evidence;
 mod execution;
 mod expression;
 mod filter;
 mod git;
 mod mutator;
+mod progress;
+mod report;
 mod return_value;
 mod value;
 
@@ -37,14 +40,23 @@ pub use baseline::Baseline;
 pub use configuration::{CommandSettings, Configuration, ConfigurationError};
 pub use discovery::{SourceError, find_rust_sources};
 pub use execution::{
-    CoverageControls, DEFAULT_TEST_TIMEOUT, ExecutionControls, GitDiffControls, MutationResult,
-    MutationRun, MutationState, MutatorSummary, RunError, TestExecution, WorkerLimit,
-    run_mutation_tests, run_mutation_tests_with_controls, run_mutation_tests_with_test_execution,
-    run_mutation_tests_with_timeout, run_mutation_tests_with_timeout_for_mutant,
+    CoverageControls, DEFAULT_TEST_TIMEOUT, DisplayFilter, ExecutionControls, GitDiffControls,
+    MutationResult, MutationRun, MutationState, MutatorSummary, RunError, TestExecution,
+    WorkerLimit, run_mutation_tests, run_mutation_tests_with_controls,
+    run_mutation_tests_with_test_execution, run_mutation_tests_with_timeout,
+    run_mutation_tests_with_timeout_for_mutant,
     run_mutation_tests_with_timeout_for_mutant_and_filters,
 };
 pub use filter::SourceFilters;
 pub use mutator::{Mutation, Mutator, Registry, RegistryBuilder, RegistryError};
+pub use report::{
+    AGENTIC_REMINDER, AGENTIC_REPORT_FILE_NAME, AgenticMutant, AgenticReport, AgenticReportInput,
+    COMPACT_SUMMARY_FILE_NAME, FULL_REPORT_FILE_NAME, FullReport, GITLAB_REPORT_FILE_NAME,
+    GitLabIssue, GitLabLines, GitLabLocation, HTML_REPORT_FILE_NAME, ReportContext, ReportMetadata,
+    ReportMutant, ReportMutator, ReportMutatorStats, ReportStats, agentic_report, compact_summary,
+    full_report, github_annotations, gitlab_report, html_report, write_agentic_report,
+    write_compact_summary, write_full_report, write_gitlab_report, write_html_report,
+};
 
 /// The package version for the installed command.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

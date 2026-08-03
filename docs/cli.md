@@ -35,6 +35,9 @@ workspace and prints one result line for each mutant. Each result has a stable
 ID. An escaped mutant also has a unified source diff. Use `--no-diffs` to hide
 these diffs.
 
+Mutarust does not mutate items inside `#[cfg(test)]` modules. Those items are
+test source, not production source.
+
 A normal run prints killed, escaped, errored, not-covered, skipped, and total
 counts. It also prints the total mutation score and a sorted result table for
 each mutator. The score is the killed, errored, and skipped count divided by
@@ -42,6 +45,45 @@ the full mutant count. The score is zero when no mutant exists.
 
 Use `--min-msi PERCENT` to require a total mutation score. A failed score gate
 returns exit value 4. A score equal to the required percentage passes.
+Use `--ignore-msi-with-no-mutations` to pass score gates when a run has no
+mutants. This is useful with `--git-diff-lines` when a change has no mutable
+lines.
+
+## Terminal Output Controls
+
+When standard error is a terminal, and none of `--verbose`, `--debug`,
+`--silent`, `--no-exec`, or `--dry-run` is set, Mutarust shows a live progress
+line on standard error. The line updates every 100 milliseconds and reports
+the processed mutant count with a state breakdown. Mutarust clears this line
+before it prints the final result output, so the line does not corrupt the
+final output. Mutarust never writes the progress line, or any other terminal
+control character, to a non-terminal standard error. Piped or redirected
+output is stable text with no control characters.
+
+Use `--silent` to hide all per-mutant result lines. Use `--no-silent` to
+force these lines on, for example to override a `silent_mode: true`
+configuration file value. `--silent` and `--no-silent` cannot be used
+together.
+
+Use `--quiet` to show only escaped-mutant result lines. It hides killed,
+errored, not-covered, and skipped lines. `--silent` overrides `--quiet`.
+
+Use `--output-statuses LETTERS` to show only chosen mutant states. Each
+letter selects one state: `k` killed, `e` escaped, `s` skipped, `n` not
+covered, `x` errored. For example, `--output-statuses ex` shows only escaped
+and errored mutants. This option requires at least one of these letters and
+rejects any other character. `--output-statuses` overrides `--quiet`.
+`--silent` overrides `--output-statuses`.
+
+Use `--no-diffs` to hide escaped-mutant source diffs. A hidden result line
+never shows its diff, regardless of `--no-diffs`.
+
+Use `--verbose` to print the mutated source file, line number, and worker
+count to standard output before each mutant runs. Use `--debug` for
+`--verbose` output plus the active mutator name and the configured test
+command. Debug output never prints environment variable values, because a
+custom test command inherits the caller environment, which can hold secret
+values. Mutarust also prints one result line per mutant under `--debug`.
 
 ## LLVM Coverage
 
@@ -77,6 +119,26 @@ with `--exec`, `--dry-run`, or `--no-exec`.
 Use `--run-mutant-id ID` to run one stable mutant ID. This mode prints only
 the selected mutant evidence. It does not print the normal summary or apply
 score gates.
+
+## Reports
+
+Use `json_output: true` in a configuration file to write the full report to
+`report.json` in the current directory. Use `html_output: true` or
+`--html-output` to write the self-contained HTML report to
+`mutarust-report.html`. Use
+`--logger-summary-json` to write the compact score summary to
+`mutarust-summary.json`. Use `--logger-agentic-json` to write the agent-ready
+escaped-mutant report to `mutarust-agentic.json`. Use `--logger-github` to
+print escaped mutants as GitHub Actions `::warning` annotations. Use
+`--logger-gitlab` to write the GitLab Code Quality report to
+`mutarust-gitlab.json`. Mutarust writes a report only when that command option
+or configuration field enables it. A baseline update does not write these
+reports.
+
+Score values in the JSON files use ratios from zero to one. Source names are
+repository-relative. See the [report schemas](json-outputs.md) for the full,
+compact, HTML, agent-ready, and GitLab document forms, including empty runs and
+escaped-mutant evidence.
 
 ## Accepted Mutants
 
@@ -242,3 +304,27 @@ generated source. Broader package, workspace, and directory selection excludes
 these sources by default.
 
 This command lets users confirm the source scope before mutation testing.
+
+## Syntax Trees
+
+Print the parsed Rust syntax for selected production sources:
+
+```text
+mutarust --print-ast [TARGET]...
+```
+
+Mutarust uses the same target rules as `--list-files`. For each selected
+source it prints the absolute path, then the parsed syntax tree, then a blank
+line. This command does not run tests and does not change the user workspace.
+
+## Bash Completion
+
+Enable Bash completion with the helper script:
+
+```text
+source scripts/mutarust-bash_completion.sh
+```
+
+The helper sets `GO_FLAGS_COMPLETION=1` and runs `mutarust` with the current
+words. Mutarust then prints matching documented options and the `[TARGET]...`
+argument marker. The completion exit value is 2.

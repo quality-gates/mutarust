@@ -6,22 +6,22 @@
   "additionalProperties": false,
   "properties": {
     "skip_without_test": {
-      "description": "Skip mutants without a selected test.",
+      "description": "Skip production source files that have no #[cfg(test)] unit tests.",
       "type": "boolean",
       "default": false
     },
     "skip_with_cfg": {
-      "description": "Skip mutants in conditionally compiled Rust source.",
+      "description": "Skip mutations inside production items gated by a non-test #[cfg(...)] attribute.",
       "type": "boolean",
       "default": false
     },
     "json_output": {
-      "description": "Request a JSON report.",
+      "description": "Write the full mutation report to report.json.",
       "type": "boolean",
       "default": false
     },
     "html_output": {
-      "description": "Request an HTML report.",
+      "description": "Write the HTML report to mutarust-report.html.",
       "type": "boolean",
       "default": false
     },

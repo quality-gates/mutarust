@@ -1,0 +1,75 @@
+name: Mutation Testing
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**/*.rs"
+      - Cargo.toml
+      - Cargo.lock
+      - .github/workflows/mutation.yml
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  mutation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v4.2.0
+        with:
+          # --git-diff-lines needs the base branch and merge-base history.
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+        with:
+          toolchain: stable
+          components: llvm-tools-preview
+      - name: Install cargo-llvm-cov
+        run: cargo install cargo-llvm-cov --locked
+      - name: Build release mutarust
+        run: cargo build --release --locked
+      - name: Run mutation testing
+        # Approved production scope: modules with isolated lib unit tests.
+        # Excluded (written technical reasons):
+        #   src/main.rs — CLI entry; the acceptance suite packages and reinstalls
+        #     the command, so a per-mutant acceptance run is recursive and slow.
+        #   src/execution.rs — primarily covered by that package acceptance suite;
+        #     lib unit tests cover score and display helpers only.
+        #   Built-in mutator modules and discovery/git/configuration/filter/
+        #     coverage/baseline/blacklist, plus remaining report helpers — covered
+        #     by fixture acceptance tests rather than lib unit tests. Per-mutant
+        #     acceptance would package and reinstall for each mutant.
+        # --test-flags "--lib" keeps each mutant on the lib unit suite. The
+        # package acceptance suite is not a safe per-mutant exec command.
+        # Pull requests mutate only changed lines inside this approved scope.
+        # Pushes to main retain the full approved scope so a faulty diff filter
+        # cannot hide a regression permanently.
+        # --coverage marks uncovered mutants and enables the covered-code gate.
+        # --min-msi and --min-covered-msi enforce the parity quality gates.
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          scope_args=()
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            scope_args=(
+              --git-diff-lines
+              --git-diff-base origin/main
+              --ignore-msi-with-no-mutations
+            )
+          fi
+
+          ./target/release/mutarust \
+            --coverage \
+            --test-flags "--lib" \
+            --exec-timeout 180 \
+            --workers 8 \
+            "${scope_args[@]}" \
+            --min-msi 75 \
+            --min-covered-msi 80 \
+            src/report/github.rs \
+            src/report/gitlab.rs \
+            src/evidence.rs \
+            src/progress.rs
