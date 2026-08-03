@@ -24,15 +24,15 @@ exclude = [
 [dependencies]
 cargo_metadata = "0.20.0"
 libc = "0.2.183"
-md5 = "0.7.0"
+md5 = "0.8.1"
 proc-macro2 = { version = "1.0.107", features = ["span-locations"] }
 regex = "1.12.3"
 rustc_lexer = "0.1.0"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 shell-words = "1.1.0"
-syn = { version = "2.0.119", features = ["full", "visit", "extra-traits"] }
-toml = "0.8.23"
+syn = { version = "3.0.3", features = ["full", "visit", "extra-traits"] }
+toml = "1.1.4"
 yaml_serde = "0.10.4"
 
 [target.'cfg(windows)'.dependencies]

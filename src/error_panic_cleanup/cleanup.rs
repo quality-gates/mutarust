@@ -218,8 +218,8 @@ impl<'ast> Visit<'ast> for CleanupVisitor<'_> {
         let mut bindings = BTreeMap::new();
         record_pattern(&mut bindings, &arm.pat, false);
         self.scopes.push(bindings);
-        if let Some((_, guard)) = &arm.guard {
-            self.visit_expr(guard);
+        if let Pat::Guard(guard) = &arm.pat {
+            self.visit_expr(&guard.guard);
         }
         self.visit_expr(&arm.body);
         self.scopes.pop();
@@ -310,6 +310,12 @@ impl<'ast> Visit<'ast> for PatternRecorder<'_> {
             .insert(pattern.ident.to_string(), self.has_cleanup);
         visit::visit_pat_ident(self, pattern);
     }
+
+    fn visit_pat_guard(&mut self, pattern: &'ast syn::PatGuard) {
+        // Match-arm guards are Pat::Guard in syn 3. The default walk enters the guard
+        // expression and would record closure or if-let bindings as arm bindings.
+        self.visit_pat(&pattern.pat);
+    }
 }
 
 struct DropTypeVisitor {
@@ -333,7 +339,7 @@ impl<'ast> Visit<'ast> for DropTypeVisitor {
         let is_local_drop_impl = item
             .trait_
             .as_ref()
-            .is_some_and(|(_, path, _)| exact_drop_trait(path, self.crates))
+            .is_some_and(|(path, _)| exact_drop_trait(path, self.crates))
             && drop_impl_has_work(item);
         if is_local_drop_impl {
             if let Some(name) = local_impl_type_name(&item.self_ty) {

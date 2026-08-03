@@ -453,6 +453,12 @@ impl<'ast> Visit<'ast> for PatternBindingCollector {
         self.names.insert(pattern.ident.to_string());
         visit::visit_pat_ident(self, pattern);
     }
+
+    fn visit_pat_guard(&mut self, pattern: &'ast syn::PatGuard) {
+        // Match-arm guards are Pat::Guard in syn 3. The default Visit walk enters the
+        // guard expression and would collect closure or if-let bindings as arm bindings.
+        self.visit_pat(&pattern.pat);
+    }
 }
 
 fn pattern_bindings<'a>(patterns: impl Iterator<Item = &'a syn::Pat>) -> BTreeSet<String> {
@@ -1077,8 +1083,8 @@ impl<'ast> Visit<'ast> for ContextVisitor<'_> {
     fn visit_arm(&mut self, arm: &'ast syn::Arm) {
         let bindings = pattern_bindings(std::iter::once(&arm.pat));
         with_context_bindings(self, None, bindings, |visitor| {
-            if let Some((_, guard)) = &arm.guard {
-                visitor.visit_expr(guard);
+            if let syn::Pat::Guard(pattern) = &arm.pat {
+                visitor.visit_expr(&pattern.guard);
             }
             visitor.visit_expr(&arm.body);
         });
@@ -1232,5 +1238,28 @@ fn strip_expression(mut expression: &Expr) -> &Expr {
             Expr::Paren(parenthesized) => &parenthesized.expr,
             _ => return expression,
         };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Mutator;
+
+    #[test]
+    fn context_nil_ignores_bindings_from_match_arm_guard_expressions() {
+        let source = "fn consume(_: Option<i32>) {} fn run(value: Option<i32>, preds: &[i32]) { match value { Some(n) if preds.iter().any(|consume| consume == &n) => { consume(Some(1)); }, _ => {} } }";
+        let mutations = ValueMutator::context_nil().mutations(source);
+
+        assert_eq!(mutations.len(), 1);
+        assert!(!mutations[0].requires_compile_validation());
+        assert_eq!(
+            mutations[0].apply(source),
+            Some(source.replacen(
+                "consume(Some(1))",
+                "consume(::core::option::Option::None)",
+                1,
+            ))
+        );
     }
 }

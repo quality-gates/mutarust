@@ -1780,7 +1780,7 @@ fn add_manifest_paths(
             let text = fs::read_to_string(&manifest).map_err(|error| {
                 run_error(format!("could not read {}: {error}", manifest.display()))
             })?;
-            let value = text.parse::<toml::Value>().map_err(|error| {
+            let value = toml::from_str::<toml::Value>(&text).map_err(|error| {
                 run_error(format!("could not read {}: {error}", manifest.display()))
             })?;
             collect_manifest_paths(
@@ -1982,7 +1982,7 @@ fn cargo_configurations(root: &Path) -> Result<(Vec<PathBuf>, Option<PathBuf>), 
                 configuration.display()
             ))
         })?;
-        let value = text.parse::<toml::Value>().map_err(|error| {
+        let value = toml::from_str::<toml::Value>(&text).map_err(|error| {
             run_error(format!(
                 "could not parse Cargo configuration {}: {error}",
                 configuration.display()
@@ -2092,7 +2092,7 @@ fn configuration_paths(configurations: &[PathBuf]) -> Result<Vec<PathBuf>, RunEr
                 configuration.display()
             ))
         })?;
-        let value = text.parse::<toml::Value>().map_err(|error| {
+        let value = toml::from_str::<toml::Value>(&text).map_err(|error| {
             run_error(format!(
                 "could not parse Cargo configuration {}: {error}",
                 configuration.display()
@@ -2961,7 +2961,7 @@ fn rewrite_cargo_manifests(workspace: &Workspace, destination: &Path) -> Result<
         let text = fs::read_to_string(&manifest).map_err(|error| {
             run_error(format!("could not read {}: {error}", manifest.display()))
         })?;
-        let mut value = text.parse::<toml::Value>().map_err(|error| {
+        let mut value = toml::from_str::<toml::Value>(&text).map_err(|error| {
             run_error(format!("could not read {}: {error}", manifest.display()))
         })?;
         rewrite_manifest_paths(&mut value, workspace, destination)?;
@@ -3084,7 +3084,7 @@ fn rewrite_cargo_configurations(workspace: &Workspace, destination: &Path) -> Re
                 copied.display()
             ))
         })?;
-        let mut value = text.parse::<toml::Value>().map_err(|error| {
+        let mut value = toml::from_str::<toml::Value>(&text).map_err(|error| {
             run_error(format!(
                 "could not parse Cargo configuration {}: {error}",
                 copied.display()

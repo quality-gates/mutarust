@@ -47,7 +47,7 @@ fn collect_mutations(
 }
 
 fn standard_error_impl(item: &syn::ItemImpl, crates: StandardCrates) -> bool {
-    let Some((_, path, _)) = &item.trait_ else {
+    let Some((path, _)) = &item.trait_ else {
         return false;
     };
     if path.leading_colon.is_none() {

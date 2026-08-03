@@ -158,7 +158,7 @@ impl<'ast> Visit<'ast> for ReturnVisitor<'_, '_> {
         let previous = self.impl_default;
         let previous_shadows = self.shadows;
         self.shadows = previous_shadows.merged(generic_shadows(&item.generics));
-        let trait_default = item.trait_.as_ref().is_some_and(|(_, path, _)| {
+        let trait_default = item.trait_.as_ref().is_some_and(|(path, _)| {
             path.segments
                 .last()
                 .is_some_and(|segment| segment.ident == "Default")
@@ -449,7 +449,7 @@ impl<'ast> Visit<'ast> for DefaultTypeCollector {
     }
 
     fn visit_item_impl(&mut self, item: &'ast syn::ItemImpl) {
-        if item.trait_.as_ref().is_some_and(|(_, path, _)| {
+        if item.trait_.as_ref().is_some_and(|(path, _)| {
             path.segments
                 .last()
                 .is_some_and(|segment| segment.ident == "Default")
