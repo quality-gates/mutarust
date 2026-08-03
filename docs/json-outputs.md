@@ -110,7 +110,8 @@ Score fields use a ratio from zero to one. Source paths use `/` separators.
 | Dry-run or no-exec | Results appear in `generated`. Tested-state arrays stay empty. |
 | Baseline update | No JSON report is written. |
 
-Published JSON Schema: [schema/report.schema.json](../schema/report.schema.json).
+Published JSON Schema:
+[schema/report.schema.json](https://github.com/quality-gates/mutarust/blob/main/schema/report.schema.json).
 
 ## Compact summary: `mutarust-summary.json`
 
@@ -147,7 +148,8 @@ mutarust --logger-summary-json [TARGET]...
 Use this file for badges and dashboards. `msi` and `coveredCodeMsi` are ratios
 from zero to one, not percentages from zero to 100.
 
-Published JSON Schema: [schema/summary.schema.json](../schema/summary.schema.json).
+Published JSON Schema:
+[schema/summary.schema.json](https://github.com/quality-gates/mutarust/blob/main/schema/summary.schema.json).
 
 ## HTML report: `mutarust-report.html`
 
@@ -228,7 +230,8 @@ escaped mutant always includes `description`, `kill_hint`,
 `context_start_line`, `context_lines`, and `test_files`. Missing source context
 or nearby tests use an empty list and `context_start_line` zero.
 
-Published JSON Schema: [schema/agentic.schema.json](../schema/agentic.schema.json).
+Published JSON Schema:
+[schema/agentic.schema.json](https://github.com/quality-gates/mutarust/blob/main/schema/agentic.schema.json).
 
 ## GitHub Actions warnings
 
@@ -287,4 +290,5 @@ mutarust --logger-gitlab [TARGET]...
 An empty run writes an empty JSON array. Configure the file as a GitLab
 `artifacts:reports:codequality` path so merge requests show the findings.
 
-Published JSON Schema: [schema/gitlab.schema.json](../schema/gitlab.schema.json).
+Published JSON Schema:
+[schema/gitlab.schema.json](https://github.com/quality-gates/mutarust/blob/main/schema/gitlab.schema.json).

@@ -5,6 +5,14 @@ repo_url: https://github.com/quality-gates/mutarust
 repo_name: quality-gates/mutarust
 edit_uri: edit/main/docs/
 
+exclude_docs: |
+  agents/**
+
+validation:
+  omitted_files: info
+  absolute_links: info
+  unrecognized_links: warn
+
 theme:
   name: material
   palette:

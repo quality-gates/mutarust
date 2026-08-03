@@ -141,12 +141,18 @@ fn third_party_actions_use_full_commit_ids_with_minimal_permissions_and_dependab
 fn docs_workflow_builds_user_guides_and_publishes_from_main() {
     let workflow = read_repo_file(".github/workflows/docs.yml");
     assert!(
-        workflow.contains("mkdocs build") || workflow.contains("mkdocs gh-deploy"),
-        "docs CI must build the user documentation site"
+        workflow.contains("mkdocs build --strict"),
+        "docs CI must build the user documentation site in strict mode"
     );
     assert!(
-        workflow.contains("branches: [main]"),
-        "documentation publication must run from main"
+        workflow.contains("mkdocs gh-deploy --force --strict"),
+        "docs CI must publish only after a successful strict build"
+    );
+    assert!(
+        workflow.contains("branches: [main]")
+            && workflow.contains("needs: build")
+            && workflow.contains(r#"github.ref == 'refs/heads/main'"#),
+        "documentation publication must run from main after the build job"
     );
 }
 
@@ -167,7 +173,8 @@ fn user_guides_cover_the_release_documentation_set() {
     for (path, marker) in required {
         let body = read_repo_file(path);
         assert!(
-            body.to_ascii_lowercase().contains(&marker.to_ascii_lowercase()),
+            body.to_ascii_lowercase()
+                .contains(&marker.to_ascii_lowercase()),
             "{path} must cover {marker}"
         );
     }
@@ -206,13 +213,15 @@ fn optional_hooks_mirror_fast_ci_and_are_not_activated_automatically() {
 
     let pre_commit_path = repo_path("githooks/pre-commit");
     let pre_push_path = repo_path("githooks/pre-push");
-    assert!(is_executable(&pre_commit_path), "pre-commit must be executable");
+    assert!(
+        is_executable(&pre_commit_path),
+        "pre-commit must be executable"
+    );
     assert!(is_executable(&pre_push_path), "pre-push must be executable");
 
     let git_config = read_repo_file(".git/config");
     assert!(
-        !git_config.contains("hooksPath = githooks")
-            && !git_config.contains("hooksPath=githooks"),
+        !git_config.contains("hooksPath = githooks") && !git_config.contains("hooksPath=githooks"),
         "repository hooks must not activate automatically"
     );
     assert!(
