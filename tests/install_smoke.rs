@@ -1690,6 +1690,22 @@ fn package_contains_the_configuration_contract() {
         changelog.contains(&format!("## {version}")),
         "the packaged change log must record the {version} release"
     );
+
+    // A file named LICENSE can hold any text. The manifest declares MIT, so the
+    // packaged file must carry the MIT terms and the copyright line.
+    let license =
+        fs::read_to_string(package.join("LICENSE")).expect("packaged LICENSE must be readable");
+    for required in [
+        "MIT License",
+        "Copyright (c)",
+        "Permission is hereby granted, free of charge, to any person obtaining a copy",
+        "THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND",
+    ] {
+        assert!(
+            license.contains(required),
+            "the packaged LICENSE must contain the MIT text {required}"
+        );
+    }
 }
 
 /// Returns the lines of one top-level Cargo manifest table, without its header.

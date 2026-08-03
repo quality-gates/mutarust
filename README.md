@@ -1,4 +1,4 @@
-# mutarust
+# mutarust [![Crates.io](https://img.shields.io/crates/v/mutarust.svg)](https://crates.io/crates/mutarust) [![Docs](https://img.shields.io/docsrs/mutarust)](https://docs.rs/mutarust) [![Mutation Testing](https://github.com/quality-gates/mutarust/actions/workflows/mutation.yml/badge.svg)](https://github.com/quality-gates/mutarust/actions/workflows/mutation.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Rust 1.85+](https://img.shields.io/badge/Rust-1.85+-dea584.svg)](https://www.rust-lang.org)
 
 `mutarust` is a mutation testing tool for Rust.
 
@@ -46,4 +46,4 @@ them with `git config core.hooksPath githooks`.
 
 ## License
 
-MIT.
+MIT. See [LICENSE](LICENSE).
