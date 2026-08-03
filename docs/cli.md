@@ -121,13 +121,16 @@ Use `json_output: true` in a configuration file to write the full report to
 self-contained HTML report to `mutarust-report.html`. Use
 `--logger-summary-json` to write the compact score summary to
 `mutarust-summary.json`. Use `--logger-agentic-json` to write the agent-ready
-escaped-mutant report to `mutarust-agentic.json`. Mutarust writes a report
-only when that command option or configuration field enables it. A baseline
-update does not write these reports.
+escaped-mutant report to `mutarust-agentic.json`. Use `--logger-github` to
+print escaped mutants as GitHub Actions `::warning` annotations. Use
+`--logger-gitlab` to write the GitLab Code Quality report to
+`mutarust-gitlab.json`. Mutarust writes a report only when that command option
+or configuration field enables it. A baseline update does not write these
+reports.
 
 Score values in the JSON files use ratios from zero to one. Source names are
 repository-relative. See the [report schemas](json-outputs.md) for the full,
-compact, HTML, and agent-ready document forms, including empty runs and
+compact, HTML, agent-ready, and GitLab document forms, including empty runs and
 escaped-mutant evidence.
 
 ## Accepted Mutants

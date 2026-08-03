@@ -51,10 +51,11 @@ pub use filter::SourceFilters;
 pub use mutator::{Mutation, Mutator, Registry, RegistryBuilder, RegistryError};
 pub use report::{
     AGENTIC_REMINDER, AGENTIC_REPORT_FILE_NAME, AgenticMutant, AgenticReport, AgenticReportInput,
-    COMPACT_SUMMARY_FILE_NAME, FULL_REPORT_FILE_NAME, FullReport, HTML_REPORT_FILE_NAME,
-    ReportContext, ReportMetadata, ReportMutant, ReportMutator, ReportMutatorStats, ReportStats,
-    agentic_report, compact_summary, full_report, html_report, write_agentic_report,
-    write_compact_summary, write_full_report, write_html_report,
+    COMPACT_SUMMARY_FILE_NAME, FULL_REPORT_FILE_NAME, FullReport, GITLAB_REPORT_FILE_NAME,
+    GitLabIssue, GitLabLines, GitLabLocation, HTML_REPORT_FILE_NAME, ReportContext, ReportMetadata,
+    ReportMutant, ReportMutator, ReportMutatorStats, ReportStats, agentic_report, compact_summary,
+    full_report, github_annotations, gitlab_report, html_report, write_agentic_report,
+    write_compact_summary, write_full_report, write_gitlab_report, write_html_report,
 };
 
 /// The package version for the installed command.

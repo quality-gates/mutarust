@@ -10,6 +10,10 @@ baseline update does not write these reports.
 | `mutarust-summary.json` | `--logger-summary-json` |
 | `mutarust-report.html` | `html_output: true` |
 | `mutarust-agentic.json` | `--logger-agentic-json` |
+| `mutarust-gitlab.json` | `--logger-gitlab` |
+
+GitHub Actions warnings use `--logger-github`. They print to standard output.
+They do not write a file.
 
 See the [command guide](cli.md) and the [configuration guide](config.md) for
 how to enable each report.
@@ -225,3 +229,62 @@ escaped mutant always includes `description`, `kill_hint`,
 or nearby tests use an empty list and `context_start_line` zero.
 
 Published JSON Schema: [schema/agentic.schema.json](../schema/agentic.schema.json).
+
+## GitHub Actions warnings
+
+Enable with `--logger-github`:
+
+```text
+mutarust --logger-github [TARGET]...
+```
+
+Mutarust prints one GitHub Actions warning for each escaped mutant:
+
+```text
+::warning file=checked/src/lib.rs,line=2,title=Mutant escaped (conditional/bool-literal)::Escaped mutation at checked/src/lib.rs:2 — add a test to kill it
+```
+
+Source names are repository-relative. Line numbers are one-based. Special
+characters in annotation properties and messages use the GitHub Actions
+percent escapes. A run with no escaped mutants prints no warnings.
+
+## GitLab Code Quality report: `mutarust-gitlab.json`
+
+Enable with `--logger-gitlab`:
+
+```text
+mutarust --logger-gitlab [TARGET]...
+```
+
+```json
+[
+  {
+    "type": "issue",
+    "check_name": "conditional/bool-literal",
+    "description": "Escaped mutant (conditional/bool-literal) at checked/src/lib.rs:2 — no test kills this mutation",
+    "severity": "minor",
+    "fingerprint": "4582b234c128077507b7558eb62c337e",
+    "location": {
+      "path": "checked/src/lib.rs",
+      "lines": {
+        "begin": 2
+      }
+    }
+  }
+]
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `type` | string | Always `issue` |
+| `check_name` | string | Stable mutator name |
+| `description` | string | Escaped-mutant description |
+| `severity` | string | Always `minor` |
+| `fingerprint` | string | Stable mutant ID |
+| `location.path` | string | Repository-relative source path |
+| `location.lines.begin` | integer | One-based source line of the mutation |
+
+An empty run writes an empty JSON array. Configure the file as a GitLab
+`artifacts:reports:codequality` path so merge requests show the findings.
+
+Published JSON Schema: [schema/gitlab.schema.json](../schema/gitlab.schema.json).

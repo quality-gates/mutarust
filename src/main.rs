@@ -6,8 +6,9 @@ use std::time::Duration;
 
 use mutarust::{
     Baseline, CommandSettings, Configuration, CoverageControls, DisplayFilter, ExecutionControls,
-    GitDiffControls, Registry, ReportContext, TestExecution, WorkerLimit, write_agentic_report,
-    write_compact_summary, write_full_report, write_html_report,
+    GitDiffControls, Registry, ReportContext, TestExecution, WorkerLimit, github_annotations,
+    write_agentic_report, write_compact_summary, write_full_report, write_gitlab_report,
+    write_html_report,
 };
 
 fn main() -> ExitCode {
@@ -79,7 +80,7 @@ fn print_help() -> io::Result<()> {
     )?;
     writeln!(
         stdout,
-        "\nOptions:\n  -h, --help           Print help\n  -V, --version        Print version\n      --config FILE     Read mutation policy from a YAML file\n      --list-files      List selected Rust production source files\n      --print-ast       Print the parsed Rust syntax for selected sources\n      --list-mutators   List available mutators\n      --exec COMMAND    Run a custom command for each mutant\n      --exec-timeout    Stop each test command after this many seconds\n      --timeout         Alias for --exec-timeout\n      --timeout-coefficient FACTOR  Set an adaptive Cargo timeout\n      --test-flags FLAGS  Add shell-quoted Cargo test flags\n      --test-recursive  Select all Cargo workspace packages\n      --workers COUNT   Run this many Cargo mutation jobs\n      --dry-run         List mutants without writing files or running tests\n      --no-exec         Write mutants without running tests\n      --do-not-remove-tmp-folder  Keep mutation workspaces\n      --match REGEXP    Mutate only functions with matching names\n      --verbose         Print mutation location and worker count\n      --debug           Print verbose details plus mutator and test command\n      --silent          Hide mutant status output\n      --no-silent       Print mutant status output\n      --quiet           Show only escaped mutants\n      --output-statuses LETTERS  Show only these states: k e s n x\n      --no-diffs        Hide escaped-mutant source diffs\n      --logger-summary-json  Write compact scores to mutarust-summary.json\n      --logger-agentic-json  Write escaped mutants to mutarust-agentic.json\n      --blacklist FILE  Read accepted mutation checksums\n      --baseline FILE   Read escaped-mutant IDs; default mutarust-baseline.json\n      --update-baseline Write current escaped-mutant IDs and exit\n      --fail-on-escaped Fail only for escaped IDs outside the baseline\n      --run-mutant-id ID  Run one mutant without score gates\n      --min-msi         Set the minimum mutation score percentage\n      --min-covered-msi Set the minimum covered-code score percentage\n      --enable NAME     Select a mutator name or group pattern\n      --disable NAME    Disable a mutator name or group pattern"
+        "\nOptions:\n  -h, --help           Print help\n  -V, --version        Print version\n      --config FILE     Read mutation policy from a YAML file\n      --list-files      List selected Rust production source files\n      --print-ast       Print the parsed Rust syntax for selected sources\n      --list-mutators   List available mutators\n      --exec COMMAND    Run a custom command for each mutant\n      --exec-timeout    Stop each test command after this many seconds\n      --timeout         Alias for --exec-timeout\n      --timeout-coefficient FACTOR  Set an adaptive Cargo timeout\n      --test-flags FLAGS  Add shell-quoted Cargo test flags\n      --test-recursive  Select all Cargo workspace packages\n      --workers COUNT   Run this many Cargo mutation jobs\n      --dry-run         List mutants without writing files or running tests\n      --no-exec         Write mutants without running tests\n      --do-not-remove-tmp-folder  Keep mutation workspaces\n      --match REGEXP    Mutate only functions with matching names\n      --verbose         Print mutation location and worker count\n      --debug           Print verbose details plus mutator and test command\n      --silent          Hide mutant status output\n      --no-silent       Print mutant status output\n      --quiet           Show only escaped mutants\n      --output-statuses LETTERS  Show only these states: k e s n x\n      --no-diffs        Hide escaped-mutant source diffs\n      --logger-summary-json  Write compact scores to mutarust-summary.json\n      --logger-agentic-json  Write escaped mutants to mutarust-agentic.json\n      --logger-github   Emit escaped mutants as GitHub Actions warnings\n      --logger-gitlab   Write mutarust-gitlab.json Code Quality findings\n      --blacklist FILE  Read accepted mutation checksums\n      --baseline FILE   Read escaped-mutant IDs; default mutarust-baseline.json\n      --update-baseline Write current escaped-mutant IDs and exit\n      --fail-on-escaped Fail only for escaped IDs outside the baseline\n      --run-mutant-id ID  Run one mutant without score gates\n      --min-msi         Set the minimum mutation score percentage\n      --min-covered-msi Set the minimum covered-code score percentage\n      --enable NAME     Select a mutator name or group pattern\n      --disable NAME    Disable a mutator name or group pattern"
     )?;
     writeln!(
         stdout,
@@ -126,6 +127,8 @@ fn bash_completion_candidates() -> &'static [&'static str] {
         "--no-diffs",
         "--logger-summary-json",
         "--logger-agentic-json",
+        "--logger-github",
+        "--logger-gitlab",
         "--blacklist",
         "--baseline",
         "--update-baseline",
@@ -320,6 +323,8 @@ fn parse_display_switch(command: &mut RunCommand, argument: &str) -> Option<Resu
         }
         "--logger-summary-json" => set_logger_summary_json(command),
         "--logger-agentic-json" => set_logger_agentic_json(command),
+        "--logger-github" => set_logger_github(command),
+        "--logger-gitlab" => set_logger_gitlab(command),
         "--quiet" => {
             command.output.quiet = true;
             Ok(())
@@ -342,6 +347,24 @@ fn set_logger_agentic_json(command: &mut RunCommand) -> Result<(), String> {
         Err("--logger-agentic-json can be supplied only once".to_owned())
     } else {
         command.logger_agentic_json = true;
+        Ok(())
+    }
+}
+
+fn set_logger_github(command: &mut RunCommand) -> Result<(), String> {
+    if command.logger_github {
+        Err("--logger-github can be supplied only once".to_owned())
+    } else {
+        command.logger_github = true;
+        Ok(())
+    }
+}
+
+fn set_logger_gitlab(command: &mut RunCommand) -> Result<(), String> {
+    if command.logger_gitlab {
+        Err("--logger-gitlab can be supplied only once".to_owned())
+    } else {
+        command.logger_gitlab = true;
         Ok(())
     }
 }
@@ -744,31 +767,48 @@ fn write_reports_or_error(
     let context = ReportContext {
         one_mutant: command.run_mutant_id.is_some(),
     };
-    if configuration.json_output {
-        if let Err(error) = write_full_report(run, &context) {
+    write_report_if(configuration.json_output, || {
+        write_full_report(run, &context)
+    })
+    .or_else(|| write_report_if(configuration.html_output, || write_html_report(run)))
+    .or_else(|| write_report_if(command.logger_summary_json, || write_compact_summary(run)))
+    .or_else(|| {
+        write_report_if(command.logger_agentic_json, || {
+            write_agentic_report(run, std::path::Path::new("."))
+        })
+    })
+    .or_else(|| write_github_annotations_if(command.logger_github, run))
+    .or_else(|| write_report_if(command.logger_gitlab, || write_gitlab_report(run)))
+}
+
+fn write_report_if(enabled: bool, write: impl FnOnce() -> Result<(), String>) -> Option<ExitCode> {
+    if !enabled {
+        return None;
+    }
+    match write() {
+        Ok(()) => None,
+        Err(error) => {
             write_error(&error);
-            return Some(ExitCode::from(3));
+            Some(ExitCode::from(3))
         }
     }
-    if configuration.html_output {
-        if let Err(error) = write_html_report(run) {
-            write_error(&error);
-            return Some(ExitCode::from(3));
+}
+
+fn write_github_annotations_if(enabled: bool, run: &mutarust::MutationRun) -> Option<ExitCode> {
+    if !enabled {
+        return None;
+    }
+    let annotations = github_annotations(run);
+    if annotations.is_empty() {
+        return None;
+    }
+    match write!(io::stdout().lock(), "{annotations}") {
+        Ok(()) => None,
+        Err(error) => {
+            write_error(&error.to_string());
+            Some(ExitCode::from(3))
         }
     }
-    if command.logger_summary_json {
-        if let Err(error) = write_compact_summary(run) {
-            write_error(&error);
-            return Some(ExitCode::from(3));
-        }
-    }
-    if command.logger_agentic_json {
-        if let Err(error) = write_agentic_report(run, std::path::Path::new(".")) {
-            write_error(&error);
-            return Some(ExitCode::from(3));
-        }
-    }
-    None
 }
 
 fn write_baseline(path: &std::path::Path, run: &mutarust::MutationRun) -> io::Result<ExitCode> {
@@ -1008,6 +1048,8 @@ struct RunCommand {
     configuration: Option<PathBuf>,
     logger_summary_json: bool,
     logger_agentic_json: bool,
+    logger_github: bool,
+    logger_gitlab: bool,
     run_mutant_id: Option<String>,
     baseline: BaselineOptions,
     settings: CommandSettings,
@@ -1066,6 +1108,8 @@ impl Default for RunCommand {
             configuration: None,
             logger_summary_json: false,
             logger_agentic_json: false,
+            logger_github: false,
+            logger_gitlab: false,
             run_mutant_id: None,
             baseline: BaselineOptions::default(),
             settings: CommandSettings::default(),

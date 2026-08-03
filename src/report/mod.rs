@@ -1,4 +1,6 @@
 mod agentic;
+mod github;
+mod gitlab;
 mod hints;
 mod html;
 
@@ -12,6 +14,11 @@ use crate::{MutationResult, MutationRun, MutationState, MutatorSummary, VERSION}
 pub use agentic::{
     AGENTIC_REMINDER, AGENTIC_REPORT_FILE_NAME, AgenticMutant, AgenticReport, AgenticReportInput,
     agentic_report, write_agentic_report,
+};
+pub use github::github_annotations;
+pub use gitlab::{
+    GITLAB_REPORT_FILE_NAME, GitLabIssue, GitLabLines, GitLabLocation, gitlab_report,
+    write_gitlab_report,
 };
 pub use html::{HTML_REPORT_FILE_NAME, html_report, write_html_report};
 
