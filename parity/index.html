@@ -1,0 +1,1685 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Mutation testing for Rust">
+      
+      
+      
+        <link rel="canonical" href="https://quality-gates.github.io/mutarust/parity/">
+      
+      
+        <link rel="prev" href="../glossary/">
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Parity Table - mutarust</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#mutago-v277-parity-table" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="mutarust" class="md-header__button md-logo" aria-label="mutarust" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            mutarust
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Parity Table
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/quality-gates/mutarust" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    quality-gates/mutarust
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="mutarust" class="md-nav__button md-logo" aria-label="mutarust" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    mutarust
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/quality-gates/mutarust" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    quality-gates/mutarust
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Command Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mutators/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Mutators
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../json-outputs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../custom-mutators/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Custom Mutators
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CI Integration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../release/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../glossary/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Domain Glossary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Parity Table
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Parity Table
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#command-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Command options
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configuration-fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration fields
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reports-and-annotations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reports and annotations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ci-controls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CI controls
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#result-states-and-exit-values" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Result states and exit values
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#built-in-mutators-33" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Built-in mutators (33)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#resolved-conflicts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Resolved conflicts
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#command-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Command options
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configuration-fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration fields
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reports-and-annotations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reports and annotations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ci-controls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CI controls
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#result-states-and-exit-values" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Result states and exit values
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#built-in-mutators-33" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Built-in mutators (33)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#resolved-conflicts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Resolved conflicts
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="mutago-v277-parity-table">Mutago v2.7.7 Parity Table<a class="headerlink" href="#mutago-v277-parity-table" title="Permanent link">&para;</a></h1>
+<p>Reference commit: <code>5e268a05d68c37d3b89a56447b4e80f791f824c2</code> (mutago v2.7.7).</p>
+<p>Approved test seam: the installed <code>mutarust</code> command and the published library
+contract. The acceptance suite in <code>tests/install_smoke.rs</code> runs against the
+Cargo package artifact.</p>
+<h2 id="command-options">Command options<a class="headerlink" href="#command-options" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Mutago option</th>
+<th>Mutarust option</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--help</code> / <code>-h</code></td>
+<td><code>--help</code> / <code>-h</code></td>
+<td>Same</td>
+<td></td>
+</tr>
+<tr>
+<td><code>--version</code> / <code>-V</code></td>
+<td><code>--version</code> / <code>-V</code></td>
+<td>Same</td>
+<td></td>
+</tr>
+<tr>
+<td><code>--config</code></td>
+<td><code>--config</code></td>
+<td>Same</td>
+<td></td>
+</tr>
+<tr>
+<td><code>--list-files</code></td>
+<td><code>--list-files</code></td>
+<td>Same</td>
+<td></td>
+</tr>
+<tr>
+<td><code>--print-ast</code></td>
+<td><code>--print-ast</code></td>
+<td>Same</td>
+<td></td>
+</tr>
+<tr>
+<td><code>--list-mutators</code></td>
+<td><code>--list-mutators</code></td>
+<td>Same</td>
+<td></td>
+</tr>
+<tr>
+<td><code>--exec</code></td>
+<td><code>--exec</code></td>
+<td>Adapted</td>
+<td>Cargo workspace copy; see <code>docs/cli.md</code></td>
+</tr>
+<tr>
+<td><code>--exec-timeout</code></td>
+<td><code>--exec-timeout</code></td>
+<td>Same</td>
+<td>Default 60s in Mutarust; Mutago default 10s</td>
+</tr>
+<tr>
+<td><code>--timeout</code></td>
+<td><code>--timeout</code></td>
+<td>Same</td>
+<td>Alias for <code>--exec-timeout</code></td>
+</tr>
+<tr>
+<td><code>--timeout-coefficient</code></td>
+<td><code>--timeout-coefficient</code></td>
+<td>Same</td>
+<td></td>
+</tr>
+<tr>
+<td><code>--test-flags</code></td>
+<td><code>--test-flags</code></td>
+<td>Adapted</td>
+<td>Cargo test flags</td>
+</tr>
+<tr>
+<td><code>--test-recursive</code></td>
+<td><code>--test-recursive</code></td>
+<td>Adapted</td>
+<td>Passes <code>--workspace</code> to Cargo</td>
+</tr>
+<tr>
+<td><code>--workers</code></td>
+<td><code>--workers</code></td>
+<td>Same</td>
+<td></td>
+</tr>
+<tr>
+<td><code>--dry-run</code></td>
+<td><code>--dry-run</code></td>
+<td>Same</td>
+<td></td>
+</tr>
+<tr>
+<td><code>--no-exec</code></td>
+<td><code>--no-exec</code></td>
+<td>Same</td>
+<td></td>
+</tr>
+<tr>
+<td><code>--do-not-remove-tmp-folder</code></td>
+<td><code>--do-not-remove-tmp-folder</code></td>
+<td>Same</td>
+<td></td>
+</tr>
+<tr>
+<td><code>--match</code></td>
+<td><code>--match</code></td>
+<td>Same</td>
+<td></td>
+</tr>
+<tr>
+<td><code>--verbose</code></td>
+<td><code>--verbose</code></td>
+<td>Same</td>
+<td></td>
+</tr>
+<tr>
+<td><code>--debug</code></td>
+<td><code>--debug</code></td>
+<td>Same</td>
+<td>Never prints environment secrets</td>
+</tr>
+<tr>
+<td><code>--silent</code></td>
+<td><code>--silent</code></td>
+<td>Same</td>
+<td>Also available as YAML <code>silent_mode</code></td>
+</tr>
+<tr>
+<td><code>--no-silent</code></td>
+<td><code>--no-silent</code></td>
+<td>Mutarust addition</td>
+<td>Overrides <code>silent_mode: true</code></td>
+</tr>
+<tr>
+<td><code>--quiet</code></td>
+<td><code>--quiet</code></td>
+<td>Same</td>
+<td></td>
+</tr>
+<tr>
+<td><code>--output-statuses</code></td>
+<td><code>--output-statuses</code></td>
+<td>Same</td>
+<td></td>
+</tr>
+<tr>
+<td><code>--no-diffs</code></td>
+<td><code>--no-diffs</code></td>
+<td>Same</td>
+<td></td>
+</tr>
+<tr>
+<td><code>--logger-summary-json</code></td>
+<td><code>--logger-summary-json</code></td>
+<td>Renamed file</td>
+<td>Writes <code>mutarust-summary.json</code></td>
+</tr>
+<tr>
+<td><code>--logger-agentic-json</code></td>
+<td><code>--logger-agentic-json</code></td>
+<td>Renamed file</td>
+<td>Writes <code>mutarust-agentic.json</code></td>
+</tr>
+<tr>
+<td><code>--logger-github</code></td>
+<td><code>--logger-github</code></td>
+<td>Same</td>
+<td></td>
+</tr>
+<tr>
+<td><code>--logger-gitlab</code></td>
+<td><code>--logger-gitlab</code></td>
+<td>Renamed file</td>
+<td>Writes <code>mutarust-gitlab.json</code></td>
+</tr>
+<tr>
+<td><code>--html-output</code></td>
+<td><code>--html-output</code></td>
+<td>Same</td>
+<td>Also YAML <code>html_output</code></td>
+</tr>
+<tr>
+<td><code>--blacklist</code></td>
+<td><code>--blacklist</code></td>
+<td>Same</td>
+<td></td>
+</tr>
+<tr>
+<td><code>--baseline</code></td>
+<td><code>--baseline</code></td>
+<td>Same</td>
+<td>Default file <code>mutarust-baseline.json</code></td>
+</tr>
+<tr>
+<td><code>--update-baseline</code></td>
+<td><code>--update-baseline</code></td>
+<td>Same</td>
+<td></td>
+</tr>
+<tr>
+<td><code>--fail-on-escaped</code></td>
+<td><code>--fail-on-escaped</code></td>
+<td>Same</td>
+<td></td>
+</tr>
+<tr>
+<td><code>--run-mutant-id</code></td>
+<td><code>--run-mutant-id</code></td>
+<td>Same</td>
+<td></td>
+</tr>
+<tr>
+<td><code>--min-msi</code></td>
+<td><code>--min-msi</code></td>
+<td>Same</td>
+<td>Integer 0–100</td>
+</tr>
+<tr>
+<td><code>--min-covered-msi</code></td>
+<td><code>--min-covered-msi</code></td>
+<td>Same</td>
+<td>Integer 0–100</td>
+</tr>
+<tr>
+<td><code>--ignore-msi-with-no-mutations</code></td>
+<td><code>--ignore-msi-with-no-mutations</code></td>
+<td>Same</td>
+<td></td>
+</tr>
+<tr>
+<td><code>--enable</code></td>
+<td><code>--enable</code></td>
+<td>Mutarust addition</td>
+<td>Mutago uses YAML <code>enable_mutators</code></td>
+</tr>
+<tr>
+<td><code>--disable</code></td>
+<td><code>--disable</code></td>
+<td>Same</td>
+<td></td>
+</tr>
+<tr>
+<td><code>--coverage</code></td>
+<td><code>--coverage</code></td>
+<td>Adapted</td>
+<td>Uses <code>cargo-llvm-cov</code></td>
+</tr>
+<tr>
+<td><code>--per-test</code></td>
+<td><code>--per-test</code></td>
+<td>Adapted</td>
+<td>Uses LLVM per-test coverage</td>
+</tr>
+<tr>
+<td><code>--git-diff-lines</code></td>
+<td><code>--git-diff-lines</code></td>
+<td>Same</td>
+<td></td>
+</tr>
+<tr>
+<td><code>--git-diff-base</code></td>
+<td><code>--git-diff-base</code></td>
+<td>Same</td>
+<td></td>
+</tr>
+<tr>
+<td><code>--noop</code></td>
+<td>(always on)</td>
+<td>Adapted</td>
+<td>Mutarust always runs the clean suite before mutation</td>
+</tr>
+</tbody>
+</table>
+<h2 id="configuration-fields">Configuration fields<a class="headerlink" href="#configuration-fields" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Mutago field</th>
+<th>Mutarust field</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>skip_without_test</code></td>
+<td><code>skip_without_test</code></td>
+<td>Adapted</td>
+<td>Skips files with no <code>#[cfg(test)]</code> item</td>
+</tr>
+<tr>
+<td><code>skip_with_build_tags</code></td>
+<td><code>skip_with_cfg</code></td>
+<td>Renamed</td>
+<td>Skips mutants in non-test <code>#[cfg(...)]</code> items</td>
+</tr>
+<tr>
+<td><code>json_output</code></td>
+<td><code>json_output</code></td>
+<td>Same</td>
+<td>Writes <code>report.json</code></td>
+</tr>
+<tr>
+<td><code>html_output</code></td>
+<td><code>html_output</code></td>
+<td>Renamed file</td>
+<td>Writes <code>mutarust-report.html</code></td>
+</tr>
+<tr>
+<td><code>silent_mode</code></td>
+<td><code>silent_mode</code></td>
+<td>Same</td>
+<td></td>
+</tr>
+<tr>
+<td><code>min_msi</code></td>
+<td><code>min_msi</code></td>
+<td>Same</td>
+<td></td>
+</tr>
+<tr>
+<td><code>min_covered_msi</code></td>
+<td><code>min_covered_msi</code></td>
+<td>Same</td>
+<td></td>
+</tr>
+<tr>
+<td><code>exclude_dirs</code></td>
+<td><code>exclude_dirs</code></td>
+<td>Same</td>
+<td></td>
+</tr>
+<tr>
+<td><code>disable_mutators</code></td>
+<td><code>disable_mutators</code></td>
+<td>Same</td>
+<td></td>
+</tr>
+<tr>
+<td><code>enable_mutators</code></td>
+<td><code>enable_mutators</code></td>
+<td>Same</td>
+<td></td>
+</tr>
+<tr>
+<td><code>ignore_source_lines</code></td>
+<td><code>ignore_source_lines</code></td>
+<td>Same</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p>Boolean fields default to <code>false</code> when omitted. Mutago’s dist file shows
+<code>true</code> for the skip fields as a starting example. Mutarust does not load a
+configuration file unless <code>--config</code> is set.</p>
+<h2 id="reports-and-annotations">Reports and annotations<a class="headerlink" href="#reports-and-annotations" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Mutago output</th>
+<th>Mutarust output</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>report.json</code></td>
+<td><code>report.json</code></td>
+<td>Same field purpose</td>
+</tr>
+<tr>
+<td><code>mutago-summary.json</code></td>
+<td><code>mutarust-summary.json</code></td>
+<td>Renamed file</td>
+</tr>
+<tr>
+<td><code>mutago-agentic.json</code></td>
+<td><code>mutarust-agentic.json</code></td>
+<td>Renamed file</td>
+</tr>
+<tr>
+<td><code>mutago-report.html</code></td>
+<td><code>mutarust-report.html</code></td>
+<td>Renamed file</td>
+</tr>
+<tr>
+<td><code>mutago-gitlab.json</code></td>
+<td><code>mutarust-gitlab.json</code></td>
+<td>Renamed file</td>
+</tr>
+<tr>
+<td>GitHub <code>::warning</code></td>
+<td>GitHub <code>::warning</code></td>
+<td>Same</td>
+</tr>
+<tr>
+<td><code>// mutator-disable-func</code></td>
+<td><code>// mutator-disable-func</code></td>
+<td>Same purpose</td>
+</tr>
+<tr>
+<td><code>// mutator-disable-next-line</code></td>
+<td><code>// mutator-disable-next-line</code></td>
+<td>Same purpose</td>
+</tr>
+<tr>
+<td><code>// mutator-disable-regexp</code></td>
+<td><code>// mutator-disable-regexp</code></td>
+<td>Same purpose</td>
+</tr>
+</tbody>
+</table>
+<h2 id="ci-controls">CI controls<a class="headerlink" href="#ci-controls" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Mutago CI control</th>
+<th>Mutarust status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--fail-on-escaped</code></td>
+<td>Same</td>
+<td>Exit 4 for new escapes</td>
+</tr>
+<tr>
+<td><code>--min-msi</code> / <code>--min-covered-msi</code></td>
+<td>Same</td>
+<td>Exit 4 when below gate</td>
+</tr>
+<tr>
+<td><code>--ignore-msi-with-no-mutations</code></td>
+<td>Same</td>
+<td>Pass gates when no mutant exists</td>
+</tr>
+<tr>
+<td><code>--logger-github</code> / <code>--logger-gitlab</code></td>
+<td>Same purpose</td>
+<td>Renamed report files</td>
+</tr>
+<tr>
+<td><code>--git-diff-lines</code> on pull requests</td>
+<td>Same</td>
+<td>Documented in <code>docs/cli.md</code></td>
+</tr>
+<tr>
+<td>Self-mutation workflow</td>
+<td>Same purpose</td>
+<td><code>.github/workflows/mutation.yml</code>; release binary, PR changed lines, main full approved scope, 75/80 gates</td>
+</tr>
+<tr>
+<td>Release CI / docs / hooks</td>
+<td>Same purpose</td>
+<td>Issue #27; quality, messrust, security, package, docs site, optional <code>githooks/</code></td>
+</tr>
+<tr>
+<td>crates.io publish check</td>
+<td>Deferred</td>
+<td>Issue #28</td>
+</tr>
+</tbody>
+</table>
+<p>Self-mutation CI is in <code>.github/workflows/mutation.yml</code>. Release CI, user
+guides, and optional hooks are in issue #27. crates.io publication remains in
+issue #28. This table maps the public command CI controls required for the
+release candidate.</p>
+<h2 id="result-states-and-exit-values">Result states and exit values<a class="headerlink" href="#result-states-and-exit-values" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Mutago</th>
+<th>Mutarust</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>KILLED</td>
+<td>Killed</td>
+<td>Same purpose</td>
+</tr>
+<tr>
+<td>ESCAPED</td>
+<td>Escaped</td>
+<td>Same purpose</td>
+</tr>
+<tr>
+<td>ERRORED</td>
+<td>Errored</td>
+<td>Same purpose</td>
+</tr>
+<tr>
+<td>NOT COVERED</td>
+<td>Not covered</td>
+<td>Same purpose</td>
+</tr>
+<tr>
+<td>SKIPPED</td>
+<td>Skipped</td>
+<td>Same purpose</td>
+</tr>
+<tr>
+<td>Exit 0</td>
+<td>Exit 0</td>
+<td>Success / gates pass</td>
+</tr>
+<tr>
+<td>Exit 1</td>
+<td>Exit 1</td>
+<td>Generic failure</td>
+</tr>
+<tr>
+<td>Exit 2</td>
+<td>Exit 2</td>
+<td>Bash completion</td>
+</tr>
+<tr>
+<td>Exit 3</td>
+<td>Exit 3</td>
+<td>Source / config / annotation errors</td>
+</tr>
+<tr>
+<td>Exit 4</td>
+<td>Exit 4</td>
+<td>Quality-gate failure</td>
+</tr>
+</tbody>
+</table>
+<h2 id="built-in-mutators-33">Built-in mutators (33)<a class="headerlink" href="#built-in-mutators-33" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Mutago name</th>
+<th>Mutarust name</th>
+<th>Status</th>
+<th>Fixture</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>arithmetic/assign_invert</code></td>
+<td>same</td>
+<td>Direct</td>
+<td><code>tests/fixtures/expression</code></td>
+</tr>
+<tr>
+<td><code>arithmetic/assignment</code></td>
+<td>same</td>
+<td>Direct</td>
+<td><code>tests/fixtures/expression</code></td>
+</tr>
+<tr>
+<td><code>arithmetic/base</code></td>
+<td>same</td>
+<td>Direct</td>
+<td><code>tests/fixtures/expression</code></td>
+</tr>
+<tr>
+<td><code>arithmetic/bitwise</code></td>
+<td>same</td>
+<td>Direct</td>
+<td><code>tests/fixtures/expression</code></td>
+</tr>
+<tr>
+<td><code>arithmetic/negate</code></td>
+<td>same</td>
+<td>Direct</td>
+<td><code>tests/fixtures/expression</code></td>
+</tr>
+<tr>
+<td><code>branch/case</code></td>
+<td>same</td>
+<td>Adapted</td>
+<td><code>tests/fixtures/control-flow</code></td>
+</tr>
+<tr>
+<td><code>branch/else</code></td>
+<td>same</td>
+<td>Direct</td>
+<td><code>tests/fixtures/control-flow</code></td>
+</tr>
+<tr>
+<td><code>branch/if</code></td>
+<td>same</td>
+<td>Direct</td>
+<td><code>tests/fixtures/control-flow</code></td>
+</tr>
+<tr>
+<td><code>composite/field-clear</code></td>
+<td>same</td>
+<td>Adapted</td>
+<td><code>tests/fixtures/value</code></td>
+</tr>
+<tr>
+<td><code>concurrency/goroutine-remove</code></td>
+<td>same</td>
+<td>Adapted</td>
+<td><code>tests/fixtures/concurrency-selection</code></td>
+</tr>
+<tr>
+<td><code>conditional/bool-literal</code></td>
+<td>same</td>
+<td>Direct</td>
+<td><code>tests/fixtures/expression</code></td>
+</tr>
+<tr>
+<td><code>conditional/negated</code></td>
+<td>same</td>
+<td>Direct</td>
+<td><code>tests/fixtures/expression</code></td>
+</tr>
+<tr>
+<td><code>conditional/not</code></td>
+<td>same</td>
+<td>Direct</td>
+<td><code>tests/fixtures/expression</code></td>
+</tr>
+<tr>
+<td><code>expression/comparison</code></td>
+<td>same</td>
+<td>Direct</td>
+<td><code>tests/fixtures/expression</code></td>
+</tr>
+<tr>
+<td><code>expression/context-nil</code></td>
+<td>same</td>
+<td>Adapted</td>
+<td><code>tests/fixtures/value</code></td>
+</tr>
+<tr>
+<td><code>expression/error-guard</code></td>
+<td>same</td>
+<td>Adapted</td>
+<td><code>tests/fixtures/expression</code></td>
+</tr>
+<tr>
+<td><code>expression/errorf-wrap</code></td>
+<td>same</td>
+<td>Adapted</td>
+<td><code>tests/fixtures/error-panic-cleanup</code></td>
+</tr>
+<tr>
+<td><code>expression/logical</code></td>
+<td>same</td>
+<td>Direct</td>
+<td><code>tests/fixtures/expression</code></td>
+</tr>
+<tr>
+<td><code>expression/recover-clear</code></td>
+<td>same</td>
+<td>Adapted</td>
+<td><code>tests/fixtures/error-panic-cleanup</code></td>
+</tr>
+<tr>
+<td><code>expression/remove</code></td>
+<td>same</td>
+<td>Direct</td>
+<td><code>tests/fixtures/expression</code></td>
+</tr>
+<tr>
+<td><code>expression/string-literal</code></td>
+<td>same</td>
+<td>Direct</td>
+<td><code>tests/fixtures/expression</code></td>
+</tr>
+<tr>
+<td><code>loop/break</code></td>
+<td>same</td>
+<td>Direct</td>
+<td><code>tests/fixtures/control-flow</code></td>
+</tr>
+<tr>
+<td><code>loop/condition</code></td>
+<td>same</td>
+<td>Direct</td>
+<td><code>tests/fixtures/control-flow</code></td>
+</tr>
+<tr>
+<td><code>loop/range_break</code></td>
+<td>same</td>
+<td>Direct</td>
+<td><code>tests/fixtures/control-flow</code></td>
+</tr>
+<tr>
+<td><code>numbers/decrementer</code></td>
+<td>same</td>
+<td>Direct</td>
+<td><code>tests/fixtures/expression</code></td>
+</tr>
+<tr>
+<td><code>numbers/float-negate</code></td>
+<td>same</td>
+<td>Direct</td>
+<td><code>tests/fixtures/expression</code></td>
+</tr>
+<tr>
+<td><code>numbers/incrementer</code></td>
+<td>same</td>
+<td>Direct</td>
+<td><code>tests/fixtures/expression</code></td>
+</tr>
+<tr>
+<td><code>select/case-remove</code></td>
+<td>same</td>
+<td>Adapted</td>
+<td><code>tests/fixtures/concurrency-selection</code></td>
+</tr>
+<tr>
+<td><code>select/default-remove</code></td>
+<td>same</td>
+<td>Adapted</td>
+<td><code>tests/fixtures/concurrency-selection</code></td>
+</tr>
+<tr>
+<td><code>statement/defer-remove</code></td>
+<td>same</td>
+<td>Adapted</td>
+<td><code>tests/fixtures/error-panic-cleanup</code></td>
+</tr>
+<tr>
+<td><code>statement/remove</code></td>
+<td>same</td>
+<td>Adapted</td>
+<td><code>tests/fixtures/control-flow</code></td>
+</tr>
+<tr>
+<td><code>statement/remove-self-assign</code></td>
+<td>same</td>
+<td>Direct</td>
+<td><code>tests/fixtures/value</code></td>
+</tr>
+<tr>
+<td><code>statement/return</code></td>
+<td>same</td>
+<td>Adapted</td>
+<td><code>tests/fixtures/value</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>expression/error-guard</code> collapses <code>is_err()</code> / <code>is_none()</code> to <code>false</code> and
+<code>is_ok()</code> / <code>is_some()</code> to <code>true</code> in an <code>if</code> condition. This keeps the Mutago
+purpose of collapsing error-presence guards.</p>
+<p>Go operators with no Rust form (<code>&amp;^</code>, <code>&amp;^=</code>, unary <code>+</code>) have no Mutarust
+replacement. See <code>docs/mutators.md</code>.</p>
+<h2 id="resolved-conflicts">Resolved conflicts<a class="headerlink" href="#resolved-conflicts" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Topic</th>
+<th>Mutago docs</th>
+<th>Mutago source / tests</th>
+<th>Mutarust choice</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Select mutators</td>
+<td>Prose says empty a clause body</td>
+<td>Source and tests remove the full clause</td>
+<td>Follow source and tests; remove the full clause</td>
+</tr>
+<tr>
+<td><code>skip_without_test</code> default in dist</td>
+<td>Dist file uses <code>true</code></td>
+<td>No config loaded → Go zero value <code>false</code></td>
+<td>Default <code>false</code>; document Rust <code>#[cfg(test)]</code> rule</td>
+</tr>
+<tr>
+<td><code>skip_with_build_tags</code></td>
+<td>Docs say “skip test files”</td>
+<td>Source skips the production file when the paired test has build tags</td>
+<td>Rename to <code>skip_with_cfg</code>; skip mutants in non-test <code>#[cfg]</code> items</td>
+</tr>
+<tr>
+<td>Report file names</td>
+<td><code>mutago-*.json</code> / <code>.html</code></td>
+<td>Same</td>
+<td>Use <code>mutarust-*</code> names</td>
+</tr>
+<tr>
+<td>Clean-suite <code>--noop</code></td>
+<td>Optional flag</td>
+<td>Optional</td>
+<td>Always run the clean suite before mutation</td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.sections", "navigation.top", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

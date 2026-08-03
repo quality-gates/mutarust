@@ -1,0 +1,977 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Mutation testing for Rust">
+      
+      
+      
+        <link rel="canonical" href="https://quality-gates.github.io/mutarust/mutators/">
+      
+      
+        <link rel="prev" href="../config/">
+      
+      
+        <link rel="next" href="../json-outputs/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Mutators - mutarust</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#built-in-mutators" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="mutarust" class="md-header__button md-logo" aria-label="mutarust" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            mutarust
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Mutators
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/quality-gates/mutarust" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    quality-gates/mutarust
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="mutarust" class="md-nav__button md-logo" aria-label="mutarust" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    mutarust
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/quality-gates/mutarust" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    quality-gates/mutarust
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Command Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Mutators
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../json-outputs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../custom-mutators/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Custom Mutators
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CI Integration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../release/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../glossary/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Domain Glossary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../parity/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Parity Table
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="built-in-mutators">Built-in Mutators<a class="headerlink" href="#built-in-mutators" title="Permanent link">&para;</a></h1>
+<p>Mutarust has the same stable mutator names as Mutago. The changes below apply
+to Rust source syntax. Mutarust does not change type syntax or patterns. It
+changes macro token input only for the documented Tokio selection forms.</p>
+<table>
+<thead>
+<tr>
+<th>Stable name</th>
+<th>Rust source change</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>arithmetic/assign_invert</code></td>
+<td><code>+=</code> to <code>-=</code>, <code>-=</code> to <code>+=</code>, <code>*=</code> to <code>/=</code>, <code>/=</code> to <code>*=</code>, <code>%=</code> to <code>*=</code>, <code>&amp;=</code> to <code>|=</code>, <code>|=</code> to <code>&amp;=</code>, <code>^=</code> to <code>&amp;=</code>, <code>&lt;&lt;=</code> to <code>&gt;&gt;=</code>, and <code>&gt;&gt;=</code> to <code>&lt;&lt;=</code></td>
+</tr>
+<tr>
+<td><code>arithmetic/assignment</code></td>
+<td>Each compound assignment above to <code>=</code></td>
+</tr>
+<tr>
+<td><code>arithmetic/base</code></td>
+<td><code>+</code> to <code>-</code>, <code>-</code> to <code>+</code>, <code>*</code> to <code>/</code>, <code>/</code> to <code>*</code>, and <code>%</code> to <code>*</code></td>
+</tr>
+<tr>
+<td><code>arithmetic/bitwise</code></td>
+<td><code>&amp;</code> to <code>|</code>, <code>|</code> to <code>&amp;</code>, <code>^</code> to <code>&amp;</code>, <code>&lt;&lt;</code> to <code>&gt;&gt;</code>, and <code>&gt;&gt;</code> to <code>&lt;&lt;</code></td>
+</tr>
+<tr>
+<td><code>arithmetic/negate</code></td>
+<td>Remove unary <code>-</code></td>
+</tr>
+<tr>
+<td><code>branch/case</code></td>
+<td>Remove all statements from a nonempty block arm, or replace another nonunit arm expression with <code>{}</code></td>
+</tr>
+<tr>
+<td><code>branch/else</code></td>
+<td>Remove all statements from a nonempty direct <code>else</code> block</td>
+</tr>
+<tr>
+<td><code>branch/if</code></td>
+<td>Remove all statements from a nonempty <code>if</code> or <code>else if</code> body</td>
+</tr>
+<tr>
+<td><code>composite/field-clear</code></td>
+<td>Remove one nondefault named struct field before a local derived <code>Default</code> rest, or replace one explicit field value with a known Rust default</td>
+</tr>
+<tr>
+<td><code>concurrency/goroutine-remove</code></td>
+<td>Run one supported discarded thread closure immediately, or await one supported discarded Tokio task immediately</td>
+</tr>
+<tr>
+<td><code>conditional/bool-literal</code></td>
+<td>Change <code>true</code> to <code>false</code>, or <code>false</code> to <code>true</code></td>
+</tr>
+<tr>
+<td><code>conditional/negated</code></td>
+<td><code>&gt;</code> to <code>&lt;=</code>, <code>&lt;</code> to <code>&gt;=</code>, <code>&gt;=</code> to <code>&lt;</code>, <code>&lt;=</code> to <code>&gt;</code>, <code>==</code> to <code>!=</code>, and <code>!=</code> to <code>==</code></td>
+</tr>
+<tr>
+<td><code>conditional/not</code></td>
+<td>Remove direct unary <code>!</code> from a condition or logical operand</td>
+</tr>
+<tr>
+<td><code>expression/comparison</code></td>
+<td><code>&lt;</code> to <code>&lt;=</code>, <code>&lt;=</code> to <code>&lt;</code>, <code>&gt;</code> to <code>&gt;=</code>, and <code>&gt;=</code> to <code>&gt;</code></td>
+</tr>
+<tr>
+<td><code>expression/context-nil</code></td>
+<td>Replace a direct <code>Some(value)</code> argument with <code>::core::option::Option::None</code></td>
+</tr>
+<tr>
+<td><code>expression/error-guard</code></td>
+<td>Replace <code>is_err()</code> or <code>is_none()</code> in an <code>if</code> condition with <code>false</code>, and <code>is_ok()</code> or <code>is_some()</code> with <code>true</code></td>
+</tr>
+<tr>
+<td><code>expression/errorf-wrap</code></td>
+<td>Replace a supported standard error source link with <code>::core::option::Option::None</code></td>
+</tr>
+<tr>
+<td><code>expression/logical</code></td>
+<td><code>&amp;&amp;</code> to <code>||</code>, and <code>||</code> to <code>&amp;&amp;</code></td>
+</tr>
+<tr>
+<td><code>expression/recover-clear</code></td>
+<td>Make a supported standard panic catch resume the panic</td>
+</tr>
+<tr>
+<td><code>expression/remove</code></td>
+<td>Replace a left or right operand of <code>&amp;&amp;</code> with <code>true</code>, or of <code>||</code> with <code>false</code></td>
+</tr>
+<tr>
+<td><code>expression/string-literal</code></td>
+<td>Change a direct, nonempty string operand of <code>==</code> or <code>!=</code> to <code>""</code></td>
+</tr>
+<tr>
+<td><code>loop/break</code></td>
+<td>Change <code>break</code> to <code>continue</code>, or <code>continue</code> to <code>break</code></td>
+</tr>
+<tr>
+<td><code>loop/condition</code></td>
+<td>Replace a <code>while</code> or <code>while let</code> condition with <code>false</code></td>
+</tr>
+<tr>
+<td><code>loop/range_break</code></td>
+<td>Insert <code>break;</code> at the start of a <code>for</code> body</td>
+</tr>
+<tr>
+<td><code>numbers/decrementer</code></td>
+<td>Subtract one from a decimal integer or float literal</td>
+</tr>
+<tr>
+<td><code>numbers/float-negate</code></td>
+<td>Change a nonzero float literal to <code>0.0</code></td>
+</tr>
+<tr>
+<td><code>numbers/incrementer</code></td>
+<td>Add one to a decimal integer or float literal</td>
+</tr>
+<tr>
+<td><code>select/case-remove</code></td>
+<td>Remove one complete nonfallback branch from a supported Tokio selection that has another clause</td>
+</tr>
+<tr>
+<td><code>select/default-remove</code></td>
+<td>Remove one complete Tokio <code>else</code> branch when a normal branch remains</td>
+</tr>
+<tr>
+<td><code>statement/defer-remove</code></td>
+<td>Remove a supported explicit <code>drop</code> statement so cleanup moves to the end of its scope</td>
+</tr>
+<tr>
+<td><code>statement/remove</code></td>
+<td>Remove a semicolon assignment, compound assignment, call, method call, or macro statement</td>
+</tr>
+<tr>
+<td><code>statement/remove-self-assign</code></td>
+<td>Remove a semicolon assignment when both sides are the same safe place</td>
+</tr>
+<tr>
+<td><code>statement/return</code></td>
+<td>Replace an explicit return value with a valid default for its declared return type</td>
+</tr>
+</tbody>
+</table>
+<p><code>branch/case</code> keeps the match pattern, guard, arrow, and comma. It does not
+change an arm that is already <code>{}</code> or <code>()</code>. <code>branch/else</code> does not treat an
+<code>else if</code> as an <code>else</code> block. The separate <code>branch/if</code> mutator changes that
+<code>else if</code> body.</p>
+<p><code>loop/break</code> changes only control flow that targets a loop. It does not change
+a <code>break</code> value or a break that targets a labeled block. It keeps a loop label.
+<code>loop/condition</code> does not change <code>while false</code>. <code>loop/range_break</code> does not add
+a second direct <code>break;</code> when the <code>for</code> body starts with one.</p>
+<p><code>statement/remove</code> changes only expressions that end with a semicolon. It does
+not remove a <code>let</code>, item, tail expression, <code>return</code>, <code>break</code>, <code>continue</code>, or
+control-flow expression. It does not change macro token input. The separate
+<code>statement/remove-self-assign</code> mutator owns a plain self-assignment. It accepts
+a local path, a field or tuple field that starts at a local path, or a tuple of
+these places. It does not accept an index, dereference, call, macro, or compound
+assignment.</p>
+<p><code>composite/field-clear</code> accepts named struct expressions. For a local struct
+with a <code>Default</code> derive, an unshadowed <code>..Default::default()</code> rest lets it
+remove one nondefault field and its comma. It does not use a type method or a
+manual <code>Default</code> implementation because either one can set a nonstandard field
+value. Without a rest, it changes only an explicit field value. The supported
+direct values are <code>true</code>, nonzero integers
+and floats, a non-NUL character, nonempty string and byte-string literals, and
+an unshadowed <code>Some(value)</code>. It keeps literal suffixes and uses a fully
+qualified <code>None</code>. It does not change shorthand fields without a default rest,
+tuple values, array values, arbitrary rest expressions, or values that are
+already known defaults.</p>
+<p><code>expression/context-nil</code> accepts <code>Some(value)</code>, <code>Option::Some(value)</code>, and the
+fully qualified <code>::core</code> or <code>::std</code> form when one of these expressions is a
+direct function or method argument. It uses <code>::core::option::Option::None</code>. It does not
+change an indirect option value, an existing <code>None</code>, or an unqualified name
+that a local item shadows. A replacement that Cargo cannot type-check is
+<code>Skipped</code> before tests run. For a custom test command, Mutarust runs a candidate
+only when a concrete local function parameter proves the option type. It marks
+other candidates <code>Skipped</code> because the custom command selects its own compiler.</p>
+<p><code>expression/remove</code> changes a direct left or right operand of <code>&amp;&amp;</code> or <code>||</code>. It
+replaces an <code>&amp;&amp;</code> operand with <code>true</code> and an <code>||</code> operand with <code>false</code>. It does
+not change bitwise operators.</p>
+<p><code>expression/error-guard</code> changes a zero-argument method call used as a direct
+<code>if</code> condition. It replaces <code>is_err()</code> and <code>is_none()</code> with <code>false</code>. It
+replaces <code>is_ok()</code> and <code>is_some()</code> with <code>true</code>. It does not change these calls
+outside an <code>if</code> condition. This is the Rust adaptation of Mutago
+<code>expression/error-guard</code>, which collapses <code>err != nil</code> and <code>err == nil</code> guards.</p>
+<p><code>statement/return</code> accepts an explicit <code>return value;</code> in a function, method,
+trait default method, or closure with an explicit return type. It supports
+Boolean, integer, float, character, string-slice, slice, option, and recursive
+tuple return types. It also uses <code>Default::default()</code> for <code>String</code>, <code>Vec</code>, a
+local type with a <code>Default</code> implementation or derive, and a type parameter with
+a direct <code>Default</code> bound. For a tuple expression, it changes one supported
+element at a time. It does not change a bare return, a tail expression, a
+return in an inferred closure or async block, <code>Result</code>, <code>impl Trait</code>, a mutable
+reference, an unconstrained type parameter, or a general borrowed value.
+Cargo checks replacements that need type proof before it runs tests. Mutarust
+skips these replacements before a custom test command because that command
+selects its own compiler.</p>
+<p><code>expression/errorf-wrap</code> accepts the tail expression of a <code>source</code> method in
+an exact <code>impl ::core::error::Error</code> or <code>impl ::std::error::Error</code> block. The
+tail expression must be an exact root-qualified
+<code>::core::option::Option::Some(source)</code> or
+<code>::std::option::Option::Some(source)</code> call. The replacement is
+<code>::core::option::Option::None</code>. This removes the source link but keeps the
+error display text. It does not change an inherent method, another trait, an
+explicit <code>return</code>, or an aliased standard path.</p>
+<p><code>expression/recover-clear</code> accepts an exact root-qualified
+<code>::std::panic::catch_unwind(callback)</code> call with one argument. It evaluates
+the catch one time. It returns the same successful value, but it passes a
+caught panic to <code>::std::panic::resume_unwind</code>. Cargo checks the replacement
+before tests run. A custom test command marks this mutation <code>Skipped</code> because
+the command cannot give Cargo type proof.</p>
+<p><code>statement/defer-remove</code> accepts a semicolon statement with one of these
+forms:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nb">drop</span><span class="p">(</span><span class="n">value</span><span class="p">);</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="p">::</span><span class="n">core</span><span class="p">::</span><span class="n">mem</span><span class="p">::</span><span class="nb">drop</span><span class="p">(</span><span class="n">value</span><span class="p">);</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="p">::</span><span class="n">std</span><span class="p">::</span><span class="n">mem</span><span class="p">::</span><span class="nb">drop</span><span class="p">(</span><span class="n">value</span><span class="p">);</span>
+</code></pre></div>
+<p>The value must be one identifier. An exact root-qualified <code>Drop</code>
+implementation for the local type in the same module can prove its cleanup
+work. Its <code>drop</code> method must contain a run-time statement. These exact standard
+guard types can also prove cleanup work:</p>
+<ul>
+<li><code>::std::sync::MutexGuard</code></li>
+<li><code>::std::sync::RwLockReadGuard</code></li>
+<li><code>::std::sync::RwLockWriteGuard</code></li>
+<li><code>::core::cell::Ref</code></li>
+<li><code>::core::cell::RefMut</code></li>
+</ul>
+<p>The statement must occur before another statement in the block. The mutator
+does not produce a mutation for an unqualified form when the file has another
+<code>drop</code> binding or a glob import. It does not produce a mutation for a
+root-qualified form when a crate-root alias replaces its standard crate name.
+The mutator removes the statement. The value then stays alive until its normal
+last use or the end of its scope. Cargo checks the replacement because a
+longer guard lifetime can make a borrow invalid. A custom test command marks
+this mutation <code>Skipped</code>.</p>
+<p><code>concurrency/goroutine-remove</code> supports these standard thread statements:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">std</span><span class="p">::</span><span class="n">thread</span><span class="p">::</span><span class="n">spawn</span><span class="p">(</span><span class="n">work</span><span class="p">);</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="p">::</span><span class="n">std</span><span class="p">::</span><span class="n">thread</span><span class="p">::</span><span class="n">spawn</span><span class="p">(</span><span class="n">work</span><span class="p">);</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="n">thread</span><span class="p">::</span><span class="n">spawn</span><span class="p">(</span><span class="n">work</span><span class="p">);</span><span class="w"> </span><span class="c1">// After an exact `use std::thread;` in this scope.</span>
+</code></pre></div>
+<p>The replacement is <code>(work)();</code>. It supports these Tokio task statements in
+an async function, async closure, or async block:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">tokio</span><span class="p">::</span><span class="n">spawn</span><span class="p">(</span><span class="n">future</span><span class="p">);</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="p">::</span><span class="n">tokio</span><span class="p">::</span><span class="n">spawn</span><span class="p">(</span><span class="n">future</span><span class="p">);</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">tokio</span><span class="p">::</span><span class="n">task</span><span class="p">::</span><span class="n">spawn</span><span class="p">(</span><span class="n">future</span><span class="p">);</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="p">::</span><span class="n">tokio</span><span class="p">::</span><span class="n">task</span><span class="p">::</span><span class="n">spawn</span><span class="p">(</span><span class="n">future</span><span class="p">);</span>
+</code></pre></div>
+<p>The replacement is <code>(future).await;</code>. Each spawn call must be a discarded
+semicolon statement with one argument. The mutator keeps a <code>move</code> closure or
+an <code>async move</code> block and evaluates it one time. It does not change a used
+join handle, a builder or method spawn, <code>spawn_blocking</code>, <code>spawn_local</code>,
+scoped threads, Rayon, async-std, Smol, an alias, or a local path that shadows
+<code>std</code>, <code>thread</code>, or <code>tokio</code>.</p>
+<p>The two <code>select</code> mutators support <code>tokio::select!</code> and
+<code>::tokio::select!</code>. They support normal branches, branch guards, an optional
+<code>biased;</code> prefix, an optional <code>else</code> branch, and nested supported selections.
+<code>select/case-remove</code> removes the pattern, future, guard, arrow, handler, and
+comma of one normal branch. It does this only when another normal or fallback
+clause remains. <code>select/default-remove</code> removes the full <code>else</code> clause only
+when a normal branch remains.</p>
+<p>These mutators do not change an imported or renamed selection macro, a local
+macro, <code>futures::select!</code>, Crossbeam selection, or invalid Tokio input. They
+do not search inside unrelated macro input. Cargo checks each selection
+replacement before tests run. A custom test command cannot give this Cargo
+proof, so Mutarust marks these candidates <code>Skipped</code>.</p>
+<p>Mutago v2.7.7 prose says that the selection mutators empty a clause body. Its
+source code and tests remove the full clause. Mutarust follows the source code
+and tests, and removes the full clause.</p>
+<p><code>conditional/bool-literal</code> changes direct local initializers, assignment
+right-hand sides, function arguments, and method arguments. It does not change
+return expressions, conditions, or macro input.</p>
+<p><code>conditional/not</code> changes a direct <code>!</code> expression in an <code>if</code> or <code>while</code>
+condition. It also changes a direct left or right operand of <code>&amp;&amp;</code> or <code>||</code>.</p>
+<p>The number mutators keep a Rust type suffix. They do not change non-decimal
+integer forms, array lengths, or repeat counts. They reject overflow and
+non-finite results. <code>numbers/float-negate</code> does not change zero.</p>
+<p>Rust has no <code>&amp;^</code>, <code>&amp;^=</code>, or unary <code>+</code> expression operators. Mutarust does not
+add replacements for these Go operators. The Rust parser limits all operator
+mutators to expressions, so similar tokens in type bounds and patterns are not
+candidates.</p>
+<p>Mutarust parses each changed file before it records or runs a mutant. An edit
+that does not produce valid Rust is not a candidate. Mutarust also removes
+equal mutations before it runs tests.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.sections", "navigation.top", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

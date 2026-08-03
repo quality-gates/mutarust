@@ -1,0 +1,1258 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Mutation testing for Rust">
+      
+      
+      
+        <link rel="canonical" href="https://quality-gates.github.io/mutarust/cli/">
+      
+      
+        <link rel="prev" href="../quickstart/">
+      
+      
+        <link rel="next" href="../config/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Command Guide - mutarust</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#command-guide" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="mutarust" class="md-header__button md-logo" aria-label="mutarust" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            mutarust
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Command Guide
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/quality-gates/mutarust" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    quality-gates/mutarust
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="mutarust" class="md-nav__button md-logo" aria-label="mutarust" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    mutarust
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/quality-gates/mutarust" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    quality-gates/mutarust
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Command Guide
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Command Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#mutator-listing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mutator Listing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#terminal-output-controls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Terminal Output Controls
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#llvm-coverage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LLVM Coverage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reports" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reports
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#accepted-mutants" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Accepted Mutants
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#git-changed-line-selection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Git Changed-Line Selection
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#execution-modes-and-cargo-controls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Execution Modes and Cargo Controls
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#custom-test-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Custom Test Commands
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#source-listing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Source Listing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#syntax-trees" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Syntax Trees
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bash-completion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bash Completion
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mutators/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Mutators
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../json-outputs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../custom-mutators/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Custom Mutators
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CI Integration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../release/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../glossary/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Domain Glossary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../parity/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Parity Table
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#mutator-listing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mutator Listing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#terminal-output-controls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Terminal Output Controls
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#llvm-coverage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LLVM Coverage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reports" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reports
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#accepted-mutants" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Accepted Mutants
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#git-changed-line-selection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Git Changed-Line Selection
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#execution-modes-and-cargo-controls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Execution Modes and Cargo Controls
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#custom-test-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Custom Test Commands
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#source-listing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Source Listing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#syntax-trees" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Syntax Trees
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bash-completion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bash Completion
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="command-guide">Command Guide<a class="headerlink" href="#command-guide" title="Permanent link">&para;</a></h1>
+<h2 id="mutator-listing">Mutator Listing<a class="headerlink" href="#mutator-listing" title="Permanent link">&para;</a></h2>
+<p>List the available mutation operators:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>mutarust --list-mutators
+</code></pre></div>
+<p>The built-in mutators use stable Mutago names and Rust expression rules. See
+the <a href="../mutators/">mutator reference</a> for all names, changes, and exclusions.
+Run mutation testing for selected production source:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>mutarust [TARGET]...
+</code></pre></div>
+<p>Use a strict YAML mutation policy file for one run:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>mutarust --config mutarust.yml [TARGET]...
+</code></pre></div>
+<p>See the <a href="../config/">configuration guide</a> for the policy fields, schema, and
+command priority rules.</p>
+<p>Mutarust first runs the applicable Cargo tests without a mutation. It stops
+before mutation if this clean test suite fails. Mutarust runs each mutant in a
+new temporary copy of the Cargo workspace that contains the selected source.
+A test failure kills the mutant. A successful test run lets the mutant escape.
+Mutarust skips a mutant that does not compile. A test-command or timeout
+failure produces an errored mutant. Mutarust then removes the temporary
+workspace and prints one result line for each mutant. Each result has a stable
+ID. An escaped mutant also has a unified source diff. Use <code>--no-diffs</code> to hide
+these diffs.</p>
+<p>Mutarust does not mutate items inside <code>#[cfg(test)]</code> modules. Those items are
+test source, not production source.</p>
+<p>A normal run prints killed, escaped, errored, not-covered, skipped, and total
+counts. It also prints the total mutation score and a sorted result table for
+each mutator. The score is the killed, errored, and skipped count divided by
+the full mutant count. The score is zero when no mutant exists.</p>
+<p>Use <code>--min-msi PERCENT</code> to require a total mutation score. A failed score gate
+returns exit value 4. A score equal to the required percentage passes.
+Use <code>--ignore-msi-with-no-mutations</code> to pass score gates when a run has no
+mutants. This is useful with <code>--git-diff-lines</code> when a change has no mutable
+lines.</p>
+<h2 id="terminal-output-controls">Terminal Output Controls<a class="headerlink" href="#terminal-output-controls" title="Permanent link">&para;</a></h2>
+<p>When standard error is a terminal, and none of <code>--verbose</code>, <code>--debug</code>,
+<code>--silent</code>, <code>--no-exec</code>, or <code>--dry-run</code> is set, Mutarust shows a live progress
+line on standard error. The line updates every 100 milliseconds and reports
+the processed mutant count with a state breakdown. Mutarust clears this line
+before it prints the final result output, so the line does not corrupt the
+final output. Mutarust never writes the progress line, or any other terminal
+control character, to a non-terminal standard error. Piped or redirected
+output is stable text with no control characters.</p>
+<p>Use <code>--silent</code> to hide all per-mutant result lines. Use <code>--no-silent</code> to
+force these lines on, for example to override a <code>silent_mode: true</code>
+configuration file value. <code>--silent</code> and <code>--no-silent</code> cannot be used
+together.</p>
+<p>Use <code>--quiet</code> to show only escaped-mutant result lines. It hides killed,
+errored, not-covered, and skipped lines. <code>--silent</code> overrides <code>--quiet</code>.</p>
+<p>Use <code>--output-statuses LETTERS</code> to show only chosen mutant states. Each
+letter selects one state: <code>k</code> killed, <code>e</code> escaped, <code>s</code> skipped, <code>n</code> not
+covered, <code>x</code> errored. For example, <code>--output-statuses ex</code> shows only escaped
+and errored mutants. This option requires at least one of these letters and
+rejects any other character. <code>--output-statuses</code> overrides <code>--quiet</code>.
+<code>--silent</code> overrides <code>--output-statuses</code>.</p>
+<p>Use <code>--no-diffs</code> to hide escaped-mutant source diffs. A hidden result line
+never shows its diff, regardless of <code>--no-diffs</code>.</p>
+<p>Use <code>--verbose</code> to print the mutated source file, line number, and worker
+count to standard output before each mutant runs. Use <code>--debug</code> for
+<code>--verbose</code> output plus the active mutator name and the configured test
+command. Debug output never prints environment variable values, because a
+custom test command inherits the caller environment, which can hold secret
+values. Mutarust also prints one result line per mutant under <code>--debug</code>.</p>
+<h2 id="llvm-coverage">LLVM Coverage<a class="headerlink" href="#llvm-coverage" title="Permanent link">&para;</a></h2>
+<p>Use <code>--coverage</code> to collect Rust line coverage before mutation. Mutarust uses
+the Cargo-compatible <a href="https://github.com/taiki-e/cargo-llvm-cov"><code>cargo-llvm-cov</code></a>
+tool and its LCOV output. Install the tool and the Rust LLVM tools component
+before use:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>cargo install cargo-llvm-cov
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>rustup component add llvm-tools-preview
+</code></pre></div>
+<p>Mutarust puts coverage build files in private temporary directories and removes
+them before it starts the normal mutation workers. It does not write coverage
+build output to the user Cargo target directory. A source line with no recorded
+coverage gets the <code>not covered</code> result. Mutarust does not write that mutant or
+run its tests.</p>
+<p>With valid normal coverage, the summary also prints the covered-code mutation
+score. This score is killed, errored, and skipped mutants divided by all mutants
+except <code>not covered</code> mutants. Use <code>--min-covered-msi PERCENT</code> to require this
+score. A failed covered-score gate returns exit value 4. A positive covered
+score gate without <code>--coverage</code> returns exit value 4.</p>
+<p>Use <code>--per-test</code> to collect one LLVM coverage report for each Cargo test and
+run only the tests that cover the mutated line. This option can be used without
+<code>--coverage</code>. A mutant with no per-test mapping runs the full Cargo test suite.
+Per-test collection is sequential so it does not create many instrumented Cargo
+target directories at one time. <code>--coverage</code> and <code>--per-test</code> cannot be used
+with <code>--exec</code>, <code>--dry-run</code>, or <code>--no-exec</code>.</p>
+<p>Use <code>--run-mutant-id ID</code> to run one stable mutant ID. This mode prints only
+the selected mutant evidence. It does not print the normal summary or apply
+score gates.</p>
+<h2 id="reports">Reports<a class="headerlink" href="#reports" title="Permanent link">&para;</a></h2>
+<p>Use <code>json_output: true</code> in a configuration file to write the full report to
+<code>report.json</code> in the current directory. Use <code>html_output: true</code> or
+<code>--html-output</code> to write the self-contained HTML report to
+<code>mutarust-report.html</code>. Use
+<code>--logger-summary-json</code> to write the compact score summary to
+<code>mutarust-summary.json</code>. Use <code>--logger-agentic-json</code> to write the agent-ready
+escaped-mutant report to <code>mutarust-agentic.json</code>. Use <code>--logger-github</code> to
+print escaped mutants as GitHub Actions <code>::warning</code> annotations. Use
+<code>--logger-gitlab</code> to write the GitLab Code Quality report to
+<code>mutarust-gitlab.json</code>. Mutarust writes a report only when that command option
+or configuration field enables it. A baseline update does not write these
+reports.</p>
+<p>Score values in the JSON files use ratios from zero to one. Source names are
+repository-relative. See the <a href="../json-outputs/">report schemas</a> for the full,
+compact, HTML, agent-ready, and GitLab document forms, including empty runs and
+escaped-mutant evidence.</p>
+<h2 id="accepted-mutants">Accepted Mutants<a class="headerlink" href="#accepted-mutants" title="Permanent link">&para;</a></h2>
+<p>Use <code>--update-baseline</code> to write the escaped mutants from the current run to
+<code>mutarust-baseline.json</code>. Use <code>--baseline FILE</code> to set another baseline path.
+A missing baseline file accepts no escaped mutants. A baseline file has a
+format that is compatible with Mutago:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="p">{</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="nt">&quot;version&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span><span class="nt">&quot;mutants&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">    </span><span class="p">{</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">      </span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;4582b234c128077507b7558eb62c337e&quot;</span><span class="p">,</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">      </span><span class="nt">&quot;file&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;checked/src/lib.rs&quot;</span><span class="p">,</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="w">      </span><span class="nt">&quot;mutator&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;conditional/bool-literal&quot;</span><span class="p">,</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="w">      </span><span class="nt">&quot;line&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="w">  </span><span class="p">]</span>
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="p">}</span>
+</code></pre></div>
+<p>Use <code>--fail-on-escaped</code> to return exit value 4 only when an escaped stable
+mutant ID is not in the baseline. Known escaped mutants remain visible in the
+normal result output. An update writes the full current escaped set and exits
+successfully before normal output and score gates.
+<code>--update-baseline</code> cannot be used with <code>--dry-run</code>, <code>--no-exec</code>, or
+<code>--run-mutant-id</code>, because these modes do not produce a full escaped set.</p>
+<p>Use <code>--blacklist FILE</code> one or more times to read accepted mutation checksums.
+Each non-empty file line is one 32-character lower-case hexadecimal checksum.
+Mutarust does not run a matching mutant. The checksum uses only the changed
+source lines, not the source path, mutator name, or line number. A checksum
+therefore remains valid after unrelated source edits. Baseline, blacklist, and
+one-mutant options are command options. They are not YAML policy fields.</p>
+<p>Use <code>--match REGEXP</code> to limit mutations to functions with matching names. Use
+<code>--config FILE</code> with <code>exclude_dirs</code> and <code>ignore_source_lines</code> to limit source
+scope. See the <a href="../config/#source-selection">configuration guide</a> for these
+rules and for the file-local mutation-disable annotations.</p>
+<h2 id="git-changed-line-selection">Git Changed-Line Selection<a class="headerlink" href="#git-changed-line-selection" title="Permanent link">&para;</a></h2>
+<p>Use <code>--git-diff-lines</code> to mutate only production source lines changed from a
+Git comparison base. Mutarust compares the base with the current work tree. It
+includes committed, staged, and unstaged tracked changes. It selects lines in
+added Rust source files and changed lines in renamed Rust source files. An
+untracked file and a pure rename have no Git changed-line scope. It does not
+select deleted lines.</p>
+<p>Use <code>--git-diff-base REF</code> to set the base ref. This option requires
+<code>--git-diff-lines</code>. Without this option, Mutarust uses the default branch from
+<code>origin/HEAD</code>. If Git has no <code>origin/HEAD</code>, Mutarust uses <code>master</code>. Mutarust
+stops with an error if it cannot find the Git repository, resolve the base ref,
+or read the Git comparison. It does not use a wider source scope after a Git
+error. Each selected source must be inside that Git repository.</p>
+<p>If the current branch and the base branch have a merge base, Mutarust compares
+that merge base with the current work tree. If they have no merge base,
+Mutarust compares the base ref directly. A run with no changed mutable lines
+succeeds. It reports zero mutants and does not run tests.</p>
+<h2 id="execution-modes-and-cargo-controls">Execution Modes and Cargo Controls<a class="headerlink" href="#execution-modes-and-cargo-controls" title="Permanent link">&para;</a></h2>
+<p>Use <code>--dry-run</code> to list the selected mutant count without writing mutation
+areas or running tests. This command does not change the user workspace.</p>
+<p>Use <code>--no-exec</code> to write one mutant to each isolated mutation area without
+running tests. Mutarust keeps these areas and prints each path. The areas are
+in the system temporary directory. Remove them when you no longer need them.</p>
+<p>By default, Mutarust removes all isolated mutation areas after the run. Use
+<code>--do-not-remove-tmp-folder</code> to keep them for inspection. Mutarust prints each
+retained path. This option can use much disk space because a normal Cargo run
+can create build output in each area.</p>
+<p>Mutarust runs Cargo mutants in parallel. By default, it starts up to one worker
+per logical CPU. Use <code>--workers COUNT</code> to set a positive whole-number limit.
+Mutarust never starts more workers than the number of mutants. Each worker uses
+one isolated mutation area and its own Cargo target directory. A higher worker
+limit can use more temporary disk space. Use a lower limit when disk space is
+limited. Mutarust prints result records and the final summary in the same plan
+order for sequential and parallel runs. A custom <code>--exec</code> command uses one
+worker so its command output cannot mix with another command output.</p>
+<p>Each Cargo test run has a fixed 60 second timeout by default. Use
+<code>--exec-timeout SECONDS</code> to set a different positive whole-second timeout.
+<code>--timeout</code> is an alias. A timeout produces an errored mutant result with an
+error message.</p>
+<p>Use <code>--timeout-coefficient FACTOR</code> for an adaptive Cargo timeout. Mutarust
+runs the clean tests first, finds the longest clean test duration, multiplies
+it by the positive factor, rounds up to a whole second, and uses at least one
+second. This option cannot be used with <code>--timeout</code>, <code>--exec</code>, or <code>--no-exec</code>.</p>
+<p>Use <code>--test-flags FLAGS</code> to add shell-quoted Cargo test arguments to every
+Cargo compile and test command. For example,
+<code>--test-flags "--package my-package --features slow"</code> limits testing to one
+package and enables a feature. This option cannot be used with <code>--exec</code> or
+<code>--no-exec</code>.</p>
+<p>Use <code>--test-recursive</code> to pass <code>--workspace</code> to Cargo and test every package
+in the selected Cargo workspace. With <code>--exec</code>, Mutarust instead sets
+<code>TEST_RECURSIVE=true</code> for the custom command. <code>--test-recursive</code> cannot be
+used with <code>--no-exec</code>.</p>
+<p><code>--dry-run</code> cannot be used with <code>--no-exec</code>, <code>--exec</code>, timeout controls, Cargo
+test controls, <code>--workers</code>, or <code>--do-not-remove-tmp-folder</code>. <code>--no-exec</code> cannot be used
+with <code>--exec</code>, timeout controls, or Cargo test controls. These rules prevent a
+command from silently ignoring a selected option.</p>
+<h2 id="custom-test-commands">Custom Test Commands<a class="headerlink" href="#custom-test-commands" title="Permanent link">&para;</a></h2>
+<p>Use <code>--exec COMMAND</code> to run a custom command for each mutant. Mutarust parses
+the command with shell quotes. The command runs in the copied workspace. It
+does not change the user workspace. A custom command selects its own compiler
+and test action.</p>
+<p>The command gets these environment values:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Name</th>
+<th style="text-align: left;">Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>MUTATE_ORIGINAL</code></td>
+<td style="text-align: left;">The original source file in the isolated temporary workspace.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>MUTATE_CHANGED</code></td>
+<td style="text-align: left;">The changed source file in the copied workspace.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>MUTATE_PACKAGE</code></td>
+<td style="text-align: left;">The Cargo package name that owns the source.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>MUTATE_TIMEOUT</code></td>
+<td style="text-align: left;">The timeout in whole seconds.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>TEST_RECURSIVE</code></td>
+<td style="text-align: left;"><code>true</code> when <code>--test-recursive</code> is set, else <code>false</code>.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>MUTATE_VERBOSE</code></td>
+<td style="text-align: left;"><code>true</code> when <code>--verbose</code> is set, else <code>false</code>.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>MUTATE_DEBUG</code></td>
+<td style="text-align: left;"><code>true</code> when <code>--debug</code> is set, else <code>false</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>Use exit value 0 to kill a mutant, 1 to let it escape, and 2 to skip it. Any
+other exit value produces an errored mutant. Mutarust stops the command and
+its child processes on timeout or interrupt. A missing, empty, or invalid
+command returns a clear error before mutation starts.</p>
+<h2 id="source-listing">Source Listing<a class="headerlink" href="#source-listing" title="Permanent link">&para;</a></h2>
+<p>List the Rust production source files that Mutarust selects:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>mutarust --list-files [TARGET]...
+</code></pre></div>
+<p>With no target after <code>--list-files</code>, Mutarust selects the current directory
+recursively. Each target can be an existing Rust source file, an existing
+directory, a Cargo workspace directory, or a package name in the current
+Cargo workspace. Mutarust uses Cargo target data for package and workspace
+targets. It includes declared library and binary source paths, including paths
+outside <code>src</code>. A directory, package, or workspace target selects its direct
+source files. Targets that require inactive Cargo features are not selected.
+Add a trailing <code>...</code> to select all nested source files.</p>
+<p>A bare target name selects a workspace package when that name exists. Use a
+relative path such as <code>./name</code> to select a directory with the same name.</p>
+<p>Mutarust returns absolute paths in sorted order. It removes duplicate paths.
+It excludes test, benchmark, example, fixture, vendor, generated, build-output,
+hidden, and <code>build.rs</code> sources during recursive discovery. It also excludes
+files that end in <code>_test.rs</code>.</p>
+<p>An explicit file or directory target can select test, fixture, vendor, or
+generated source. Broader package, workspace, and directory selection excludes
+these sources by default.</p>
+<p>This command lets users confirm the source scope before mutation testing.</p>
+<h2 id="syntax-trees">Syntax Trees<a class="headerlink" href="#syntax-trees" title="Permanent link">&para;</a></h2>
+<p>Print the parsed Rust syntax for selected production sources:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>mutarust --print-ast [TARGET]...
+</code></pre></div>
+<p>Mutarust uses the same target rules as <code>--list-files</code>. For each selected
+source it prints the absolute path, then the parsed syntax tree, then a blank
+line. This command does not run tests and does not change the user workspace.</p>
+<h2 id="bash-completion">Bash Completion<a class="headerlink" href="#bash-completion" title="Permanent link">&para;</a></h2>
+<p>Enable Bash completion with the helper script:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>source scripts/mutarust-bash_completion.sh
+</code></pre></div>
+<p>The helper sets <code>GO_FLAGS_COMPLETION=1</code> and runs <code>mutarust</code> with the current
+words. Mutarust then prints matching documented options and the <code>[TARGET]...</code>
+argument marker. The completion exit value is 2.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.sections", "navigation.top", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
