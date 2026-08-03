@@ -32,8 +32,8 @@ jobs:
       - name: Build release mutarust
         run: cargo build --release --locked
       - name: Run mutation testing
-        # Scoped to modules with isolated unit tests that meet the parity gates.
-        # Excluded:
+        # Approved production scope: modules with isolated lib unit tests.
+        # Excluded (written technical reasons):
         #   src/main.rs — CLI entry; the acceptance suite packages and reinstalls
         #     the command, so a per-mutant acceptance run is recursive and slow.
         #   src/execution.rs — primarily covered by that package acceptance suite;
@@ -44,8 +44,9 @@ jobs:
         #     acceptance would package and reinstall for each mutant.
         # --test-flags "--lib" keeps each mutant on the lib unit suite. The
         # package acceptance suite is not a safe per-mutant exec command.
-        # Pull requests mutate only changed lines. Pushes to main retain the full
-        # approved scope so a faulty diff filter cannot hide a regression.
+        # Pull requests mutate only changed lines inside this approved scope.
+        # Pushes to main retain the full approved scope so a faulty diff filter
+        # cannot hide a regression permanently.
         # --coverage marks uncovered mutants and enables the covered-code gate.
         # --min-msi and --min-covered-msi enforce the parity quality gates.
         env:

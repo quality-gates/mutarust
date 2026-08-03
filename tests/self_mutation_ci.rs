@@ -1,6 +1,23 @@
 use std::fs;
-use std::path::PathBuf;
+use std::ops::Deref;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+
+struct SmokeRoot(PathBuf);
+
+impl Deref for SmokeRoot {
+    type Target = Path;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Drop for SmokeRoot {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
 
 #[test]
 fn self_mutation_workflow_builds_the_release_command() {
@@ -71,7 +88,7 @@ fn self_mutation_workflow_keeps_full_main_scope_and_score_gates() {
         "main pushes must mutate the approved production scope"
     );
     assert!(
-        workflow.contains("Excluded:")
+        workflow.contains("Excluded (written technical reasons):")
             && workflow.contains("src/main.rs")
             && workflow.contains("src/execution.rs"),
         "production exclusions must have a written technical reason"
@@ -130,6 +147,71 @@ fn installed_command_exits_control_the_self_mutation_gates() {
     );
 }
 
+#[test]
+fn installed_command_changed_line_selection_controls_self_mutation_scope() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_changed_line_fixture(&root);
+    let source = fixture.join("src").join("lib.rs");
+
+    let unchanged = Command::new(command_path(&install))
+        .args([
+            "--git-diff-lines",
+            "--git-diff-base",
+            "main",
+            "--enable",
+            "conditional/bool-literal",
+            "--min-msi",
+            "75",
+            "--ignore-msi-with-no-mutations",
+            "--dry-run",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start for unchanged Git scope");
+    assert!(
+        unchanged.status.success(),
+        "unchanged production lines must pass: {}",
+        String::from_utf8_lossy(&unchanged.stderr)
+    );
+    let unchanged_stdout =
+        String::from_utf8(unchanged.stdout).expect("unchanged stdout must be UTF-8");
+    assert!(
+        unchanged_stdout.contains("Total: 0 mutation(s) would be generated"),
+        "unchanged lines must produce no mutants: {unchanged_stdout}"
+    );
+
+    fs::write(
+        &source,
+        "pub fn checked() -> bool { let value = false; value }\n",
+    )
+    .expect("changed production source must be written");
+    let changed = Command::new(command_path(&install))
+        .args([
+            "--git-diff-lines",
+            "--git-diff-base",
+            "main",
+            "--enable",
+            "conditional/bool-literal",
+            "--dry-run",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start for changed Git scope");
+    assert!(
+        changed.status.success(),
+        "changed production lines must select mutants: {}",
+        String::from_utf8_lossy(&changed.stderr)
+    );
+    let changed_stdout = String::from_utf8(changed.stdout).expect("changed stdout must be UTF-8");
+    assert!(
+        changed_stdout.contains("Total: 1 mutation(s) would be generated"),
+        "changed lines must select mutable production source: {changed_stdout}"
+    );
+}
+
 fn mutation_workflow() -> String {
     fs::read_to_string(
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".github/workflows/mutation.yml"),
@@ -137,7 +219,7 @@ fn mutation_workflow() -> String {
     .expect("self-mutation workflow must exist")
 }
 
-fn write_gate_fixture(root: &std::path::Path) -> PathBuf {
+fn write_gate_fixture(root: &Path) -> PathBuf {
     let fixture = root.join("self-mutation-gate-fixture");
     fs::create_dir_all(fixture.join("checked").join("src"))
         .expect("gate fixture source must be created");
@@ -171,7 +253,45 @@ fn write_gate_fixture(root: &std::path::Path) -> PathBuf {
     fixture
 }
 
-fn smoke_root() -> PathBuf {
+fn write_changed_line_fixture(root: &Path) -> PathBuf {
+    let fixture = root.join("self-mutation-changed-lines");
+    fs::create_dir_all(fixture.join("src")).expect("changed-line fixture source must be created");
+    fs::write(
+        fixture.join("Cargo.toml"),
+        "[package]\nname = \"self-mutation-changed-lines\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .expect("changed-line fixture manifest must be written");
+    fs::write(
+        fixture.join("src").join("lib.rs"),
+        "pub fn checked() -> bool { let value = true; value }\n",
+    )
+    .expect("changed-line fixture source must be written");
+    run_git(&fixture, &["init", "--initial-branch", "main"]);
+    run_git(
+        &fixture,
+        &["config", "user.email", "mutarust@example.invalid"],
+    );
+    run_git(&fixture, &["config", "user.name", "Mutarust Test"]);
+    run_git(&fixture, &["add", "."]);
+    run_git(&fixture, &["commit", "--message", "initial"]);
+    fixture
+}
+
+fn run_git(directory: &Path, args: &[&str]) {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(directory)
+        .output()
+        .expect("git must start");
+    assert!(
+        output.status.success(),
+        "git {:?} must succeed: {}",
+        args,
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn smoke_root() -> SmokeRoot {
     let root = std::env::temp_dir().join(format!(
         "mutarust-self-mutation-ci-{}-{}",
         std::process::id(),
@@ -181,10 +301,10 @@ fn smoke_root() -> PathBuf {
             .as_nanos()
     ));
     fs::create_dir(&root).expect("self-mutation smoke root must be created");
-    root
+    SmokeRoot(root)
 }
 
-fn install_command(root: &std::path::Path) -> PathBuf {
+fn install_command(root: &Path) -> PathBuf {
     let package_target = root.join("package-target");
     let target = root.join("target");
     let install = root.join("install");
@@ -227,7 +347,7 @@ fn install_command(root: &std::path::Path) -> PathBuf {
     install
 }
 
-fn command_path(install: &std::path::Path) -> PathBuf {
+fn command_path(install: &Path) -> PathBuf {
     install.join("bin").join(if cfg!(windows) {
         "mutarust.exe"
     } else {
