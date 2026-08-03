@@ -59,8 +59,9 @@ the covered-score policy after the total-score policy. A positive
 When `json_output` is true, Mutarust writes `report.json` after a completed
 run. When `html_output` is true, Mutarust writes `mutarust-report.html`. Use
 `--logger-summary-json` for the compact `mutarust-summary.json` file and
-`--logger-agentic-json` for `mutarust-agentic.json`. See the
-[report schemas](json-outputs.md).
+`--logger-agentic-json` for `mutarust-agentic.json`. Use `--logger-github` for
+GitHub Actions warnings and `--logger-gitlab` for `mutarust-gitlab.json`. See
+the [report schemas](json-outputs.md).
 
 ## Source Selection
 

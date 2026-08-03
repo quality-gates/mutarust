@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/quality-gates/mutarust/main/schema/gitlab.schema.json",
+  "title": "Mutarust GitLab Code Quality report",
+  "description": "GitLab Code Quality findings for escaped mutants.",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["type", "description", "severity", "fingerprint", "location"],
+    "properties": {
+      "type": {
+        "const": "issue"
+      },
+      "description": {
+        "type": "string",
+        "minLength": 1
+      },
+      "severity": {
+        "const": "minor"
+      },
+      "fingerprint": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{32}$"
+      },
+      "location": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "lines"],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "lines": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["begin"],
+            "properties": {
+              "begin": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
