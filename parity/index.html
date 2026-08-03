@@ -1290,13 +1290,13 @@ configuration file unless <code>--config</code> is set.</p>
 </tr>
 <tr>
 <td>crates.io publish check</td>
-<td>Deferred</td>
-<td>Issue #28</td>
+<td>Same purpose</td>
+<td>Issue #28; <code>package</code> job in <code>.github/workflows/quality.yml</code>; <code>cargo publish --locked</code> and clean registry install are the manual steps in <code>docs/release.md</code></td>
 </tr>
 </tbody>
 </table>
 <p>Self-mutation CI is in <code>.github/workflows/mutation.yml</code>. Release CI, user
-guides, and optional hooks are in issue #27. crates.io publication remains in
+guides, and optional hooks are in issue #27. crates.io publication is in
 issue #28. This table maps the public command CI controls required for the
 release candidate.</p>
 <h2 id="result-states-and-exit-values">Result states and exit values<a class="headerlink" href="#result-states-and-exit-values" title="Permanent link">&para;</a></h2>
