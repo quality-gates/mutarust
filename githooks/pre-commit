@@ -1,0 +1,71 @@
+#!/bin/sh
+# Local mirror of the fast CI checks in .github/workflows/quality.yml and
+# .github/workflows/messrust.yml. Every step fails on any finding and on any
+# missing tool. There are no silent skips.
+#
+# These hooks are not active by default. To enable them, run once:
+#   git config core.hooksPath githooks
+set -eu
+
+ROOT_DIR=$(git rev-parse --show-toplevel)
+cd "$ROOT_DIR"
+
+FAIL=0
+
+note() {
+	printf '\n== %s ==\n' "$1"
+}
+
+fail() {
+	printf 'FAIL: %s\n' "$1" >&2
+	FAIL=1
+}
+
+require_tool() {
+	tool="$1"
+	hint="$2"
+	if ! command -v "$tool" >/dev/null 2>&1; then
+		printf 'FAIL: required tool "%s" not found on PATH.\n  install with: %s\n' "$tool" "$hint" >&2
+		exit 1
+	fi
+}
+
+require_tool cargo "https://rustup.rs/"
+require_tool rustfmt "rustup component add rustfmt"
+require_tool cargo-clippy "rustup component add clippy"
+require_tool messrust "cargo install messrust --version 0.1.0 --locked"
+
+note "cargo fmt --all -- --check"
+if ! cargo fmt --all -- --check; then
+	fail "cargo fmt found unformatted files"
+else
+	echo "ok"
+fi
+
+note "cargo clippy --workspace --all-targets --all-features -- -D warnings"
+if ! cargo clippy --workspace --all-targets --all-features -- -D warnings; then
+	fail "cargo clippy reported warnings or errors"
+else
+	echo "ok"
+fi
+
+note "cargo build --locked"
+if ! cargo build --locked; then
+	fail "cargo build failed"
+else
+	echo "ok"
+fi
+
+note "messrust"
+if ! messrust src text codesize,design --ignore-tests --strict; then
+	fail "messrust found violations"
+else
+	echo "ok"
+fi
+
+if [ "$FAIL" -ne 0 ]; then
+	printf '\npre-commit checks failed.\n' >&2
+	exit 1
+fi
+
+printf '\nall pre-commit checks passed.\n'

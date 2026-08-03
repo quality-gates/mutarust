@@ -6,6 +6,11 @@ This file records important user changes.
 
 ### Added
 
+- Release CI, user documentation site, and optional `githooks/` that mirror
+  fast format, Clippy, messrust, and changed-line self-mutation checks without
+  automatic activation.
+- User guides for install, quick start, commands, configuration, mutators,
+  reports, custom mutators, CI, release, and the domain glossary.
 - Self-mutation CI workflow that builds the release command, mutates changed
   lines on pull requests, and mutates the approved production scope on main
   with 75 percent total and 80 percent covered-code score gates.

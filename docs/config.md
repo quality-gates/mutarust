@@ -8,8 +8,10 @@ The command reads a relative file name from its current directory.
 mutarust --config mutarust.yml [TARGET]...
 ```
 
-Start with [mutarust.yml.example](../mutarust.yml.example). The published JSON
-Schema is [schema/mutarust.schema.json](../schema/mutarust.schema.json).
+Start with
+[mutarust.yml.example](https://github.com/quality-gates/mutarust/blob/main/mutarust.yml.example).
+The published JSON Schema is
+[schema/mutarust.schema.json](https://github.com/quality-gates/mutarust/blob/main/schema/mutarust.schema.json).
 
 ## Policy Fields
 

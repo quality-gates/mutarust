@@ -1,4 +1,5 @@
 /target/
+/site/
 mutarust-baseline.json
 mutarust-report.html
 mutarust-summary.json
