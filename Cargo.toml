@@ -17,6 +17,8 @@ exclude = [
     "skills-lock.json",
     "githooks/",
     "docs/agents/",
+    "AGENTS.md",
+    "CLAUDE.md",
 ]
 
 [dependencies]

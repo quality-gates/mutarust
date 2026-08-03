@@ -100,7 +100,7 @@ configuration file unless `--config` is set.
 | `--git-diff-lines` on pull requests | Same | Documented in `docs/cli.md` |
 | Self-mutation workflow | Same purpose | `.github/workflows/mutation.yml`; release binary, PR changed lines, main full approved scope, 75/80 gates |
 | Release CI / docs / hooks | Same purpose | Issue #27; quality, messrust, security, package, docs site, optional `githooks/` |
-| crates.io publish check | Same purpose | Issue #28; `cargo publish --locked` and clean registry install |
+| crates.io publish check | Same purpose | Issue #28; `package` job in `.github/workflows/quality.yml`; `cargo publish --locked` and clean registry install are the manual steps in `docs/release.md` |
 
 Self-mutation CI is in `.github/workflows/mutation.yml`. Release CI, user
 guides, and optional hooks are in issue #27. crates.io publication is in

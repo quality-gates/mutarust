@@ -1645,39 +1645,63 @@ fn package_contains_the_configuration_contract() {
         );
     }
 
-    for path in [".agents", ".serena", "skills-lock.json"] {
+    for path in [
+        ".agents",
+        ".serena",
+        "skills-lock.json",
+        "githooks",
+        "docs/agents",
+        "AGENTS.md",
+        "CLAUDE.md",
+    ] {
         assert!(
             !package.join(path).exists(),
             "the package must exclude non-user path {path}"
         );
     }
 
+    let version = env!("CARGO_PKG_VERSION");
     let manifest = fs::read_to_string(package.join("Cargo.toml"))
         .expect("packaged Cargo.toml must be readable");
+    // The dependency tables repeat keys such as `version`, so a whole-file
+    // search can pass on a dependency instead of the package itself.
+    let package_section = manifest_section(&manifest, "[package]");
     for required in [
-        "license = \"MIT\"",
-        "repository = \"https://github.com/quality-gates/mutarust\"",
-        "homepage = \"https://github.com/quality-gates/mutarust\"",
-        "documentation = \"https://quality-gates.github.io/mutarust/\"",
-        "version = \"0.1.0\"",
-        "\"mutation-testing\"",
-        "\"testing\"",
-        "\"rust\"",
-        "\"development-tools::testing\"",
-        "\"command-line-utilities\"",
+        "license = \"MIT\"".to_owned(),
+        "repository = \"https://github.com/quality-gates/mutarust\"".to_owned(),
+        "homepage = \"https://github.com/quality-gates/mutarust\"".to_owned(),
+        "documentation = \"https://quality-gates.github.io/mutarust/\"".to_owned(),
+        format!("version = \"{version}\""),
+        "\"mutation-testing\"".to_owned(),
+        "\"testing\"".to_owned(),
+        "\"rust\"".to_owned(),
+        "\"development-tools::testing\"".to_owned(),
+        "\"command-line-utilities\"".to_owned(),
     ] {
         assert!(
-            manifest.contains(required),
-            "version 0.1.0 packaged metadata must include {required}"
+            package_section.contains(&required),
+            "the packaged [package] metadata must include {required}"
         );
     }
 
     let changelog = fs::read_to_string(package.join("CHANGELOG.md"))
         .expect("packaged CHANGELOG.md must be readable");
     assert!(
-        changelog.contains("## 0.1.0"),
-        "the packaged change log must record the 0.1.0 release"
+        changelog.contains(&format!("## {version}")),
+        "the packaged change log must record the {version} release"
     );
+}
+
+/// Returns the lines of one top-level Cargo manifest table, without its header.
+fn manifest_section<'a>(manifest: &'a str, header: &str) -> &'a str {
+    let body = manifest
+        .split_once(&format!("\n{header}\n"))
+        .unwrap_or_else(|| panic!("the packaged manifest must have a {header} table"))
+        .1;
+    match body.find("\n[") {
+        Some(end) => &body[..end],
+        None => body,
+    }
 }
 
 #[test]
