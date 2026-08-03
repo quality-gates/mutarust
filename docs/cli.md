@@ -35,6 +35,9 @@ workspace and prints one result line for each mutant. Each result has a stable
 ID. An escaped mutant also has a unified source diff. Use `--no-diffs` to hide
 these diffs.
 
+Mutarust does not mutate items inside `#[cfg(test)]` modules. Those items are
+test source, not production source.
+
 A normal run prints killed, escaped, errored, not-covered, skipped, and total
 counts. It also prints the total mutation score and a sorted result table for
 each mutator. The score is the killed, errored, and skipped count divided by

@@ -6,6 +6,11 @@ This file records important user changes.
 
 ### Added
 
+- Self-mutation CI workflow that builds the release command, mutates changed
+  lines on pull requests, and mutates the approved production scope on main
+  with 75 percent total and 80 percent covered-code score gates.
+- Workspace copy support for symbolic links required by self-mutation.
+- Default exclusion of `#[cfg(test)]` modules from mutation.
 - Mutago v2.7.7 parity table and the final two expression mutators
   (`expression/remove`, `expression/error-guard`).
 - Working `skip_without_test` and `skip_with_cfg` configuration policies.
@@ -18,3 +23,7 @@ This file records important user changes.
 - Full `report.json` and compact `mutarust-summary.json` reports.
 - Self-contained `mutarust-report.html` and agent-ready `mutarust-agentic.json` reports.
 - GitHub Actions warnings and GitLab Code Quality report for escaped mutants.
+
+### Fixed
+
+- `--test-flags` now apply to normal LLVM coverage collection.

@@ -1098,6 +1098,37 @@ fn installed_command_reads_yaml_configuration_and_command_options_take_priority(
 }
 
 #[test]
+fn installed_command_excludes_cfg_test_modules_from_mutation() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_mutation_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    fs::write(
+        &source,
+        "pub fn checked() -> bool { let value = true; value }\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn keeps_checked() {\n        let expected = true;\n        assert_eq!(super::checked(), expected);\n    }\n}\n",
+    )
+    .expect("cfg(test) fixture source must be written");
+
+    let output = Command::new(command_path(&install))
+        .args(["--enable", "conditional/bool-literal", "--dry-run"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start for cfg(test) exclusion");
+
+    assert!(
+        output.status.success(),
+        "cfg(test) exclusion must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("cfg(test) output must be UTF-8");
+    assert!(
+        stdout.contains("Total: 1 mutation(s) would be generated"),
+        "#[cfg(test)] modules must not contribute mutants: {stdout}"
+    );
+}
+
+#[test]
 fn installed_command_applies_skip_without_test_and_skip_with_cfg() {
     let root = smoke_root();
     let install = install_command(&root);
@@ -3497,6 +3528,38 @@ fn installed_command_runs_external_source_with_local_dependency_and_configuratio
 
 #[cfg(unix)]
 #[test]
+fn installed_command_copies_workspace_symbolic_links() {
+    use std::os::unix::fs::symlink;
+
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_mutation_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    fs::write(fixture.join("AGENTS.md"), "agents\n").expect("agents guide must be written");
+    symlink("AGENTS.md", fixture.join("CLAUDE.md"))
+        .expect("workspace symbolic link must be created");
+
+    let output = Command::new(command_path(&install))
+        .args(["--enable", "conditional/bool-literal"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start");
+
+    assert!(
+        output.status.success(),
+        "a workspace with a symbolic link must mutate: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("mutation output must be UTF-8");
+    assert!(
+        stdout.contains("Killed:") && stdout.contains("Total:"),
+        "symbolic-link workspaces must complete mutation results: {stdout}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn installed_command_review_ignores_unrelated_cargo_configuration_data() {
     use std::os::unix::fs::PermissionsExt;
 
@@ -4371,6 +4434,61 @@ fn installed_command_rejects_incompatible_execution_controls() {
             "control error must explain the invalid combination"
         );
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn installed_command_passes_test_flags_to_coverage_collection() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_coverage_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    let fake_cargo = root.join("coverage-flags-cargo");
+    let record = root.join("coverage-flags-record");
+    let temporary_root = root.join("coverage-flags-temporary");
+    fs::create_dir(&temporary_root).expect("coverage flags temporary root must be created");
+    fs::write(
+        &fake_cargo,
+        "#!/bin/sh\nif [ \"$1\" = \"metadata\" ]; then\n  exec \"$MUTARUST_REAL_CARGO\" \"$@\"\nfi\nif [ \"$1\" = \"llvm-cov\" ]; then\n  printf '%s\\n' \"$*\" >> \"$MUTARUST_COVERAGE_RECORD\"\n  output=\n  while [ \"$#\" -gt 0 ]; do\n    if [ \"$1\" = \"--output-path\" ]; then\n      output=$2\n      break\n    fi\n    shift\n  done\n  printf 'SF:%s\\nDA:1,1\\nDA:2,1\\nDA:3,0\\nend_of_record\\n' \"$MUTARUST_COVERAGE_SOURCE\" > \"$output\"\n  exit 0\nfi\nif ! grep -q false checked/src/lib.rs 2>/dev/null; then\n  exit 0\nfi\nexit 1\n",
+    )
+    .expect("coverage flags Cargo command must be written");
+    fs::set_permissions(&fake_cargo, fs::Permissions::from_mode(0o755))
+        .expect("coverage flags Cargo command must be executable");
+
+    let output = Command::new(command_path(&install))
+        .args([
+            "--coverage",
+            "--test-flags",
+            "--lib",
+            "--enable",
+            "conditional/bool-literal",
+            "--workers",
+            "1",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .env("CARGO", &fake_cargo)
+        .env("MUTARUST_REAL_CARGO", env!("CARGO"))
+        .env("MUTARUST_COVERAGE_SOURCE", &source)
+        .env("MUTARUST_COVERAGE_RECORD", &record)
+        .env("TMPDIR", &temporary_root)
+        .output()
+        .expect("installed mutarust must collect coverage with test flags");
+
+    assert!(
+        output.status.success(),
+        "coverage with --test-flags must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let records = fs::read_to_string(&record).expect("llvm-cov argument records must exist");
+    assert!(
+        records.lines().any(|line| {
+            line.contains("llvm-cov") && line.contains("--lib") && !line.contains("--exact")
+        }),
+        "normal coverage collection must receive --test-flags: {records}"
+    );
 }
 
 #[cfg(unix)]

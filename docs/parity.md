@@ -98,13 +98,13 @@ configuration file unless `--config` is set.
 | `--ignore-msi-with-no-mutations` | Same | Pass gates when no mutant exists |
 | `--logger-github` / `--logger-gitlab` | Same purpose | Renamed report files |
 | `--git-diff-lines` on pull requests | Same | Documented in `docs/cli.md` |
-| Self-mutation workflow | Deferred | Issue #26 |
+| Self-mutation workflow | Same purpose | `.github/workflows/mutation.yml`; release binary, PR changed lines, main full approved scope, 75/80 gates |
 | Release CI / docs / hooks | Deferred | Issues #27 and #28 |
 | crates.io publish check | Deferred | Issue #28 |
 
-Self-mutation CI, release publication, and optional hooks remain in issues #26,
-#27, and #28. This table maps the public command CI controls required for the
-release candidate.
+Self-mutation CI is in `.github/workflows/mutation.yml`. Release publication and
+optional hooks remain in issues #27 and #28. This table maps the public command
+CI controls required for the release candidate.
 
 ## Result states and exit values
 

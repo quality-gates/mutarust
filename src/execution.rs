@@ -815,6 +815,8 @@ fn run_llvm_cov_command(
         append_test_target(&mut command, test);
         command.args(&execution.cargo_flags);
         command.args(["--", "--exact", &test.name]);
+    } else {
+        command.args(&execution.cargo_flags);
     }
     stop_if_interrupted()?;
     configure_process_group(&mut command);
@@ -3263,10 +3265,7 @@ fn copy_entry(workspace: &Workspace, source: &Path, destination: &Path) -> Resul
         .map_err(|error| run_error(format!("could not inspect {}: {error}", source.display())))?
         .file_type();
     if file_type.is_symlink() {
-        return Err(run_error(format!(
-            "could not copy symbolic link in workspace: {}",
-            source.display()
-        )));
+        return copy_symbolic_link(source, destination);
     }
     if file_type.is_dir() {
         fs::create_dir(destination).map_err(|error| {
@@ -3286,6 +3285,53 @@ fn copy_entry(workspace: &Workspace, source: &Path, destination: &Path) -> Resul
             source.display()
         )))
     }
+}
+
+fn copy_symbolic_link(source: &Path, destination: &Path) -> Result<(), RunError> {
+    let target = fs::read_link(source).map_err(|error| {
+        run_error(format!(
+            "could not read symbolic link {}: {error}",
+            source.display()
+        ))
+    })?;
+    create_symbolic_link(&target, destination).map_err(|error| {
+        run_error(format!(
+            "could not copy symbolic link {}: {error}",
+            source.display()
+        ))
+    })
+}
+
+#[cfg(unix)]
+fn create_symbolic_link(target: &Path, destination: &Path) -> io::Result<()> {
+    std::os::unix::fs::symlink(target, destination)
+}
+
+#[cfg(windows)]
+fn create_symbolic_link(target: &Path, destination: &Path) -> io::Result<()> {
+    use std::os::windows::fs::{symlink_dir, symlink_file};
+
+    let absolute = if target.is_absolute() {
+        target.to_path_buf()
+    } else {
+        destination
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(target)
+    };
+    if absolute.is_dir() {
+        symlink_dir(target, destination)
+    } else {
+        symlink_file(target, destination)
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn create_symbolic_link(_target: &Path, _destination: &Path) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "symbolic links are not supported on this platform",
+    ))
 }
 
 struct MutationPlan {
