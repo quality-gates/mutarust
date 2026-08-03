@@ -29,7 +29,7 @@ mutarust --config mutarust.yml [TARGET]...
 ```json
 {
   "metadata": {
-    "version": "0.1.0",
+    "version": "0.1.1",
     "hasCoverage": false,
     "oneMutant": false
   },

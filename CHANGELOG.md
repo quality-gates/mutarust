@@ -2,6 +2,27 @@
 
 This file records important user changes.
 
+## 0.1.1 — 2026-08-03
+
+A compatible release. The public library interface does not change.
+
+### Added
+
+- License and version badges in `README.md`.
+- A test that the packaged `LICENSE` file contains the MIT terms.
+
+### Changed
+
+- Dependency updates: `md5` to 0.8, `syn` to 3, and `toml` to 1.
+- The `LICENSE` file now uses the standard MIT header text.
+
+### Fixed
+
+- Match-arm guards are again read correctly. In `syn` 3 a guard is part of the
+  pattern. The cleanup mutator missed guard expressions, and the pattern
+  recorder wrongly recorded guard bindings as arm bindings.
+- Manifest and Cargo configuration files parse again with `toml` 1.
+
 ## 0.1.0 — 2026-08-03
 
 First crates.io release.
