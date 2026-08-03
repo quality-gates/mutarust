@@ -1,0 +1,52 @@
+site_name: mutarust
+site_description: Mutation testing for Rust
+site_url: https://quality-gates.github.io/mutarust/
+repo_url: https://github.com/quality-gates/mutarust
+repo_name: quality-gates/mutarust
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+
+markdown_extensions:
+  - admonition
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Installation: install.md
+  - Quick Start: quickstart.md
+  - Command Guide: cli.md
+  - Configuration: config.md
+  - Mutators: mutators.md
+  - Reports: json-outputs.md
+  - Custom Mutators: custom-mutators.md
+  - CI Integration: ci.md
+  - Release: release.md
+  - Domain Glossary: glossary.md
+  - Parity Table: parity.md

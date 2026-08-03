@@ -99,12 +99,13 @@ configuration file unless `--config` is set.
 | `--logger-github` / `--logger-gitlab` | Same purpose | Renamed report files |
 | `--git-diff-lines` on pull requests | Same | Documented in `docs/cli.md` |
 | Self-mutation workflow | Same purpose | `.github/workflows/mutation.yml`; release binary, PR changed lines, main full approved scope, 75/80 gates |
-| Release CI / docs / hooks | Deferred | Issues #27 and #28 |
+| Release CI / docs / hooks | Same purpose | Issue #27; quality, messrust, security, package, docs site, optional `githooks/` |
 | crates.io publish check | Deferred | Issue #28 |
 
-Self-mutation CI is in `.github/workflows/mutation.yml`. Release publication and
-optional hooks remain in issues #27 and #28. This table maps the public command
-CI controls required for the release candidate.
+Self-mutation CI is in `.github/workflows/mutation.yml`. Release CI, user
+guides, and optional hooks are in issue #27. crates.io publication remains in
+issue #28. This table maps the public command CI controls required for the
+release candidate.
 
 ## Result states and exit values
 
