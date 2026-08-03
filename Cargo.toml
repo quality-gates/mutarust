@@ -7,8 +7,19 @@ description = "Mutation testing for Rust"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/quality-gates/mutarust"
+homepage = "https://github.com/quality-gates/mutarust"
+documentation = "https://quality-gates.github.io/mutarust/"
 keywords = ["mutation-testing", "testing", "rust"]
 categories = ["development-tools::testing", "command-line-utilities"]
+exclude = [
+    ".agents/",
+    ".serena/",
+    "skills-lock.json",
+    "githooks/",
+    "docs/agents/",
+    "AGENTS.md",
+    "CLAUDE.md",
+]
 
 [dependencies]
 cargo_metadata = "0.20.0"

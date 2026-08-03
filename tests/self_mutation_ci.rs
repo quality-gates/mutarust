@@ -2,6 +2,9 @@ use std::fs;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static NEXT_SMOKE_ROOT: AtomicU64 = AtomicU64::new(0);
 
 struct SmokeRoot(PathBuf);
 
@@ -292,16 +295,27 @@ fn run_git(directory: &Path, args: &[&str]) {
 }
 
 fn smoke_root() -> SmokeRoot {
-    let root = std::env::temp_dir().join(format!(
-        "mutarust-self-mutation-ci-{}-{}",
+    loop {
+        let root = smoke_root_name();
+
+        match fs::create_dir(&root) {
+            Ok(()) => return SmokeRoot(root),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => panic!("self-mutation smoke root must be created: {error}"),
+        }
+    }
+}
+
+fn smoke_root_name() -> PathBuf {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system time must be after the Unix epoch")
+        .as_nanos();
+    let sequence = NEXT_SMOKE_ROOT.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!(
+        "mutarust-self-mutation-ci-{}-{nonce}-{sequence}",
         std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("system time must be after the Unix epoch")
-            .as_nanos()
-    ));
-    fs::create_dir(&root).expect("self-mutation smoke root must be created");
-    SmokeRoot(root)
+    ))
 }
 
 fn install_command(root: &Path) -> PathBuf {

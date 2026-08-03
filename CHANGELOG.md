@@ -2,10 +2,13 @@
 
 This file records important user changes.
 
-## Unreleased
+## 0.1.0 — 2026-08-03
+
+First crates.io release.
 
 ### Added
 
+- Mutation testing command and public mutator library for Rust.
 - Release CI, user documentation site, and optional `githooks/` that mirror
   fast format, Clippy, messrust, and changed-line self-mutation checks without
   automatic activation.
