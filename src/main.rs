@@ -767,43 +767,49 @@ fn write_reports_or_error(
     let context = ReportContext {
         one_mutant: command.run_mutant_id.is_some(),
     };
-    if configuration.json_output {
-        if let Err(error) = write_full_report(run, &context) {
+    write_report_if(configuration.json_output, || write_full_report(run, &context))
+        .or_else(|| write_report_if(configuration.html_output, || write_html_report(run)))
+        .or_else(|| write_report_if(command.logger_summary_json, || write_compact_summary(run)))
+        .or_else(|| {
+            write_report_if(command.logger_agentic_json, || {
+                write_agentic_report(run, std::path::Path::new("."))
+            })
+        })
+        .or_else(|| write_github_annotations_if(command.logger_github, run))
+        .or_else(|| write_report_if(command.logger_gitlab, || write_gitlab_report(run)))
+}
+
+fn write_report_if(
+    enabled: bool,
+    write: impl FnOnce() -> Result<(), String>,
+) -> Option<ExitCode> {
+    if !enabled {
+        return None;
+    }
+    match write() {
+        Ok(()) => None,
+        Err(error) => {
             write_error(&error);
-            return Some(ExitCode::from(3));
+            Some(ExitCode::from(3))
         }
     }
-    if configuration.html_output {
-        if let Err(error) = write_html_report(run) {
-            write_error(&error);
-            return Some(ExitCode::from(3));
+}
+
+fn write_github_annotations_if(enabled: bool, run: &mutarust::MutationRun) -> Option<ExitCode> {
+    if !enabled {
+        return None;
+    }
+    let annotations = github_annotations(run);
+    if annotations.is_empty() {
+        return None;
+    }
+    match write!(io::stdout().lock(), "{annotations}") {
+        Ok(()) => None,
+        Err(error) => {
+            write_error(&error.to_string());
+            Some(ExitCode::from(3))
         }
     }
-    if command.logger_summary_json {
-        if let Err(error) = write_compact_summary(run) {
-            write_error(&error);
-            return Some(ExitCode::from(3));
-        }
-    }
-    if command.logger_agentic_json {
-        if let Err(error) = write_agentic_report(run, std::path::Path::new(".")) {
-            write_error(&error);
-            return Some(ExitCode::from(3));
-        }
-    }
-    if command.logger_github {
-        let annotations = github_annotations(run);
-        if !annotations.is_empty() {
-            print!("{annotations}");
-        }
-    }
-    if command.logger_gitlab {
-        if let Err(error) = write_gitlab_report(run) {
-            write_error(&error);
-            return Some(ExitCode::from(3));
-        }
-    }
-    None
 }
 
 fn write_baseline(path: &std::path::Path, run: &mutarust::MutationRun) -> io::Result<ExitCode> {
