@@ -1229,6 +1229,31 @@ fn installed_command_ignore_msi_with_no_mutations_and_html_output_flag() {
         fixture.join("mutarust-report.html").is_file(),
         "--html-output must write mutarust-report.html"
     );
+
+    let covered_config = fixture.join("covered-msi.yml");
+    fs::write(
+        &covered_config,
+        "min_covered_msi: 80\nenable_mutators:\n  - conditional/bool-literal\n",
+    )
+    .expect("covered-msi configuration must be written");
+    let covered_gate = Command::new(command_path(&install))
+        .args(["--config"])
+        .arg(&covered_config)
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start with configured min_covered_msi");
+    assert_eq!(
+        covered_gate.status.code(),
+        Some(4),
+        "configured min_covered_msi without --coverage must return exit value 4: {}",
+        String::from_utf8_lossy(&covered_gate.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&covered_gate.stderr).contains("covered-code mutation score"),
+        "configured min_covered_msi must name the covered-code gate: {}",
+        String::from_utf8_lossy(&covered_gate.stderr)
+    );
 }
 
 #[test]

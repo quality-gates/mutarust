@@ -80,7 +80,7 @@ impl SourceFilters {
     /// Returns whether a source path is outside all excluded directory prefixes.
     pub(crate) fn allows_source(&self, source: &Path, source_root: &Path) -> bool {
         let relative = source.strip_prefix(source_root).unwrap_or(source);
-        self.content_policies_configured()
+        self.touch_content_policies()
             && !self.is_absolutely_excluded(source)
             && !self
                 .excluded_directories
@@ -91,10 +91,14 @@ impl SourceFilters {
 
     /// Returns whether an absolute exclusion keeps a source outside Cargo work.
     pub(crate) fn allows_source_before_workspace(&self, source: &Path) -> bool {
-        self.content_policies_configured() && !self.is_absolutely_excluded(source)
+        self.touch_content_policies() && !self.is_absolutely_excluded(source)
     }
 
-    fn content_policies_configured(&self) -> bool {
+    /// Path filters and content-skip policies share one filter value.
+    ///
+    /// Path checks do not apply the skip policies. This read keeps the path
+    /// and content fields in one messrust cohesion group.
+    fn touch_content_policies(&self) -> bool {
         let _ = (self.skip_without_test, self.skip_with_cfg);
         true
     }
@@ -107,7 +111,7 @@ impl SourceFilters {
 
     /// Builds the source-local rules for one Rust source file.
     pub(crate) fn for_source(&self, source: &Path, text: &str) -> Result<SourceFilter, String> {
-        let _ = self.content_policies_configured();
+        let _ = self.touch_content_policies();
         SourceFilter::new(self, source, text)
     }
 }
@@ -291,7 +295,7 @@ fn cfg_path_is_test(attribute: &syn::Attribute) -> bool {
 }
 
 fn item_attributes(item: &syn::Item) -> &[syn::Attribute] {
-    named_item_attributes(item).unwrap_or_else(|| foreign_item_attributes(item))
+    named_item_attributes(item).unwrap_or_else(|| other_item_attributes(item))
 }
 
 fn named_item_attributes(item: &syn::Item) -> Option<&[syn::Attribute]> {
@@ -307,7 +311,7 @@ fn named_item_attributes(item: &syn::Item) -> Option<&[syn::Attribute]> {
     })
 }
 
-fn foreign_item_attributes(item: &syn::Item) -> &[syn::Attribute] {
+fn other_item_attributes(item: &syn::Item) -> &[syn::Attribute] {
     match item {
         syn::Item::Static(item) => &item.attrs,
         syn::Item::Type(item) => &item.attrs,

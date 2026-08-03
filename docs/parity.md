@@ -85,6 +85,26 @@ configuration file unless `--config` is set.
 | `mutago-report.html` | `mutarust-report.html` | Renamed file |
 | `mutago-gitlab.json` | `mutarust-gitlab.json` | Renamed file |
 | GitHub `::warning` | GitHub `::warning` | Same |
+| `// mutator-disable-func` | `// mutator-disable-func` | Same purpose |
+| `// mutator-disable-next-line` | `// mutator-disable-next-line` | Same purpose |
+| `// mutator-disable-regexp` | `// mutator-disable-regexp` | Same purpose |
+
+## CI controls
+
+| Mutago CI control | Mutarust status | Notes |
+| --- | --- | --- |
+| `--fail-on-escaped` | Same | Exit 4 for new escapes |
+| `--min-msi` / `--min-covered-msi` | Same | Exit 4 when below gate |
+| `--ignore-msi-with-no-mutations` | Same | Pass gates when no mutant exists |
+| `--logger-github` / `--logger-gitlab` | Same purpose | Renamed report files |
+| `--git-diff-lines` on pull requests | Same | Documented in `docs/cli.md` |
+| Self-mutation workflow | Deferred | Issue #26 |
+| Release CI / docs / hooks | Deferred | Issues #27 and #28 |
+| crates.io publish check | Deferred | Issue #28 |
+
+Self-mutation CI, release publication, and optional hooks remain in issues #26,
+#27, and #28. This table maps the public command CI controls required for the
+release candidate.
 
 ## Result states and exit values
 
@@ -155,9 +175,3 @@ replacement. See `docs/mutators.md`.
 | `skip_with_build_tags` | Docs say “skip test files” | Source skips the production file when the paired test has build tags | Rename to `skip_with_cfg`; skip mutants in non-test `#[cfg]` items |
 | Report file names | `mutago-*.json` / `.html` | Same | Use `mutarust-*` names |
 | Clean-suite `--noop` | Optional flag | Optional | Always run the clean suite before mutation |
-
-## CI controls
-
-Self-mutation CI, release publication, and optional hooks are tracked in
-issues #26, #27, and #28. This parity table covers the public command,
-configuration, reports, and mutator set required for the release candidate.
