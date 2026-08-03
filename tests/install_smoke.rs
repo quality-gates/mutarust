@@ -1618,15 +1618,66 @@ fn package_contains_the_configuration_contract() {
     let package = package_crate(&root.join("package-target"));
 
     for file in [
-        "docs/config.md",
-        "schema/mutarust.schema.json",
+        "LICENSE",
+        "README.md",
+        "CHANGELOG.md",
         "mutarust.yml.example",
+        "docs/config.md",
+        "docs/cli.md",
+        "docs/install.md",
+        "docs/quickstart.md",
+        "docs/mutators.md",
+        "docs/json-outputs.md",
+        "docs/custom-mutators.md",
+        "docs/ci.md",
+        "docs/release.md",
+        "docs/glossary.md",
+        "schema/mutarust.schema.json",
+        "schema/report.schema.json",
+        "schema/summary.schema.json",
+        "schema/agentic.schema.json",
+        "schema/gitlab.schema.json",
+        "scripts/mutarust-bash_completion.sh",
     ] {
         assert!(
             package.join(file).is_file(),
             "the package must contain {file}"
         );
     }
+
+    for path in [".agents", ".serena", "skills-lock.json"] {
+        assert!(
+            !package.join(path).exists(),
+            "the package must exclude non-user path {path}"
+        );
+    }
+
+    let manifest = fs::read_to_string(package.join("Cargo.toml"))
+        .expect("packaged Cargo.toml must be readable");
+    for required in [
+        "license = \"MIT\"",
+        "repository = \"https://github.com/quality-gates/mutarust\"",
+        "homepage = \"https://github.com/quality-gates/mutarust\"",
+        "documentation = \"https://quality-gates.github.io/mutarust/\"",
+        "version = \"0.1.0\"",
+        "\"mutation-testing\"",
+        "\"testing\"",
+        "\"rust\"",
+        "\"development-tools::testing\"",
+        "\"command-line-utilities\"",
+    ] {
+        assert!(
+            manifest.contains(required),
+            "version 0.1.0 packaged metadata must include {required}"
+        );
+    }
+
+    let changelog = fs::read_to_string(package.join("CHANGELOG.md"))
+        .expect("packaged CHANGELOG.md must be readable");
+    assert!(
+        changelog.contains("## 0.1.0"),
+        "the packaged change log must record the 0.1.0 release"
+    );
 }
 
 #[test]
