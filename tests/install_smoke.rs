@@ -102,7 +102,7 @@ fn installed_command_lists_builtin_mutators() {
         String::from_utf8(output.stdout)
             .expect("mutator list must be UTF-8")
             .trim(),
-        "arithmetic/assign_invert\narithmetic/assignment\narithmetic/base\narithmetic/bitwise\narithmetic/negate\nbranch/case\nbranch/else\nbranch/if\ncomposite/field-clear\nconcurrency/goroutine-remove\nconditional/bool-literal\nconditional/negated\nconditional/not\nexpression/comparison\nexpression/context-nil\nexpression/errorf-wrap\nexpression/logical\nexpression/recover-clear\nexpression/string-literal\nloop/break\nloop/condition\nloop/range_break\nnumbers/decrementer\nnumbers/float-negate\nnumbers/incrementer\nselect/case-remove\nselect/default-remove\nstatement/defer-remove\nstatement/remove\nstatement/remove-self-assign\nstatement/return",
+        "arithmetic/assign_invert\narithmetic/assignment\narithmetic/base\narithmetic/bitwise\narithmetic/negate\nbranch/case\nbranch/else\nbranch/if\ncomposite/field-clear\nconcurrency/goroutine-remove\nconditional/bool-literal\nconditional/negated\nconditional/not\nexpression/comparison\nexpression/context-nil\nexpression/error-guard\nexpression/errorf-wrap\nexpression/logical\nexpression/recover-clear\nexpression/remove\nexpression/string-literal\nloop/break\nloop/condition\nloop/range_break\nnumbers/decrementer\nnumbers/float-negate\nnumbers/incrementer\nselect/case-remove\nselect/default-remove\nstatement/defer-remove\nstatement/remove\nstatement/remove-self-assign\nstatement/return",
         "the built-in mutator list must be stable and sorted"
     );
 }
@@ -568,12 +568,14 @@ fn installed_command_classifies_expression_fixture_mutants() {
     );
     let stdout = String::from_utf8(output.stdout).expect("expression output must be UTF-8");
     assert!(
-        stdout.contains("Killed: 16")
+        stdout.contains("Killed: 22")
             && stdout.contains("Escaped: 1")
             && stdout.contains("Errored: 0")
-            && stdout.contains("Total: 17")
+            && stdout.contains("Total: 23")
             && stdout.contains("conditional/negated | 2 | 0 | 0 | 2")
             && stdout.contains("expression/comparison | 0 | 1 | 0 | 1")
+            && stdout.contains("expression/remove | 4 | 0 | 0 | 4")
+            && stdout.contains("expression/error-guard | 1 | 0 | 0 | 1")
             && stdout.contains("numbers/decrementer | 2 | 0 | 0 | 2")
             && stdout.contains("numbers/incrementer | 2 | 0 | 0 | 2"),
         "the fixture must classify every valid expression mutant: {stdout}"
@@ -1092,6 +1094,165 @@ fn installed_command_reads_yaml_configuration_and_command_options_take_priority(
     assert!(
         disabled_output.contains("Killed: 0") && disabled_output.contains("Escaped: 0"),
         "a command mutator denylist must change the configuration selection: {disabled_output}"
+    );
+}
+
+#[test]
+fn installed_command_applies_skip_without_test_and_skip_with_cfg() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_mutation_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    fs::write(
+        &source,
+        "pub fn checked() -> bool { let value = true; value }\n\n#[cfg(feature = \"extra\")]\npub fn gated() -> bool { let value = true; value }\n",
+    )
+    .expect("skip policy source must be written");
+    let without_tests = fixture.join("skip-without-test.yml");
+    fs::write(
+        &without_tests,
+        "skip_without_test: true\nenable_mutators:\n  - conditional/bool-literal\n",
+    )
+    .expect("skip_without_test configuration must be written");
+    let without_tests_run = Command::new(command_path(&install))
+        .args(["--config"])
+        .arg(&without_tests)
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start with skip_without_test");
+    assert!(
+        without_tests_run.status.success(),
+        "skip_without_test must succeed: {}",
+        String::from_utf8_lossy(&without_tests_run.stderr)
+    );
+    let without_tests_stdout = String::from_utf8(without_tests_run.stdout)
+        .expect("skip_without_test output must be UTF-8");
+    assert!(
+        without_tests_stdout.contains("Total: 0"),
+        "a source without #[cfg(test)] must produce no mutants: {without_tests_stdout}"
+    );
+
+    fs::write(
+        &source,
+        "pub fn checked() -> bool { let value = true; value }\n\n#[cfg(feature = \"extra\")]\npub fn gated() -> bool { let value = true; value }\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn keeps_checked() {\n        assert!(super::checked());\n    }\n}\n",
+    )
+    .expect("skip_with_cfg source must be written");
+    let with_cfg = fixture.join("skip-with-cfg.yml");
+    fs::write(
+        &with_cfg,
+        "skip_with_cfg: true\nenable_mutators:\n  - conditional/bool-literal\n",
+    )
+    .expect("skip_with_cfg configuration must be written");
+    let with_cfg_run = Command::new(command_path(&install))
+        .args(["--config"])
+        .arg(&with_cfg)
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start with skip_with_cfg");
+    assert!(
+        with_cfg_run.status.success(),
+        "skip_with_cfg must succeed: {}",
+        String::from_utf8_lossy(&with_cfg_run.stderr)
+    );
+    let with_cfg_stdout =
+        String::from_utf8(with_cfg_run.stdout).expect("skip_with_cfg output must be UTF-8");
+    assert!(
+        with_cfg_stdout.contains("Total: 1") && with_cfg_stdout.contains("Killed: 1"),
+        "skip_with_cfg must keep unguarded mutants and drop cfg-gated ones: {with_cfg_stdout}"
+    );
+}
+
+#[test]
+fn installed_command_ignore_msi_with_no_mutations_and_html_output_flag() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_mutation_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    fs::write(&source, "pub fn checked() -> bool { true }\n")
+        .expect("no-mutant source must be written");
+
+    let failed_gate = Command::new(command_path(&install))
+        .args(["--enable", "conditional/bool-literal", "--min-msi", "75"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start with an empty score gate");
+    assert_eq!(
+        failed_gate.status.code(),
+        Some(4),
+        "zero mutants with a positive min-msi must fail: {}",
+        String::from_utf8_lossy(&failed_gate.stderr)
+    );
+
+    let ignored = Command::new(command_path(&install))
+        .args([
+            "--enable",
+            "conditional/bool-literal",
+            "--min-msi",
+            "75",
+            "--ignore-msi-with-no-mutations",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start with ignore-msi-with-no-mutations");
+    assert!(
+        ignored.status.success(),
+        "ignore-msi-with-no-mutations must pass with zero mutants: {}",
+        String::from_utf8_lossy(&ignored.stderr)
+    );
+
+    fs::write(
+        &source,
+        "pub fn checked() -> bool { let value = true; value }\n",
+    )
+    .expect("html output source must be written");
+    let html = Command::new(command_path(&install))
+        .args([
+            "--enable",
+            "conditional/bool-literal",
+            "--html-output",
+            "--silent",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start with --html-output");
+    assert!(
+        html.status.success(),
+        "--html-output must succeed: {}",
+        String::from_utf8_lossy(&html.stderr)
+    );
+    assert!(
+        fixture.join("mutarust-report.html").is_file(),
+        "--html-output must write mutarust-report.html"
+    );
+
+    let covered_config = fixture.join("covered-msi.yml");
+    fs::write(
+        &covered_config,
+        "min_covered_msi: 80\nenable_mutators:\n  - conditional/bool-literal\n",
+    )
+    .expect("covered-msi configuration must be written");
+    let covered_gate = Command::new(command_path(&install))
+        .args(["--config"])
+        .arg(&covered_config)
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start with configured min_covered_msi");
+    assert_eq!(
+        covered_gate.status.code(),
+        Some(4),
+        "configured min_covered_msi without --coverage must return exit value 4: {}",
+        String::from_utf8_lossy(&covered_gate.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&covered_gate.stderr).contains("covered-code mutation score"),
+        "configured min_covered_msi must name the covered-code gate: {}",
+        String::from_utf8_lossy(&covered_gate.stderr)
     );
 }
 
@@ -4985,7 +5146,7 @@ fn packaged_library_builds_a_custom_mutator() {
     .expect("downstream manifest must be written");
     fs::write(
         downstream.join("src").join("main.rs"),
-        "use mutarust::{Mutation, Mutator, Registry, RegistryBuilder};\n\nstruct Custom;\nstruct Invalid;\n\nimpl Mutator for Custom {\n    fn name(&self) -> &str { \"custom/no-op\" }\n\n    fn mutations(&self, _source: &str) -> Vec<Mutation> { Vec::new() }\n}\n\nimpl Mutator for Invalid {\n    fn name(&self) -> &str { \"Custom\" }\n\n    fn mutations(&self, _source: &str) -> Vec<Mutation> { Vec::new() }\n}\n\nfn mutate(registry: &Registry, source: &str) -> String {\n    let mutation = registry.get(\"conditional/bool-literal\").expect(\"built-in mutator must exist\").mutations(source).pop().expect(\"boolean must mutate\");\n    mutation.apply(source).expect(\"mutation must apply\")\n}\n\nfn main() {\n    let registry = RegistryBuilder::with_builtins().register(Custom).expect(\"custom mutator must register\").build();\n    assert_eq!(registry.names().collect::<Vec<_>>(), vec![\"arithmetic/assign_invert\", \"arithmetic/assignment\", \"arithmetic/base\", \"arithmetic/bitwise\", \"arithmetic/negate\", \"branch/case\", \"branch/else\", \"branch/if\", \"composite/field-clear\", \"concurrency/goroutine-remove\", \"conditional/bool-literal\", \"conditional/negated\", \"conditional/not\", \"custom/no-op\", \"expression/comparison\", \"expression/context-nil\", \"expression/errorf-wrap\", \"expression/logical\", \"expression/recover-clear\", \"expression/string-literal\", \"loop/break\", \"loop/condition\", \"loop/range_break\", \"numbers/decrementer\", \"numbers/float-negate\", \"numbers/incrementer\", \"select/case-remove\", \"select/default-remove\", \"statement/defer-remove\", \"statement/remove\", \"statement/remove-self-assign\", \"statement/return\"]);\n    let duplicate = RegistryBuilder::new().register(Custom).expect(\"first custom mutator must register\").register(Custom).err().expect(\"duplicate must fail\");\n    assert_eq!(duplicate.to_string(), \"duplicate mutator name: custom/no-op\");\n    let invalid = RegistryBuilder::new().register(Invalid).err().expect(\"invalid name must fail\");\n    assert_eq!(invalid.to_string(), \"invalid mutator name: Custom\");\n    assert_eq!(mutate(&registry, \"fn enabled() -> bool { let enabled = true; enabled }\"), \"fn enabled() -> bool { let enabled = false; enabled }\");\n    assert_eq!(mutate(&registry, \"fn enabled() -> bool { let label = \\\"é\\\"; let enabled = true; enabled }\"), \"fn enabled() -> bool { let label = \\\"é\\\"; let enabled = false; enabled }\");\n    assert!(registry.get(\"conditional/bool-literal\").unwrap().mutations(\"fn check() { assert!(true); }\").is_empty());\n    println!(\"custom mutator works\");\n}\n",
+        "use mutarust::{Mutation, Mutator, Registry, RegistryBuilder};\n\nstruct Custom;\nstruct Invalid;\n\nimpl Mutator for Custom {\n    fn name(&self) -> &str { \"custom/no-op\" }\n\n    fn mutations(&self, _source: &str) -> Vec<Mutation> { Vec::new() }\n}\n\nimpl Mutator for Invalid {\n    fn name(&self) -> &str { \"Custom\" }\n\n    fn mutations(&self, _source: &str) -> Vec<Mutation> { Vec::new() }\n}\n\nfn mutate(registry: &Registry, source: &str) -> String {\n    let mutation = registry.get(\"conditional/bool-literal\").expect(\"built-in mutator must exist\").mutations(source).pop().expect(\"boolean must mutate\");\n    mutation.apply(source).expect(\"mutation must apply\")\n}\n\nfn main() {\n    let registry = RegistryBuilder::with_builtins().register(Custom).expect(\"custom mutator must register\").build();\n    assert_eq!(registry.names().collect::<Vec<_>>(), vec![\"arithmetic/assign_invert\", \"arithmetic/assignment\", \"arithmetic/base\", \"arithmetic/bitwise\", \"arithmetic/negate\", \"branch/case\", \"branch/else\", \"branch/if\", \"composite/field-clear\", \"concurrency/goroutine-remove\", \"conditional/bool-literal\", \"conditional/negated\", \"conditional/not\", \"custom/no-op\", \"expression/comparison\", \"expression/context-nil\", \"expression/error-guard\", \"expression/errorf-wrap\", \"expression/logical\", \"expression/recover-clear\", \"expression/remove\", \"expression/string-literal\", \"loop/break\", \"loop/condition\", \"loop/range_break\", \"numbers/decrementer\", \"numbers/float-negate\", \"numbers/incrementer\", \"select/case-remove\", \"select/default-remove\", \"statement/defer-remove\", \"statement/remove\", \"statement/remove-self-assign\", \"statement/return\"]);\n    let duplicate = RegistryBuilder::new().register(Custom).expect(\"first custom mutator must register\").register(Custom).err().expect(\"duplicate must fail\");\n    assert_eq!(duplicate.to_string(), \"duplicate mutator name: custom/no-op\");\n    let invalid = RegistryBuilder::new().register(Invalid).err().expect(\"invalid name must fail\");\n    assert_eq!(invalid.to_string(), \"invalid mutator name: Custom\");\n    assert_eq!(mutate(&registry, \"fn enabled() -> bool { let enabled = true; enabled }\"), \"fn enabled() -> bool { let enabled = false; enabled }\");\n    assert_eq!(mutate(&registry, \"fn enabled() -> bool { let label = \\\"é\\\"; let enabled = true; enabled }\"), \"fn enabled() -> bool { let label = \\\"é\\\"; let enabled = false; enabled }\");\n    assert!(registry.get(\"conditional/bool-literal\").unwrap().mutations(\"fn check() { assert!(true); }\").is_empty());\n    println!(\"custom mutator works\");\n}\n",
     )
     .expect("downstream source must be written");
 

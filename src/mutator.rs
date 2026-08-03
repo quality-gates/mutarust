@@ -9,7 +9,7 @@ use crate::control_flow::ControlFlowMutator;
 use crate::error_panic_cleanup::{CleanupMutator, ErrorWrapMutator, RecoveryMutator};
 use crate::expression::{
     ArithmeticNegate, BinaryOperatorMutator, BoolLiteralMutator, ConditionalNotMutator,
-    NumberMutator, StringLiteralMutator,
+    ErrorGuardMutator, NumberMutator, RemoveTermMutator, StringLiteralMutator,
 };
 use crate::return_value::ReturnValueMutator;
 use crate::value::ValueMutator;
@@ -117,9 +117,13 @@ impl RegistryBuilder {
             .expect("built-in mutator registration must be valid")
             .register(BinaryOperatorMutator::expression_logical())
             .expect("built-in mutator registration must be valid")
+            .register(RemoveTermMutator)
+            .expect("built-in mutator registration must be valid")
             .register(StringLiteralMutator)
             .expect("built-in mutator registration must be valid")
             .register(ErrorWrapMutator)
+            .expect("built-in mutator registration must be valid")
+            .register(ErrorGuardMutator)
             .expect("built-in mutator registration must be valid")
             .register(RecoveryMutator)
             .expect("built-in mutator registration must be valid")

@@ -84,7 +84,7 @@ fn print_help() -> io::Result<()> {
     )?;
     writeln!(
         stdout,
-        "      --coverage        Collect LLVM line coverage before mutation\n      --per-test        Run mapped tests for each covered mutant\n      --git-diff-lines  Mutate Git changed lines only\n      --git-diff-base REF  Set Git base; default origin/HEAD, then master"
+        "      --coverage        Collect LLVM line coverage before mutation\n      --per-test        Run mapped tests for each covered mutant\n      --git-diff-lines  Mutate Git changed lines only\n      --git-diff-base REF  Set Git base; default origin/HEAD, then master\n      --html-output     Write mutarust-report.html\n      --ignore-msi-with-no-mutations  Pass score gates when no mutant exists"
     )
 }
 
@@ -124,11 +124,15 @@ fn bash_completion_candidates() -> &'static [&'static str] {
         "--debug",
         "--silent",
         "--no-silent",
+        "--quiet",
+        "--output-statuses",
         "--no-diffs",
         "--logger-summary-json",
         "--logger-agentic-json",
         "--logger-github",
         "--logger-gitlab",
+        "--html-output",
+        "--ignore-msi-with-no-mutations",
         "--blacklist",
         "--baseline",
         "--update-baseline",
@@ -314,6 +318,9 @@ fn parse_switch_option(command: &mut RunCommand, argument: &str) -> Result<(), S
 }
 
 fn parse_display_switch(command: &mut RunCommand, argument: &str) -> Option<Result<(), String>> {
+    if let Some(result) = parse_report_switch(command, argument) {
+        return Some(result);
+    }
     Some(match argument {
         "--silent" => set_silent(command, true),
         "--no-silent" => set_silent(command, false),
@@ -321,10 +328,6 @@ fn parse_display_switch(command: &mut RunCommand, argument: &str) -> Option<Resu
             command.output.no_diffs = true;
             Ok(())
         }
-        "--logger-summary-json" => set_logger_summary_json(command),
-        "--logger-agentic-json" => set_logger_agentic_json(command),
-        "--logger-github" => set_logger_github(command),
-        "--logger-gitlab" => set_logger_gitlab(command),
         "--quiet" => {
             command.output.quiet = true;
             Ok(())
@@ -333,38 +336,56 @@ fn parse_display_switch(command: &mut RunCommand, argument: &str) -> Option<Resu
     })
 }
 
+fn parse_report_switch(command: &mut RunCommand, argument: &str) -> Option<Result<(), String>> {
+    Some(match argument {
+        "--logger-summary-json" => set_logger_summary_json(command),
+        "--logger-agentic-json" => set_logger_agentic_json(command),
+        "--logger-github" => set_logger_github(command),
+        "--logger-gitlab" => set_logger_gitlab(command),
+        "--html-output" => {
+            command.reports.html_output = true;
+            Ok(())
+        }
+        "--ignore-msi-with-no-mutations" => {
+            command.baseline.ignore_msi_with_no_mutations = true;
+            Ok(())
+        }
+        _ => return None,
+    })
+}
+
 fn set_logger_summary_json(command: &mut RunCommand) -> Result<(), String> {
-    if command.logger_summary_json {
+    if command.reports.summary_json {
         Err("--logger-summary-json can be supplied only once".to_owned())
     } else {
-        command.logger_summary_json = true;
+        command.reports.summary_json = true;
         Ok(())
     }
 }
 
 fn set_logger_agentic_json(command: &mut RunCommand) -> Result<(), String> {
-    if command.logger_agentic_json {
+    if command.reports.agentic_json {
         Err("--logger-agentic-json can be supplied only once".to_owned())
     } else {
-        command.logger_agentic_json = true;
+        command.reports.agentic_json = true;
         Ok(())
     }
 }
 
 fn set_logger_github(command: &mut RunCommand) -> Result<(), String> {
-    if command.logger_github {
+    if command.reports.github {
         Err("--logger-github can be supplied only once".to_owned())
     } else {
-        command.logger_github = true;
+        command.reports.github = true;
         Ok(())
     }
 }
 
 fn set_logger_gitlab(command: &mut RunCommand) -> Result<(), String> {
-    if command.logger_gitlab {
+    if command.reports.gitlab {
         Err("--logger-gitlab can be supplied only once".to_owned())
     } else {
-        command.logger_gitlab = true;
+        command.reports.gitlab = true;
         Ok(())
     }
 }
@@ -707,11 +728,13 @@ fn configured_registry(
 ) -> Result<(Registry, mutarust::SourceFilters), String> {
     let mut registry = Registry::builtins();
     let names = registry.names().map(str::to_owned).collect::<Vec<_>>();
-    let filters = mutarust::SourceFilters::new(
+    let filters = mutarust::SourceFilters::with_policies(
         &configuration.exclude_dirs,
         &configuration.ignore_source_lines,
         command.function_match.as_deref(),
         &names,
+        configuration.skip_without_test,
+        configuration.skip_with_cfg,
     )?;
     let selected = configuration
         .select_mutators(&names)
@@ -755,6 +778,7 @@ fn finish_mutation_run(
             configuration,
             baseline,
             command.baseline.fail_on_escaped,
+            command.baseline.ignore_msi_with_no_mutations,
         )
     })
 }
@@ -770,15 +794,20 @@ fn write_reports_or_error(
     write_report_if(configuration.json_output, || {
         write_full_report(run, &context)
     })
-    .or_else(|| write_report_if(configuration.html_output, || write_html_report(run)))
-    .or_else(|| write_report_if(command.logger_summary_json, || write_compact_summary(run)))
     .or_else(|| {
-        write_report_if(command.logger_agentic_json, || {
+        write_report_if(
+            configuration.html_output || command.reports.html_output,
+            || write_html_report(run),
+        )
+    })
+    .or_else(|| write_report_if(command.reports.summary_json, || write_compact_summary(run)))
+    .or_else(|| {
+        write_report_if(command.reports.agentic_json, || {
             write_agentic_report(run, std::path::Path::new("."))
         })
     })
-    .or_else(|| write_github_annotations_if(command.logger_github, run))
-    .or_else(|| write_report_if(command.logger_gitlab, || write_gitlab_report(run)))
+    .or_else(|| write_github_annotations_if(command.reports.github, run))
+    .or_else(|| write_report_if(command.reports.gitlab, || write_gitlab_report(run)))
 }
 
 fn write_report_if(enabled: bool, write: impl FnOnce() -> Result<(), String>) -> Option<ExitCode> {
@@ -954,7 +983,11 @@ fn score_gates(
     configuration: &Configuration,
     baseline: &Baseline,
     fail_on_escaped: bool,
+    ignore_msi_with_no_mutations: bool,
 ) -> ExitCode {
+    if ignore_msi_with_no_mutations && run.total() == 0 {
+        return ExitCode::SUCCESS;
+    }
     let total = total_score_gate(run, configuration.min_msi);
     if total != ExitCode::SUCCESS {
         return total;
@@ -1044,12 +1077,9 @@ struct RunCommand {
     recursive_tests: bool,
     execution: ExecutionOptions,
     output: OutputOptions,
+    reports: ReportOptions,
     function_match: Option<String>,
     configuration: Option<PathBuf>,
-    logger_summary_json: bool,
-    logger_agentic_json: bool,
-    logger_github: bool,
-    logger_gitlab: bool,
     run_mutant_id: Option<String>,
     baseline: BaselineOptions,
     settings: CommandSettings,
@@ -1065,10 +1095,20 @@ struct OutputOptions {
 }
 
 #[derive(Default)]
+struct ReportOptions {
+    summary_json: bool,
+    agentic_json: bool,
+    github: bool,
+    gitlab: bool,
+    html_output: bool,
+}
+
+#[derive(Default)]
 struct BaselineOptions {
     path: Option<PathBuf>,
     update: bool,
     fail_on_escaped: bool,
+    ignore_msi_with_no_mutations: bool,
 }
 
 impl BaselineOptions {
@@ -1106,10 +1146,7 @@ impl Default for RunCommand {
             output: OutputOptions::default(),
             function_match: None,
             configuration: None,
-            logger_summary_json: false,
-            logger_agentic_json: false,
-            logger_github: false,
-            logger_gitlab: false,
+            reports: ReportOptions::default(),
             run_mutant_id: None,
             baseline: BaselineOptions::default(),
             settings: CommandSettings::default(),

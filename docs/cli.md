@@ -42,6 +42,9 @@ the full mutant count. The score is zero when no mutant exists.
 
 Use `--min-msi PERCENT` to require a total mutation score. A failed score gate
 returns exit value 4. A score equal to the required percentage passes.
+Use `--ignore-msi-with-no-mutations` to pass score gates when a run has no
+mutants. This is useful with `--git-diff-lines` when a change has no mutable
+lines.
 
 ## Terminal Output Controls
 
@@ -117,8 +120,9 @@ score gates.
 ## Reports
 
 Use `json_output: true` in a configuration file to write the full report to
-`report.json` in the current directory. Use `html_output: true` to write the
-self-contained HTML report to `mutarust-report.html`. Use
+`report.json` in the current directory. Use `html_output: true` or
+`--html-output` to write the self-contained HTML report to
+`mutarust-report.html`. Use
 `--logger-summary-json` to write the compact score summary to
 `mutarust-summary.json`. Use `--logger-agentic-json` to write the agent-ready
 escaped-mutant report to `mutarust-agentic.json`. Use `--logger-github` to

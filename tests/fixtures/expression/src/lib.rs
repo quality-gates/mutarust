@@ -42,6 +42,17 @@ pub fn logical(a: bool, b: bool) -> bool {
     a && b
 }
 
+pub fn remove_terms(a: bool, b: bool) -> bool {
+    a && b
+}
+
+pub fn error_guard(result: Result<(), ()>) -> bool {
+    if result.is_err() {
+        return false;
+    }
+    true
+}
+
 pub fn string(value: &str) -> bool {
     value == "yes"
 }

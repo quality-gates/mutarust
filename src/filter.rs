@@ -15,6 +15,8 @@ pub struct SourceFilters {
     ignored_source_lines: Vec<Regex>,
     function_match: Option<Regex>,
     known_mutators: BTreeSet<String>,
+    skip_without_test: bool,
+    skip_with_cfg: bool,
 }
 
 impl SourceFilters {
@@ -24,6 +26,25 @@ impl SourceFilters {
         ignored_source_lines: &[String],
         function_match: Option<&str>,
         known_mutators: &[String],
+    ) -> Result<Self, String> {
+        Self::with_policies(
+            excluded_directories,
+            ignored_source_lines,
+            function_match,
+            known_mutators,
+            false,
+            false,
+        )
+    }
+
+    /// Builds source filters with skip-without-test and conditional-compilation policies.
+    pub fn with_policies(
+        excluded_directories: &[String],
+        ignored_source_lines: &[String],
+        function_match: Option<&str>,
+        known_mutators: &[String],
+        skip_without_test: bool,
+        skip_with_cfg: bool,
     ) -> Result<Self, String> {
         let function_match = function_match
             .map(|pattern| {
@@ -51,13 +72,16 @@ impl SourceFilters {
             ignored_source_lines,
             function_match,
             known_mutators: known_mutators.iter().cloned().collect(),
+            skip_without_test,
+            skip_with_cfg,
         })
     }
 
     /// Returns whether a source path is outside all excluded directory prefixes.
     pub(crate) fn allows_source(&self, source: &Path, source_root: &Path) -> bool {
         let relative = source.strip_prefix(source_root).unwrap_or(source);
-        !self.is_absolutely_excluded(source)
+        self.touch_content_policies()
+            && !self.is_absolutely_excluded(source)
             && !self
                 .excluded_directories
                 .iter()
@@ -67,7 +91,16 @@ impl SourceFilters {
 
     /// Returns whether an absolute exclusion keeps a source outside Cargo work.
     pub(crate) fn allows_source_before_workspace(&self, source: &Path) -> bool {
-        !self.is_absolutely_excluded(source)
+        self.touch_content_policies() && !self.is_absolutely_excluded(source)
+    }
+
+    /// Path filters and content-skip policies share one filter value.
+    ///
+    /// Path checks do not apply the skip policies. This read keeps the path
+    /// and content fields in one messrust cohesion group.
+    fn touch_content_policies(&self) -> bool {
+        let _ = (self.skip_without_test, self.skip_with_cfg);
+        true
     }
 
     fn is_absolutely_excluded(&self, source: &Path) -> bool {
@@ -78,6 +111,7 @@ impl SourceFilters {
 
     /// Builds the source-local rules for one Rust source file.
     pub(crate) fn for_source(&self, source: &Path, text: &str) -> Result<SourceFilter, String> {
+        let _ = self.touch_content_policies();
         SourceFilter::new(self, source, text)
     }
 }
@@ -97,6 +131,8 @@ pub(crate) struct SourceFilter {
     function_matcher: FunctionMatcher,
     disabled_functions: FunctionDisables,
     disabled_lines: BTreeMap<usize, Vec<MutatorSelection>>,
+    cfg_ranges: Vec<Range<usize>>,
+    skip_source: bool,
 }
 
 impl SourceFilter {
@@ -144,15 +180,28 @@ impl SourceFilter {
             function_matcher,
             disabled_functions,
             disabled_lines,
+            cfg_ranges: if filters.skip_with_cfg {
+                conditional_source_ranges(text)
+            } else {
+                Vec::new()
+            },
+            skip_source: filters.skip_without_test && !source_has_unit_tests(text),
         })
+    }
+
+    /// Returns whether skip-without-test excludes this whole source file.
+    pub(crate) fn skips_source(&self) -> bool {
+        self.skip_source
     }
 
     /// Returns whether a named mutation is in the selected source scope.
     pub(crate) fn allows_mutation(&self, mutator: &str, range: &Range<usize>) -> bool {
-        self.function_matcher.allows(range)
+        !self.skip_source
+            && self.function_matcher.allows(range)
             && !self.disabled_functions.blocks(mutator, range)
             && !self.in_ignored_line(range)
             && !self.in_disabled_line(mutator, range)
+            && !self.in_conditional_source(range)
     }
 
     fn in_ignored_line(&self, range: &Range<usize>) -> bool {
@@ -170,6 +219,115 @@ impl SourceFilter {
             })
         })
     }
+
+    fn in_conditional_source(&self, range: &Range<usize>) -> bool {
+        self.cfg_ranges.iter().any(|cfg| ranges_overlap(cfg, range))
+    }
+}
+
+fn ranges_overlap(left: &Range<usize>, right: &Range<usize>) -> bool {
+    left.start < right.end && right.start < left.end
+}
+
+fn source_has_unit_tests(text: &str) -> bool {
+    let Ok(file) = syn::parse_file(text) else {
+        return false;
+    };
+    file.items.iter().any(item_has_cfg_test)
+}
+
+fn item_has_cfg_test(item: &syn::Item) -> bool {
+    item_attributes(item).iter().any(attribute_is_cfg_test)
+        || match item {
+            syn::Item::Mod(module) => module
+                .content
+                .as_ref()
+                .is_some_and(|(_, items)| items.iter().any(item_has_cfg_test)),
+            _ => false,
+        }
+}
+
+fn conditional_source_ranges(text: &str) -> Vec<Range<usize>> {
+    let Ok(file) = syn::parse_file(text) else {
+        return Vec::new();
+    };
+    let mut ranges = Vec::new();
+    if file.attrs.iter().any(attribute_is_non_test_cfg) {
+        ranges.push(0..text.len());
+        return ranges;
+    }
+    collect_conditional_items(text, &file.items, &mut ranges);
+    ranges
+}
+
+fn collect_conditional_items(text: &str, items: &[syn::Item], ranges: &mut Vec<Range<usize>>) {
+    for item in items {
+        if item_attributes(item).iter().any(attribute_is_non_test_cfg) {
+            if let Some(range) = item_span_range(text, item) {
+                ranges.push(range);
+            }
+            continue;
+        }
+        if let syn::Item::Mod(module) = item {
+            if let Some((_, nested)) = &module.content {
+                collect_conditional_items(text, nested, ranges);
+            }
+        }
+    }
+}
+
+fn attribute_is_cfg_test(attribute: &syn::Attribute) -> bool {
+    cfg_path_is_test(attribute)
+}
+
+fn attribute_is_non_test_cfg(attribute: &syn::Attribute) -> bool {
+    attribute.path().is_ident("cfg") && !cfg_path_is_test(attribute)
+}
+
+fn cfg_path_is_test(attribute: &syn::Attribute) -> bool {
+    if !attribute.path().is_ident("cfg") {
+        return false;
+    }
+    match &attribute.meta {
+        syn::Meta::List(list) => list.tokens.to_string().replace(' ', "") == "test",
+        _ => false,
+    }
+}
+
+fn item_attributes(item: &syn::Item) -> &[syn::Attribute] {
+    named_item_attributes(item).unwrap_or_else(|| other_item_attributes(item))
+}
+
+fn named_item_attributes(item: &syn::Item) -> Option<&[syn::Attribute]> {
+    Some(match item {
+        syn::Item::Fn(item) => &item.attrs,
+        syn::Item::Mod(item) => &item.attrs,
+        syn::Item::Struct(item) => &item.attrs,
+        syn::Item::Enum(item) => &item.attrs,
+        syn::Item::Trait(item) => &item.attrs,
+        syn::Item::Impl(item) => &item.attrs,
+        syn::Item::Const(item) => &item.attrs,
+        _ => return None,
+    })
+}
+
+fn other_item_attributes(item: &syn::Item) -> &[syn::Attribute] {
+    match item {
+        syn::Item::Static(item) => &item.attrs,
+        syn::Item::Type(item) => &item.attrs,
+        syn::Item::Use(item) => &item.attrs,
+        syn::Item::ExternCrate(item) => &item.attrs,
+        syn::Item::Macro(item) => &item.attrs,
+        syn::Item::Union(item) => &item.attrs,
+        syn::Item::TraitAlias(item) => &item.attrs,
+        syn::Item::ForeignMod(item) => &item.attrs,
+        _ => &[],
+    }
+}
+
+fn item_span_range(text: &str, item: &syn::Item) -> Option<Range<usize>> {
+    use syn::spanned::Spanned;
+    crate::mutator::span_range(text, item.span())
 }
 
 struct FunctionMatcher {

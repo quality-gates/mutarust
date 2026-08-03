@@ -10,6 +10,12 @@ fn detects_expression_changes() {
     assert!(expression_mutator_fixture::comparison(1, 2));
     assert!(expression_mutator_fixture::not(false));
     assert!(!expression_mutator_fixture::logical(true, false));
+    assert!(!expression_mutator_fixture::logical(false, true));
+    assert!(expression_mutator_fixture::remove_terms(true, true));
+    assert!(!expression_mutator_fixture::remove_terms(true, false));
+    assert!(!expression_mutator_fixture::remove_terms(false, true));
+    assert!(expression_mutator_fixture::error_guard(Ok(())));
+    assert!(!expression_mutator_fixture::error_guard(Err(())));
     assert!(expression_mutator_fixture::string("yes"));
 }
 
