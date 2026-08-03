@@ -260,6 +260,7 @@ mutarust --logger-gitlab [TARGET]...
 [
   {
     "type": "issue",
+    "check_name": "conditional/bool-literal",
     "description": "Escaped mutant (conditional/bool-literal) at checked/src/lib.rs:2 — no test kills this mutation",
     "severity": "minor",
     "fingerprint": "4582b234c128077507b7558eb62c337e",
@@ -276,6 +277,7 @@ mutarust --logger-gitlab [TARGET]...
 | Field | Type | Description |
 | --- | --- | --- |
 | `type` | string | Always `issue` |
+| `check_name` | string | Stable mutator name |
 | `description` | string | Escaped-mutant description |
 | `severity` | string | Always `minor` |
 | `fingerprint` | string | Stable mutant ID |

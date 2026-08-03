@@ -767,22 +767,21 @@ fn write_reports_or_error(
     let context = ReportContext {
         one_mutant: command.run_mutant_id.is_some(),
     };
-    write_report_if(configuration.json_output, || write_full_report(run, &context))
-        .or_else(|| write_report_if(configuration.html_output, || write_html_report(run)))
-        .or_else(|| write_report_if(command.logger_summary_json, || write_compact_summary(run)))
-        .or_else(|| {
-            write_report_if(command.logger_agentic_json, || {
-                write_agentic_report(run, std::path::Path::new("."))
-            })
+    write_report_if(configuration.json_output, || {
+        write_full_report(run, &context)
+    })
+    .or_else(|| write_report_if(configuration.html_output, || write_html_report(run)))
+    .or_else(|| write_report_if(command.logger_summary_json, || write_compact_summary(run)))
+    .or_else(|| {
+        write_report_if(command.logger_agentic_json, || {
+            write_agentic_report(run, std::path::Path::new("."))
         })
-        .or_else(|| write_github_annotations_if(command.logger_github, run))
-        .or_else(|| write_report_if(command.logger_gitlab, || write_gitlab_report(run)))
+    })
+    .or_else(|| write_github_annotations_if(command.logger_github, run))
+    .or_else(|| write_report_if(command.logger_gitlab, || write_gitlab_report(run)))
 }
 
-fn write_report_if(
-    enabled: bool,
-    write: impl FnOnce() -> Result<(), String>,
-) -> Option<ExitCode> {
+fn write_report_if(enabled: bool, write: impl FnOnce() -> Result<(), String>) -> Option<ExitCode> {
     if !enabled {
         return None;
     }

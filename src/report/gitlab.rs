@@ -18,6 +18,7 @@ pub fn gitlab_report(run: &MutationRun) -> Vec<GitLabIssue> {
             let path = portable_path(&result.source);
             GitLabIssue {
                 kind: "issue",
+                check_name: result.mutator.clone(),
                 description: format!(
                     "Escaped mutant ({}) at {path}:{} — no test kills this mutation",
                     result.mutator, result.line
@@ -47,6 +48,8 @@ pub struct GitLabIssue {
     /// Finding type. Always `issue`.
     #[serde(rename = "type")]
     pub kind: &'static str,
+    /// Stable mutator name used as the check name.
+    pub check_name: String,
     /// Human-readable description of the escaped mutant.
     pub description: String,
     /// Severity. Always `minor`.
@@ -96,6 +99,7 @@ mod tests {
         let report = gitlab_report(&run);
         assert_eq!(report.len(), 1);
         assert_eq!(report[0].kind, "issue");
+        assert_eq!(report[0].check_name, "conditional/bool-literal");
         assert_eq!(report[0].severity, "minor");
         assert_eq!(report[0].fingerprint, "4582b234c128077507b7558eb62c337e");
         assert_eq!(report[0].location.path, "checked/src/lib.rs");

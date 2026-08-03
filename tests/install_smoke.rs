@@ -1893,7 +1893,14 @@ fn installed_command_emits_github_and_gitlab_ci_results() {
     let config = fixture.join("mutarust.yml");
     fs::write(&config, "enable_mutators:\n  - conditional/bool-literal\n")
         .expect("CI report configuration must be written");
+    let report_config = fixture.join("ci-report.yml");
+    fs::write(
+        &report_config,
+        "json_output: true\nenable_mutators:\n  - conditional/bool-literal\n",
+    )
+    .expect("CI JSON report configuration must be written");
     let gitlab_report = fixture.join("mutarust-gitlab.json");
+    let full_report = fixture.join("report.json");
 
     let without_ci = Command::new(command_path(&install))
         .args([
@@ -1919,7 +1926,9 @@ fn installed_command_emits_github_and_gitlab_ci_results() {
     let output = Command::new(command_path(&install))
         .args([
             "--config",
-            config.to_str().expect("config path must be UTF-8"),
+            report_config
+                .to_str()
+                .expect("report config path must be UTF-8"),
             "--logger-github",
             "--logger-gitlab",
         ])
@@ -1951,6 +1960,40 @@ fn installed_command_emits_github_and_gitlab_ci_results() {
             && warning.contains("::Escaped mutation at checked/src/lib.rs:2"),
         "GitHub annotation must use repository-relative paths and correct lines: {warning}"
     );
+
+    let gitlab = read_json_array(&gitlab_report);
+    assert_eq!(
+        gitlab
+            .as_array()
+            .expect("GitLab report must be an array")
+            .len(),
+        1,
+        "GitLab report must list one escaped mutant: {gitlab}"
+    );
+    let finding = &gitlab[0];
+    assert_eq!(finding["type"], "issue");
+    assert_eq!(finding["check_name"], "conditional/bool-literal");
+    assert_eq!(finding["severity"], "minor");
+    assert_eq!(finding["location"]["path"], "checked/src/lib.rs");
+    assert_eq!(finding["location"]["lines"]["begin"], 2);
+    assert!(
+        finding["description"]
+            .as_str()
+            .expect("description")
+            .contains("Escaped mutant (conditional/bool-literal) at checked/src/lib.rs:2"),
+        "GitLab description must name the escaped mutant: {finding}"
+    );
+    let fingerprint = finding["fingerprint"]
+        .as_str()
+        .expect("fingerprint")
+        .to_owned();
+    let full = read_json_object(&full_report);
+    assert_eq!(
+        fingerprint,
+        full["escaped"][0]["id"].as_str().expect("escaped id"),
+        "GitLab fingerprint must match the stable escaped mutant ID: {finding}"
+    );
+    validate_gitlab_report_schema(&gitlab);
 
     let special = fixture.join("checked").join("src").join("a%b,c:d.rs");
     fs::write(
@@ -1987,37 +2030,6 @@ fn installed_command_emits_github_and_gitlab_ci_results() {
         "special characters in GitHub annotations must be escaped: {special_warning}"
     );
     let _ = fs::remove_file(&special);
-
-    let gitlab = read_json_array(&gitlab_report);
-    assert_eq!(
-        gitlab
-            .as_array()
-            .expect("GitLab report must be an array")
-            .len(),
-        1,
-        "GitLab report must list one escaped mutant: {gitlab}"
-    );
-    let finding = &gitlab[0];
-    assert_eq!(finding["type"], "issue");
-    assert_eq!(finding["severity"], "minor");
-    assert_eq!(finding["location"]["path"], "checked/src/lib.rs");
-    assert_eq!(finding["location"]["lines"]["begin"], 2);
-    assert!(
-        finding["description"]
-            .as_str()
-            .expect("description")
-            .contains("Escaped mutant (conditional/bool-literal) at checked/src/lib.rs:2"),
-        "GitLab description must name the escaped mutant: {finding}"
-    );
-    let fingerprint = finding["fingerprint"]
-        .as_str()
-        .expect("fingerprint")
-        .to_owned();
-    assert!(
-        fingerprint.len() == 32 && fingerprint.chars().all(|ch| ch.is_ascii_hexdigit()),
-        "GitLab fingerprint must use the stable mutant ID: {finding}"
-    );
-    validate_gitlab_report_schema(&gitlab);
 
     let empty_config = fixture.join("empty-ci.yml");
     fs::write(
@@ -2056,6 +2068,48 @@ fn installed_command_emits_github_and_gitlab_ci_results() {
         &Vec::<serde_json::Value>::new()
     );
     validate_gitlab_report_schema(&empty_gitlab);
+
+    let no_escape_config = fixture.join("no-escape-ci.yml");
+    fs::write(
+        &no_escape_config,
+        "enable_mutators:\n  - conditional/bool-literal\n",
+    )
+    .expect("no-escape CI configuration must be written");
+    let _ = fs::remove_file(&gitlab_report);
+    let no_escape_output = Command::new(command_path(&install))
+        .args([
+            "--config",
+            no_escape_config
+                .to_str()
+                .expect("no-escape config path must be UTF-8"),
+            "--match",
+            "^checked$",
+            "--logger-github",
+            "--logger-gitlab",
+        ])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start for no-escape CI output");
+    assert!(
+        no_escape_output.status.success(),
+        "no-escape CI run must succeed: {}",
+        String::from_utf8_lossy(&no_escape_output.stderr)
+    );
+    let no_escape_stdout =
+        String::from_utf8(no_escape_output.stdout).expect("no-escape CI stdout must be UTF-8");
+    assert!(
+        !no_escape_stdout.contains("::warning "),
+        "a no-escape run must emit no GitHub warnings: {no_escape_stdout}"
+    );
+    let no_escape_gitlab = read_json_array(&gitlab_report);
+    assert_eq!(
+        no_escape_gitlab
+            .as_array()
+            .expect("no-escape GitLab report must be an array"),
+        &Vec::<serde_json::Value>::new()
+    );
+    validate_gitlab_report_schema(&no_escape_gitlab);
 
     let git_fixture = git_mutation_fixture(&root, "ci-changed-lines", "main");
     write_git_source(
