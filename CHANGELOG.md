@@ -2,6 +2,16 @@
 
 This file records important user changes.
 
+## Unreleased
+
+### Fixed
+
+- Mutation workers no longer oversubscribe the host CPU. Each Cargo build gets a
+  `-j` limit so worker count times Cargo jobs stays near the logical CPU count.
+- Each mutation worker reuses one workspace copy and its Cargo target directory
+  across mutants. Later mutants rebuild only the changed crate instead of a full
+  cold dependency build for every mutant.
+
 ## 0.1.1 — 2026-08-03
 
 A compatible release. The public library interface does not change.
