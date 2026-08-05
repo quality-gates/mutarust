@@ -217,12 +217,16 @@ can create build output in each area.
 
 Mutarust runs Cargo mutants in parallel. By default, it starts up to one worker
 per logical CPU. Use `--workers COUNT` to set a positive whole-number limit.
-Mutarust never starts more workers than the number of mutants. Each worker uses
-one isolated mutation area and its own Cargo target directory. A higher worker
-limit can use more temporary disk space. Use a lower limit when disk space is
-limited. Mutarust prints result records and the final summary in the same plan
-order for sequential and parallel runs. A custom `--exec` command uses one
-worker so its command output cannot mix with another command output.
+Mutarust never starts more workers than the number of mutants. Each worker keeps
+one isolated mutation area and reuses its Cargo target directory across mutants
+in that worker, so later mutants rebuild only the changed crate. Mutarust also
+caps each Cargo build with `-j` so the product of worker count and Cargo jobs
+stays near the host CPU count. This limit prevents nested oversubscription when
+many workers run at once. A higher worker limit can use more temporary disk
+space and more memory. Use a lower limit when disk space or memory is limited.
+Mutarust prints result records and the final summary in the same plan order for
+sequential and parallel runs. A custom `--exec` command uses one worker so its
+command output cannot mix with another command output.
 
 Each Cargo test run has a fixed 60 second timeout by default. Use
 `--exec-timeout SECONDS` to set a different positive whole-second timeout.

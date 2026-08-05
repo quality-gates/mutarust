@@ -241,6 +241,8 @@ pub struct TestExecution {
     verbose: bool,
     debug: bool,
     cargo_flags: Vec<String>,
+    /// Caps `cargo` parallel jobs for each mutation worker.
+    build_jobs: Option<NonZeroUsize>,
 }
 
 impl TestExecution {
@@ -252,6 +254,7 @@ impl TestExecution {
             verbose: false,
             debug: false,
             cargo_flags: Vec::new(),
+            build_jobs: None,
         }
     }
 
@@ -268,6 +271,7 @@ impl TestExecution {
             verbose,
             debug,
             cargo_flags,
+            build_jobs: None,
         }
     }
 
@@ -284,6 +288,7 @@ impl TestExecution {
             verbose,
             debug,
             cargo_flags: Vec::new(),
+            build_jobs: None,
         })
     }
 
@@ -1024,10 +1029,13 @@ fn test_candidates(
 ) -> Result<Vec<MutationResult>, RunError> {
     let workers = active_worker_count(candidates.len(), execution, controls);
     log_worker_count(execution, workers);
+    // Cap each Cargo build so worker count times Cargo jobs stays near the CPU count.
+    let mut execution = execution.clone();
+    execution.build_jobs = NonZeroUsize::new(cargo_build_jobs(workers));
     if workers < 2 {
-        return test_candidates_sequential(candidates, timeout, execution, controls, counters);
+        return test_candidates_sequential(candidates, timeout, &execution, controls, counters);
     }
-    test_candidates_in_parallel(candidates, workers, timeout, execution, controls, counters)
+    test_candidates_in_parallel(candidates, workers, timeout, &execution, controls, counters)
 }
 
 fn active_worker_count(
@@ -1042,6 +1050,16 @@ fn active_worker_count(
     }
 }
 
+/// Returns Cargo `-j` jobs for each mutation worker.
+///
+/// The product of worker count and this value stays near the host CPU count.
+fn cargo_build_jobs(worker_count: usize) -> usize {
+    let cpus = thread::available_parallelism()
+        .map(NonZeroUsize::get)
+        .unwrap_or(1);
+    (cpus / worker_count.max(1)).max(1)
+}
+
 fn test_candidates_sequential(
     candidates: Vec<MutationCandidate>,
     timeout: Duration,
@@ -1050,12 +1068,18 @@ fn test_candidates_sequential(
     counters: &ProgressCounters,
 ) -> Result<Vec<MutationResult>, RunError> {
     let mut results = Vec::with_capacity(candidates.len());
+    let mut scratch = None;
     for candidate in candidates {
         if mutation_run_was_interrupted() {
             return Err(run_error("mutation run interrupted"));
         }
         results.push(test_candidate(
-            candidate, timeout, execution, controls, counters,
+            candidate,
+            timeout,
+            execution,
+            controls,
+            counters,
+            &mut scratch,
         ));
         if mutation_run_was_interrupted() {
             return Err(run_error("mutation run interrupted"));
@@ -1108,6 +1132,7 @@ fn test_mutation_worker(
     counters: &ProgressCounters,
 ) -> Result<Vec<IndexedResult>, RunError> {
     let mut results = Vec::new();
+    let mut scratch = None;
     while let Some(candidate) = next_candidate(&candidates)? {
         if mutation_run_was_interrupted() {
             break;
@@ -1118,6 +1143,7 @@ fn test_mutation_worker(
             &execution,
             &controls,
             counters,
+            &mut scratch,
         );
         results.push(IndexedResult {
             index: candidate.index,
@@ -1249,7 +1275,21 @@ mod tests {
     use std::path::PathBuf;
     use std::time::Duration;
 
-    use super::{DisplayFilter, MutationResult, MutationRun, MutationState, adaptive_timeout};
+    use super::{
+        DisplayFilter, MutationResult, MutationRun, MutationState, adaptive_timeout,
+        cargo_build_jobs,
+    };
+
+    #[test]
+    fn cargo_build_jobs_divides_cpus_across_workers() {
+        let cpus = cargo_build_jobs(1);
+        assert!(cpus >= 1);
+        assert_eq!(cargo_build_jobs(cpus), 1);
+        assert_eq!(cargo_build_jobs(usize::MAX), 1);
+        if cpus >= 2 {
+            assert_eq!(cargo_build_jobs(2), cpus / 2);
+        }
+    }
 
     #[test]
     fn display_filter_honours_silent_quiet_and_every_status_letter() {
@@ -2295,9 +2335,10 @@ fn test_candidate(
     execution: &TestExecution,
     controls: &ExecutionControls,
     counters: &ProgressCounters,
+    scratch: &mut Option<WorkerScratch>,
 ) -> MutationResult {
     log_candidate_start(execution, &candidate);
-    let (state, error) = test_candidate_state(&candidate, timeout, execution, controls)
+    let (state, error) = test_candidate_state(&candidate, timeout, execution, controls, scratch)
         .unwrap_or_else(|error| (MutationState::Errored, Some(error.to_string())));
     log_candidate_finish(execution, controls, &candidate, state);
     counters.record(state);
@@ -2367,11 +2408,28 @@ fn test_candidate_state(
     timeout: Duration,
     execution: &TestExecution,
     controls: &ExecutionControls,
+    scratch: &mut Option<WorkerScratch>,
 ) -> Result<(MutationState, Option<String>), RunError> {
     stop_if_interrupted()?;
     if candidate.test_selection == CandidateTestSelection::NotCovered {
         return Ok((MutationState::NotCovered, None));
     }
+    if reuses_worker_scratch(execution, controls) {
+        return test_candidate_with_scratch(candidate, timeout, execution, scratch);
+    }
+    test_candidate_in_fresh_workspace(candidate, timeout, execution, controls)
+}
+
+fn reuses_worker_scratch(execution: &TestExecution, controls: &ExecutionControls) -> bool {
+    execution.uses_cargo() && !controls.no_exec && !controls.keep_temporary
+}
+
+fn test_candidate_in_fresh_workspace(
+    candidate: &MutationCandidate,
+    timeout: Duration,
+    execution: &TestExecution,
+    controls: &ExecutionControls,
+) -> Result<(MutationState, Option<String>), RunError> {
     let temporary = TemporaryWorkspace::create()?;
     let keep_temporary = controls.keep_temporary || controls.no_exec;
     let temporary_path = keep_temporary.then(|| temporary.path().to_path_buf());
@@ -2402,6 +2460,36 @@ fn test_candidate_state(
         error = Some(error.map_or(detail.clone(), |error| format!("{error}; {detail}")));
     }
     Ok((state, error))
+}
+
+fn test_candidate_with_scratch(
+    candidate: &MutationCandidate,
+    timeout: Duration,
+    execution: &TestExecution,
+    scratch: &mut Option<WorkerScratch>,
+) -> Result<(MutationState, Option<String>), RunError> {
+    let area = prepare_worker_scratch(scratch, &candidate.workspace)?;
+    area.restore_dirty()?;
+    area.capture_original(&candidate.workspace, &candidate.source)?;
+    let temporary = area.temporary.path().to_path_buf();
+    let copied_workspace = area.copied_workspace.clone();
+    // test_cargo_mutant writes the mutant once against the restored original source.
+    test_cargo_mutant(candidate, &temporary, &copied_workspace, timeout, execution)
+}
+
+fn prepare_worker_scratch<'a>(
+    scratch: &'a mut Option<WorkerScratch>,
+    workspace: &Workspace,
+) -> Result<&'a mut WorkerScratch, RunError> {
+    let needs_new = scratch
+        .as_ref()
+        .is_none_or(|area| area.layout_root != workspace.layout_root);
+    if needs_new {
+        *scratch = Some(WorkerScratch::create(workspace)?);
+    }
+    Ok(scratch
+        .as_mut()
+        .expect("worker scratch must exist after create"))
 }
 
 fn add_mutation_area_to_error<T>(
@@ -2754,6 +2842,9 @@ fn run_cargo_command(
         .env_remove("CARGO_TARGET_DIR")
         .stdout(Stdio::from(diagnostic_stdout))
         .stderr(Stdio::from(diagnostics));
+    if let Some(jobs) = execution.build_jobs {
+        command.arg("-j").arg(jobs.get().to_string());
+    }
     if let Some(cargo_home) = &workspace.cargo_home {
         command.env("CARGO_HOME", copied_path(workspace, temporary, cargo_home)?);
     }
@@ -3332,6 +3423,55 @@ fn create_symbolic_link(_target: &Path, _destination: &Path) -> io::Result<()> {
         io::ErrorKind::Unsupported,
         "symbolic links are not supported on this platform",
     ))
+}
+
+/// A long-lived copy of one Cargo workspace for one mutation worker.
+///
+/// The worker reuses the copy and its Cargo target directory across mutants so
+/// later mutants rebuild only the changed crate.
+struct WorkerScratch {
+    temporary: TemporaryWorkspace,
+    layout_root: PathBuf,
+    copied_workspace: PathBuf,
+    dirty: Option<DirtySource>,
+}
+
+struct DirtySource {
+    path: PathBuf,
+    original: String,
+}
+
+impl WorkerScratch {
+    fn create(workspace: &Workspace) -> Result<Self, RunError> {
+        let temporary = TemporaryWorkspace::create()?;
+        let copied_workspace = copy_workspace(workspace, temporary.path())?;
+        Ok(Self {
+            temporary,
+            layout_root: workspace.layout_root.clone(),
+            copied_workspace,
+            dirty: None,
+        })
+    }
+
+    fn restore_dirty(&mut self) -> Result<(), RunError> {
+        let Some(dirty) = self.dirty.take() else {
+            return Ok(());
+        };
+        fs::write(&dirty.path, dirty.original.as_bytes()).map_err(|error| {
+            run_error(format!(
+                "could not restore {}: {error}",
+                dirty.path.display()
+            ))
+        })
+    }
+
+    fn capture_original(&mut self, workspace: &Workspace, source: &Path) -> Result<(), RunError> {
+        let path = copied_path(workspace, self.temporary.path(), source)?;
+        let original = fs::read_to_string(&path)
+            .map_err(|error| run_error(format!("could not read {}: {error}", path.display())))?;
+        self.dirty = Some(DirtySource { path, original });
+        Ok(())
+    }
 }
 
 struct MutationPlan {
