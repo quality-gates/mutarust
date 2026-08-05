@@ -2,7 +2,9 @@
 
 This file records important user changes.
 
-## Unreleased
+## 0.1.2 — 2026-08-05
+
+A compatible fix release. The public library interface does not change.
 
 ### Fixed
 
