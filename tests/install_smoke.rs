@@ -3486,6 +3486,103 @@ fn installed_command_skips_mutants_that_do_not_compile() {
     );
 }
 
+/// Locks the three Cargo mutant states for later single-invocation classification.
+///
+/// A mutant that does not build is skipped. A mutant that builds and fails a test
+/// is killed. A mutant that builds and passes all tests is escaped.
+#[test]
+fn installed_command_locks_skipped_killed_and_escaped_mutant_states() {
+    let root = smoke_root();
+    let install = install_command(&root);
+
+    let skipped = run_state_lock_package(
+        &root,
+        &install,
+        "state-skipped",
+        "pub fn joined() -> String { \"a\".to_owned() + \"b\" }\n",
+        "use state_skipped::joined;\n\n#[test]\nfn joins() {\n    assert_eq!(joined(), \"ab\");\n}\n",
+    );
+    assert!(
+        skipped.contains("Skipped: 1")
+            && skipped.contains("Killed: 0")
+            && skipped.contains("Escaped: 0")
+            && skipped.contains("Errored: 0")
+            && skipped.contains("mutant did not compile"),
+        "a mutant that does not build must be skipped: {skipped}"
+    );
+
+    let killed = run_state_lock_package(
+        &root,
+        &install,
+        "state-killed",
+        "pub fn checked() -> bool { let value = true; value }\n",
+        "use state_killed::checked;\n\n#[test]\nfn detects() {\n    assert!(checked());\n}\n",
+    );
+    assert!(
+        killed.contains("Killed: 1")
+            && killed.contains("Escaped: 0")
+            && killed.contains("Skipped: 0")
+            && killed.contains("Errored: 0"),
+        "a mutant that builds and fails a test must be killed: {killed}"
+    );
+
+    let escaped = run_state_lock_package(
+        &root,
+        &install,
+        "state-escaped",
+        "pub fn unchecked() -> bool { let value = true; value }\n",
+        "use state_escaped::unchecked;\n\n#[test]\nfn ignores_return() {\n    let _ = unchecked();\n}\n",
+    );
+    assert!(
+        escaped.contains("Escaped: 1")
+            && escaped.contains("Killed: 0")
+            && escaped.contains("Skipped: 0")
+            && escaped.contains("Errored: 0"),
+        "a mutant that builds and passes all tests must be escaped: {escaped}"
+    );
+}
+
+fn run_state_lock_package(
+    root: &Path,
+    install: &Path,
+    name: &str,
+    library: &str,
+    test_source: &str,
+) -> String {
+    let package = root.join(name);
+    fs::create_dir_all(package.join("src")).expect("state lock package source must be created");
+    fs::create_dir_all(package.join("tests")).expect("state lock package tests must be created");
+    fs::write(
+        package.join("Cargo.toml"),
+        format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n"),
+    )
+    .expect("state lock package manifest must be written");
+    let source = package.join("src").join("lib.rs");
+    fs::write(&source, library).expect("state lock library must be written");
+    fs::write(package.join("tests").join("detect.rs"), test_source)
+        .expect("state lock test must be written");
+    let source_before = fs::read(&source).expect("state lock source must be readable");
+
+    let output = Command::new(command_path(install))
+        .args(["--workers", "1"])
+        .arg(&source)
+        .current_dir(&package)
+        .output()
+        .expect("installed mutarust must start the state lock run");
+
+    assert!(
+        output.status.success(),
+        "{name} state lock run must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        fs::read(&source).expect("state lock source must remain readable"),
+        source_before,
+        "{name} state lock run must not change user source"
+    );
+    String::from_utf8(output.stdout).expect("state lock output must be UTF-8")
+}
+
 #[cfg(unix)]
 #[test]
 fn installed_command_reports_a_failed_test_command_as_errored() {
