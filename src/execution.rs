@@ -1454,7 +1454,6 @@ fn test_clean_layout(
             temporary.path(),
             &copied_workspace,
             package,
-            CargoAction::Test,
             timeout,
             execution,
             None,
@@ -2572,12 +2571,9 @@ fn test_cargo_mutant(
     execution: &TestExecution,
 ) -> Result<(MutationState, Option<String>), RunError> {
     write_mutant(&candidate.workspace, temporary, candidate)?;
-    if let Some(result) =
-        compile_mutant(candidate, temporary, copied_workspace, timeout, execution)?
-    {
-        return Ok(result);
-    }
-    test_compiled_mutant(
+    // One cargo test builds and runs the mutant. Classify compile failure as
+    // skipped and test failure as killed from that single command's output.
+    run_mutant_cargo_tests(
         temporary,
         copied_workspace,
         &candidate.workspace,
@@ -2585,48 +2581,6 @@ fn test_cargo_mutant(
         timeout,
         execution,
     )
-}
-
-fn compile_mutant(
-    candidate: &MutationCandidate,
-    temporary: &Path,
-    copied_workspace: &Path,
-    timeout: Duration,
-    execution: &TestExecution,
-) -> Result<Option<(MutationState, Option<String>)>, RunError> {
-    let outcome = run_cargo_command(
-        temporary,
-        copied_workspace,
-        &candidate.workspace,
-        CargoAction::Compile,
-        timeout,
-        execution,
-        None,
-    )?;
-    let result = match outcome {
-        CargoCommandOutcome {
-            outcome: CargoOutcome::Passed,
-            ..
-        } => None,
-        CargoCommandOutcome {
-            outcome: CargoOutcome::Failed(detail),
-            ..
-        } => Some((
-            MutationState::Skipped,
-            Some(format!("mutant did not compile: {}", cargo_detail(detail))),
-        )),
-        CargoCommandOutcome {
-            outcome: CargoOutcome::TimedOut,
-            ..
-        } => Some((
-            MutationState::Errored,
-            Some(format!(
-                "mutant compilation timed out after {} seconds",
-                timeout.as_secs()
-            )),
-        )),
-    };
-    Ok(result)
 }
 
 fn test_custom_mutant(
@@ -2654,7 +2608,7 @@ fn test_custom_mutant(
     )
 }
 
-fn test_compiled_mutant(
+fn run_mutant_cargo_tests(
     temporary: &Path,
     copied_workspace: &Path,
     workspace: &Workspace,
@@ -2667,7 +2621,6 @@ fn test_compiled_mutant(
             temporary,
             copied_workspace,
             workspace,
-            CargoAction::Test,
             timeout,
             execution,
             None,
@@ -2686,6 +2639,10 @@ fn test_compiled_mutant(
     };
     match outcome.outcome {
         CargoOutcome::Passed => Ok((MutationState::Escaped, None)),
+        CargoOutcome::Failed(detail) if cargo_failure_is_compile(&detail) => Ok((
+            MutationState::Skipped,
+            Some(format!("mutant did not compile: {}", cargo_detail(detail))),
+        )),
         CargoOutcome::Failed(_) => Ok((MutationState::Killed, None)),
         CargoOutcome::TimedOut => Ok((
             MutationState::Errored,
@@ -2695,6 +2652,16 @@ fn test_compiled_mutant(
             )),
         )),
     }
+}
+
+/// True when Cargo failed while building the mutant rather than running tests.
+fn cargo_failure_is_compile(detail: &str) -> bool {
+    detail.contains("could not compile")
+        || detail.contains("Couldn't compile the test")
+        || (detail.contains("error")
+            && !detail.contains("test result:")
+            && !detail.contains("FAILED")
+            && !detail.contains("failures:"))
 }
 
 fn run_selected_cargo_tests(
@@ -2710,7 +2677,6 @@ fn run_selected_cargo_tests(
             temporary,
             copied_workspace,
             workspace,
-            CargoAction::Test,
             timeout,
             execution,
             Some(test),
@@ -2781,12 +2747,6 @@ fn apply_candidate_mutation(
             candidate.source.display()
         ))
     })
-}
-
-#[derive(Clone, Copy)]
-enum CargoAction {
-    Compile,
-    Test,
 }
 
 enum CargoOutcome {
@@ -2870,7 +2830,6 @@ fn run_cargo_command(
     temporary: &Path,
     copied_workspace: &Path,
     workspace: &Workspace,
-    action: CargoAction,
     timeout: Duration,
     execution: &TestExecution,
     test: Option<&TestIdentity>,
@@ -2906,7 +2865,7 @@ fn run_cargo_command(
     if let Some(cargo_home) = &workspace.cargo_home {
         command.env("CARGO_HOME", copied_path(workspace, temporary, cargo_home)?);
     }
-    configure_cargo_test_scope(&mut command, action, execution, test);
+    configure_cargo_test_scope(&mut command, execution, test);
     stop_if_interrupted()?;
     configure_process_group(&mut command);
     let mut child = ProcessChild::new(
@@ -2930,13 +2889,9 @@ fn run_cargo_command(
 
 fn configure_cargo_test_scope(
     command: &mut Command,
-    action: CargoAction,
     execution: &TestExecution,
     test: Option<&TestIdentity>,
 ) {
-    if matches!(action, CargoAction::Compile) {
-        command.arg("--no-run");
-    }
     if execution.recursive && test.is_none() {
         command.arg("--workspace");
     }

@@ -11,6 +11,9 @@ This file records important user changes.
   starts from a cold Cargo build for that layout.
 - Parallel mutation workers each receive a private copy of the clean suite
   build. Workers never share a writable Cargo target directory.
+- The default Cargo path runs one `cargo test` per mutant. Compile failures
+  are still skipped and test failures are still killed from that single
+  command.
 
 ## 0.1.2 — 2026-08-05
 
