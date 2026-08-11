@@ -70,3 +70,8 @@ the label to return later label events to the normal selection.
 When mutation runs, pull requests still limit mutants with `--git-diff-lines`.
 Pushes to `main` still use the full approved production scope. Path selection only decides whether the mutation job runs. It does not change
 mutarust flags or score thresholds.
+
+## Verification evidence
+
+Real GitHub Actions verification evidence for the selective CI matrix is recorded
+on parent issue #83.
