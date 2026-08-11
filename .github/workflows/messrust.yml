@@ -6,12 +6,65 @@ on:
   pull_request:
     branches: [main]
 
+# Run Messrust for production changes. A non-light change also runs it, so an
+# unclassified path cannot skip this check.
+
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
+  changes:
+    name: detect Messrust paths
+    runs-on: ubuntu-latest
+    outputs:
+      run_messrust_or_unknown: ${{ steps.classes.outputs.run_messrust_or_unknown }}
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+      - uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3
+        id: filter
+        with:
+          filters: |
+            production:
+              - 'src/**'
+              - '.github/workflows/messrust.yml'
+            light:
+              - 'AGENTS.md'
+              - 'CONTEXT.md'
+              - 'CONTEXT-MAP.md'
+              - 'CHANGELOG.md'
+              - 'CODE_OF_CONDUCT.md'
+              - 'CONTRIBUTING.md'
+              - 'LICENSE'
+              - 'LICENSE.*'
+              - 'README.md'
+              - 'docs/**'
+              - 'mkdocs.yml'
+              - '.agents/**'
+              - '.claude/**'
+              - '**/*.md'
+              - '.gitignore'
+              - '.gitattributes'
+              - '.github/ISSUE_TEMPLATE/**'
+              - '.github/PULL_REQUEST_TEMPLATE*'
+              - '.github/dependabot.yml'
+      - id: classes
+        name: Derive Messrust flag
+        run: |
+          production='${{ steps.filter.outputs.production }}'
+          light='${{ steps.filter.outputs.light }}'
+          if [[ "$production" == "true" || "$light" != "true" ]]; then
+            run_messrust_or_unknown=true
+          else
+            run_messrust_or_unknown=false
+          fi
+          echo "run_messrust_or_unknown=$run_messrust_or_unknown" >> "$GITHUB_OUTPUT"
+          echo "Messrust paths: production=$production light=$light run_messrust_or_unknown=$run_messrust_or_unknown"
+
   messrust:
     name: Production code
+    needs: changes
+    if: needs.changes.outputs.run_messrust_or_unknown == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
@@ -20,3 +73,20 @@ jobs:
           toolchain: stable
       - run: cargo install messrust --version 0.1.0 --locked
       - run: messrust src text codesize,design --ignore-tests --strict
+
+  messrust-gate:
+    name: messrust-gate
+    if: always()
+    needs: [changes, messrust]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require Messrust result
+        run: |
+          if [[ "${{ needs.changes.result }}" != "success" ]]; then
+            echo "Path detection failed."
+            exit 1
+          fi
+          if [[ "${{ needs.messrust.result }}" != "success" && "${{ needs.messrust.result }}" != "skipped" ]]; then
+            echo "Production code result: ${{ needs.messrust.result }}"
+            exit 1
+          fi
