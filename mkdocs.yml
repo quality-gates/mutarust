@@ -55,6 +55,7 @@ nav:
   - Reports: json-outputs.md
   - Custom Mutators: custom-mutators.md
   - CI Integration: ci.md
+  - Selective CI: selective-ci.md
   - Release: release.md
   - Domain Glossary: glossary.md
   - Parity Table: parity.md
