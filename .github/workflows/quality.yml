@@ -10,6 +10,8 @@ on:
 # - rust: sources, tests, manifests, lockfile, toolchain config, this workflow
 # - light: agent/docs/changelog/markdown and similar non-code paths
 # run_tests is true when rust matches OR the diff is not pure-light (prefer run over skip).
+# package is true when the published README changes; run_package also runs for rust or
+# non-light diffs (prefer run over skip).
 # Dual-toolchain test jobs are skipped on light diffs. quality-gate accepts skipped
 # jobs and fails when a required quality job fails, so required checks do not wedge.
 
@@ -25,6 +27,8 @@ jobs:
       rust: ${{ steps.classes.outputs.rust }}
       light: ${{ steps.classes.outputs.light }}
       run_tests: ${{ steps.classes.outputs.run_tests }}
+      package: ${{ steps.classes.outputs.package }}
+      run_package: ${{ steps.classes.outputs.run_package }}
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
       - uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3
@@ -63,22 +67,33 @@ jobs:
               - '.github/ISSUE_TEMPLATE/**'
               - '.github/PULL_REQUEST_TEMPLATE*'
               - '.github/dependabot.yml'
+            package:
+              - 'README.md'
       - id: classes
         name: Derive job flags
         run: |
           rust='${{ steps.filter.outputs.rust }}'
           light='${{ steps.filter.outputs.light }}'
+          package='${{ steps.filter.outputs.package }}'
           if [[ "$rust" == "true" || "$light" != "true" ]]; then
-            run_tests=true
+            run_rust_or_unknown=true
           else
-            run_tests=false
+            run_rust_or_unknown=false
+          fi
+          run_tests="$run_rust_or_unknown"
+          if [[ "$run_rust_or_unknown" == "true" || "$package" == "true" ]]; then
+            run_package=true
+          else
+            run_package=false
           fi
           {
             echo "rust=$rust"
             echo "light=$light"
             echo "run_tests=$run_tests"
+            echo "package=$package"
+            echo "run_package=$run_package"
           } >> "$GITHUB_OUTPUT"
-          echo "Path classes: rust=$rust light=$light run_tests=$run_tests"
+          echo "Path classes: rust=$rust light=$light package=$package run_tests=$run_tests run_package=$run_package"
 
   lint:
     runs-on: ubuntu-latest
@@ -124,6 +139,8 @@ jobs:
       - run: cargo doc --workspace --all-features --no-deps --locked
 
   package:
+    needs: changes
+    if: needs.changes.outputs.run_package == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
