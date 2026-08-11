@@ -6,10 +6,11 @@ This file records important user changes.
 
 ### Changed
 
-- Capped Docker bench (`--cpus=1 --memory=512m --workers 1`, 21-mutant value
-  fixture): wall time about 5.10s versus the 5.46s baseline. Remaining time is
-  almost all rustc/Cargo work on each mutant; see parent PRD #68 for the
-  residual list toward the 2.73s bar.
+- Capped Docker bench (`--cpus=1 --memory=512m --workers 1 --network=none`,
+  21-mutant value fixture): wall about **5.09s** versus the 5.46s baseline.
+  Cargo child time about 4.89s; Mutarust-owned share about **4%** of wall
+  (≤ 5% target). Hand warm `cargo test` after one bool flip about 0.31s.
+  Wall stays above 2.73s because remaining time is rustc/Cargo per mutant.
 
 - After a clean Cargo test passes, Mutarust keeps that workspace copy and its
   target directory for the first mutation worker. The first mutant no longer
