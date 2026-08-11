@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
 
 # Selective CI path classes (parent #83 / child #84):
 # - rust: sources, tests, manifests, lockfile, toolchain config, this workflow
@@ -76,7 +77,8 @@ jobs:
           rust='${{ steps.filter.outputs.rust }}'
           light='${{ steps.filter.outputs.light }}'
           package='${{ steps.filter.outputs.package }}'
-          if [[ "$rust" == "true" || "$light" != "true" ]]; then
+          force_full="${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci-full') }}"
+          if [[ "$force_full" == "true" || "$rust" == "true" || "$light" != "true" ]]; then
             run_rust_or_unknown=true
           else
             run_rust_or_unknown=false
@@ -93,7 +95,7 @@ jobs:
             echo "package=$package"
             echo "run_package=$run_package"
           } >> "$GITHUB_OUTPUT"
-          echo "Path classes: rust=$rust light=$light package=$package run_rust_or_unknown=$run_rust_or_unknown run_package=$run_package"
+          echo "Path classes: rust=$rust light=$light package=$package force_full=$force_full run_rust_or_unknown=$run_rust_or_unknown run_package=$run_package"
 
   lint:
     needs: changes

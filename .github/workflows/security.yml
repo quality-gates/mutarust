@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   schedule:
     - cron: "0 8 * * 1"
 
@@ -58,14 +59,15 @@ jobs:
           else
             dependencies='${{ steps.filter.outputs.dependencies }}'
             light='${{ steps.filter.outputs.light }}'
-            if [[ "$dependencies" == "true" || "$light" != "true" ]]; then
+            force_full="${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci-full') }}"
+            if [[ "$force_full" == "true" || "$dependencies" == "true" || "$light" != "true" ]]; then
               run_audit_or_unknown=true
             else
               run_audit_or_unknown=false
             fi
           fi
           echo "run_audit_or_unknown=$run_audit_or_unknown" >> "$GITHUB_OUTPUT"
-          echo "Audit paths: event=${{ github.event_name }} run_audit_or_unknown=$run_audit_or_unknown"
+          echo "Audit paths: event=${{ github.event_name }} force_full=${force_full:-false} run_audit_or_unknown=$run_audit_or_unknown"
 
   audit:
     needs: changes
