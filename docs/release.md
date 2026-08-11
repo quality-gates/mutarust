@@ -10,6 +10,9 @@ Run the required CI jobs on `main`:
 - Mutation: full approved production scope
 - Docs: user guide build
 
+On day-to-day pull requests, path filters may skip heavy jobs for light diffs.
+See [Selective CI](selective-ci.md).
+
 ## Package check
 
 ```text
