@@ -10,6 +10,11 @@ on:
       - .github/workflows/mutation.yml
   pull_request:
     branches: [main]
+    paths:
+      - "**/*.rs"
+      - Cargo.toml
+      - Cargo.lock
+      - .github/workflows/mutation.yml
 
 permissions:
   contents: read
