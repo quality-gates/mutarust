@@ -12,10 +12,7 @@ impl Mutator for RecoveryMutator {
         "expression/recover-clear"
     }
 
-    fn mutations(&self, source: &str) -> Vec<Mutation> {
-        let Ok(file) = syn::parse_file(source) else {
-            return Vec::new();
-        };
+    fn mutations_from_parsed(&self, source: &str, file: &syn::File) -> Vec<Mutation> {
         if !standard_crates(&file.items).std_available {
             return Vec::new();
         }
@@ -23,7 +20,7 @@ impl Mutator for RecoveryMutator {
             source,
             mutations: Vec::new(),
         };
-        visitor.visit_file(&file);
+        visitor.visit_file(file);
         visitor.mutations
     }
 }

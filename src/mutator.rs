@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::ops::Range;
 
@@ -70,12 +70,27 @@ pub trait Mutator: Send + Sync {
     fn name(&self) -> &str;
 
     /// Returns mutations for the supplied Rust source text.
-    fn mutations(&self, source: &str) -> Vec<Mutation>;
+    fn mutations(&self, source: &str) -> Vec<Mutation> {
+        let Ok(file) = syn::parse_file(source) else {
+            return Vec::new();
+        };
+        self.mutations_from_parsed(source, &file)
+    }
+
+    /// Returns mutations from source text that Mutarust already parsed.
+    ///
+    /// Built-in mutators implement this method so one mutation plan parses each
+    /// source only once. Custom mutators can implement [`Mutator::mutations`].
+    #[doc(hidden)]
+    fn mutations_from_parsed(&self, _source: &str, _file: &syn::File) -> Vec<Mutation> {
+        Vec::new()
+    }
 }
 
 /// Builds a registry of named mutators.
 pub struct RegistryBuilder {
     mutators: BTreeMap<String, Box<dyn Mutator>>,
+    syntax_guaranteed: BTreeSet<String>,
 }
 
 impl RegistryBuilder {
@@ -83,12 +98,13 @@ impl RegistryBuilder {
     pub fn new() -> Self {
         Self {
             mutators: BTreeMap::new(),
+            syntax_guaranteed: BTreeSet::new(),
         }
     }
 
     /// Creates a builder with all mutators supplied by Mutarust.
     pub fn with_builtins() -> Self {
-        Self::new()
+        let mut registry = Self::new()
             .register(ControlFlowMutator::branch_case())
             .expect("built-in mutator registration must be valid")
             .register(ControlFlowMutator::branch_else())
@@ -154,7 +170,11 @@ impl RegistryBuilder {
             .register(SelectionMutator::case_remove())
             .expect("built-in mutator registration must be valid")
             .register(SelectionMutator::default_remove())
-            .expect("built-in mutator registration must be valid")
+            .expect("built-in mutator registration must be valid");
+        registry
+            .syntax_guaranteed
+            .extend(registry.mutators.keys().cloned());
+        registry
     }
 
     /// Adds a mutator to this builder.
@@ -172,6 +192,7 @@ impl RegistryBuilder {
     pub fn build(self) -> Registry {
         Registry {
             mutators: self.mutators,
+            syntax_guaranteed: self.syntax_guaranteed,
         }
     }
 }
@@ -185,6 +206,7 @@ impl Default for RegistryBuilder {
 /// A sorted registry of named mutators.
 pub struct Registry {
     mutators: BTreeMap<String, Box<dyn Mutator>>,
+    syntax_guaranteed: BTreeSet<String>,
 }
 
 impl Registry {
@@ -206,6 +228,12 @@ impl Registry {
     /// Removes each mutator for which `keep` returns false.
     pub fn retain(&mut self, mut keep: impl FnMut(&str) -> bool) {
         self.mutators.retain(|name, _| keep(name));
+        self.syntax_guaranteed
+            .retain(|name| self.mutators.contains_key(name));
+    }
+
+    pub(crate) fn guarantees_valid_syntax(&self, name: &str) -> bool {
+        self.syntax_guaranteed.contains(name)
     }
 }
 

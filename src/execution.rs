@@ -1603,6 +1603,7 @@ fn mutation_plan(
     }
     let mut workspaces = Vec::new();
     let mut candidates = Vec::new();
+    let mut metadata_cache = Vec::new();
     for source in sources {
         let source = fs::canonicalize(&source).map_err(|error| {
             run_error(format!("could not resolve {}: {error}", source.display()))
@@ -1613,7 +1614,7 @@ fn mutation_plan(
         if !filters.allows_source_before_workspace(&source) {
             continue;
         }
-        let workspace = workspace_for(&source)?;
+        let workspace = workspace_for(&source, &mut metadata_cache)?;
         if !filters.allows_source(&source, &workspace.source_root) {
             continue;
         }
@@ -1653,32 +1654,48 @@ fn deduplicate_candidates(candidates: &mut Vec<MutationCandidate>) {
     });
 }
 
-fn workspace_for(source: &Path) -> Result<Workspace, RunError> {
-    let directory = source.parent().ok_or_else(|| {
-        run_error(format!(
-            "source file has no parent directory: {}",
-            source.display()
-        ))
-    })?;
-    let metadata = metadata_for_directory(directory, source).or_else(|_| {
-        let current = env::current_dir()
-            .map_err(|error| run_error(format!("could not read the current directory: {error}")))?;
-        metadata_for_directory(&current, source)
-    })?;
+fn workspace_for(source: &Path, metadata_cache: &mut Vec<Metadata>) -> Result<Workspace, RunError> {
+    let metadata = if let Some(metadata) = metadata_cache
+        .iter()
+        .find(|metadata| package_for(metadata, source).is_ok())
+    {
+        metadata
+    } else {
+        let directory = source.parent().ok_or_else(|| {
+            run_error(format!(
+                "source file has no parent directory: {}",
+                source.display()
+            ))
+        })?;
+        let metadata = metadata_for_directory(directory, source).or_else(|_| {
+            let current = env::current_dir().map_err(|error| {
+                run_error(format!("could not read the current directory: {error}"))
+            })?;
+            metadata_for_directory(&current, source)
+        })?;
+        metadata_cache.push(metadata);
+        metadata_cache
+            .last()
+            .expect("metadata cache must contain the inserted value")
+    };
+    workspace_from_metadata(source, metadata)
+}
+
+fn workspace_from_metadata(source: &Path, metadata: &Metadata) -> Result<Workspace, RunError> {
     let root = fs::canonicalize(metadata.workspace_root.as_std_path()).map_err(|error| {
         run_error(format!(
             "could not resolve Cargo workspace for {}: {error}",
             source.display()
         ))
     })?;
-    let package = package_for(&metadata, source)?;
+    let package = package_for(metadata, source)?;
     let source_root = common_ancestor(&[root.clone(), source.to_path_buf()])?;
     let (configurations, cargo_home) = cargo_configurations(&root)?;
     let CopyPaths {
         mut roots,
         manifests,
         build_targets,
-    } = copy_paths_for(&metadata, &root, source)?;
+    } = copy_paths_for(metadata, &root, source)?;
     roots.extend(configuration_paths(&configurations)?);
     let copy_paths = copy_roots(roots.into_iter().collect());
     let excluded_copy_roots = excluded_copy_roots(&manifests, &build_targets)?;
@@ -2322,11 +2339,22 @@ fn add_source_candidates(
     scope: &CandidateScope<'_>,
     blacklist: &mut Blacklist,
 ) -> Result<(), RunError> {
+    let Ok(file) = syn::parse_file(scope.text) else {
+        return Ok(());
+    };
     for name in registry.names() {
         let mutator = registry
             .get(name)
             .expect("registered mutator name must resolve to a mutator");
-        add_mutator_candidates(candidates, name, mutator, scope, blacklist)?;
+        add_mutator_candidates(
+            candidates,
+            name,
+            mutator,
+            registry.guarantees_valid_syntax(name),
+            &file,
+            scope,
+            blacklist,
+        )?;
     }
     Ok(())
 }
@@ -2335,19 +2363,28 @@ fn add_mutator_candidates(
     candidates: &mut Vec<MutationCandidate>,
     name: &str,
     mutator: &dyn Mutator,
+    syntax_is_guaranteed: bool,
+    file: &syn::File,
     scope: &CandidateScope<'_>,
     blacklist: &mut Blacklist,
 ) -> Result<(), RunError> {
-    for mutation in mutator.mutations(scope.text) {
+    let mutations = if syntax_is_guaranteed {
+        mutator.mutations_from_parsed(scope.text, file)
+    } else {
+        mutator.mutations(scope.text)
+    };
+    for mutation in mutations {
         let (range, _) = mutation.identity();
         if !scope.filter.allows_mutation(name, &range) {
             continue;
         }
-        let Some(changed_source) = mutation.apply(scope.text) else {
-            continue;
-        };
-        if syn::parse_file(&changed_source).is_err() {
-            continue;
+        if !syntax_is_guaranteed {
+            let Some(changed_source) = mutation.apply(scope.text) else {
+                continue;
+            };
+            if syn::parse_file(&changed_source).is_err() {
+                continue;
+            }
         }
         let evidence = mutation_evidence(
             &scope.workspace.source_root,

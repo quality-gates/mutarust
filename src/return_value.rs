@@ -18,11 +18,8 @@ impl Mutator for ReturnValueMutator {
         "statement/return"
     }
 
-    fn mutations(&self, source: &str) -> Vec<Mutation> {
-        let Ok(file) = syn::parse_file(source) else {
-            return Vec::new();
-        };
-        let default_types = collect_default_types(&file);
+    fn mutations_from_parsed(&self, source: &str, file: &syn::File) -> Vec<Mutation> {
+        let default_types = collect_default_types(file);
         let mut visitor = ReturnVisitor {
             source,
             default_types: &default_types,
@@ -31,7 +28,7 @@ impl Mutator for ReturnValueMutator {
             impl_default: false,
             mutations: Vec::new(),
         };
-        visitor.visit_file(&file);
+        visitor.visit_file(file);
         visitor.mutations
     }
 }

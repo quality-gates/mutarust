@@ -13,17 +13,14 @@ impl Mutator for ConcurrencyMutator {
         "concurrency/goroutine-remove"
     }
 
-    fn mutations(&self, source: &str) -> Vec<Mutation> {
-        let Ok(file) = syn::parse_file(source) else {
-            return Vec::new();
-        };
+    fn mutations_from_parsed(&self, source: &str, file: &syn::File) -> Vec<Mutation> {
         let mut visitor = ConcurrencyVisitor {
             source,
             async_context: false,
             bindings: Bindings::for_crate(&file.items),
             mutations: Vec::new(),
         };
-        visitor.visit_file(&file);
+        visitor.visit_file(file);
         visitor.mutations
     }
 }

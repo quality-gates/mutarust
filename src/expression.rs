@@ -27,15 +27,12 @@ impl Mutator for ConditionalNotMutator {
         "conditional/not"
     }
 
-    fn mutations(&self, source: &str) -> Vec<Mutation> {
-        let Ok(file) = syn::parse_file(source) else {
-            return Vec::new();
-        };
+    fn mutations_from_parsed(&self, source: &str, file: &syn::File) -> Vec<Mutation> {
         let mut visitor = ConditionalNotVisitor {
             source,
             mutations: Vec::new(),
         };
-        visitor.visit_file(&file);
+        visitor.visit_file(file);
         visitor.mutations
     }
 }
@@ -87,15 +84,12 @@ impl Mutator for BoolLiteralMutator {
         "conditional/bool-literal"
     }
 
-    fn mutations(&self, source: &str) -> Vec<Mutation> {
-        let Ok(file) = syn::parse_file(source) else {
-            return Vec::new();
-        };
+    fn mutations_from_parsed(&self, source: &str, file: &syn::File) -> Vec<Mutation> {
         let mut visitor = BoolLiteralVisitor {
             source,
             mutations: Vec::new(),
         };
-        visitor.visit_file(&file);
+        visitor.visit_file(file);
         visitor.mutations
     }
 }
@@ -162,15 +156,12 @@ impl Mutator for RemoveTermMutator {
         "expression/remove"
     }
 
-    fn mutations(&self, source: &str) -> Vec<Mutation> {
-        let Ok(file) = syn::parse_file(source) else {
-            return Vec::new();
-        };
+    fn mutations_from_parsed(&self, source: &str, file: &syn::File) -> Vec<Mutation> {
         let mut visitor = RemoveTermVisitor {
             source,
             mutations: Vec::new(),
         };
-        visitor.visit_file(&file);
+        visitor.visit_file(file);
         visitor.mutations
     }
 }
@@ -210,15 +201,12 @@ impl Mutator for ErrorGuardMutator {
         "expression/error-guard"
     }
 
-    fn mutations(&self, source: &str) -> Vec<Mutation> {
-        let Ok(file) = syn::parse_file(source) else {
-            return Vec::new();
-        };
+    fn mutations_from_parsed(&self, source: &str, file: &syn::File) -> Vec<Mutation> {
         let mut visitor = ErrorGuardVisitor {
             source,
             mutations: Vec::new(),
         };
-        visitor.visit_file(&file);
+        visitor.visit_file(file);
         visitor.mutations
     }
 }
@@ -261,15 +249,12 @@ impl Mutator for StringLiteralMutator {
         "expression/string-literal"
     }
 
-    fn mutations(&self, source: &str) -> Vec<Mutation> {
-        let Ok(file) = syn::parse_file(source) else {
-            return Vec::new();
-        };
+    fn mutations_from_parsed(&self, source: &str, file: &syn::File) -> Vec<Mutation> {
         let mut visitor = StringComparisonVisitor {
             source,
             mutations: Vec::new(),
         };
-        visitor.visit_file(&file);
+        visitor.visit_file(file);
         visitor.mutations
     }
 }
@@ -348,16 +333,13 @@ impl Mutator for NumberMutator {
         self.name
     }
 
-    fn mutations(&self, source: &str) -> Vec<Mutation> {
-        let Ok(file) = syn::parse_file(source) else {
-            return Vec::new();
-        };
+    fn mutations_from_parsed(&self, source: &str, file: &syn::File) -> Vec<Mutation> {
         let mut visitor = NumberVisitor {
             source,
             change: self.change,
             mutations: Vec::new(),
         };
-        visitor.visit_file(&file);
+        visitor.visit_file(file);
         visitor.mutations
     }
 }
@@ -550,15 +532,12 @@ impl Mutator for ArithmeticNegate {
         "arithmetic/negate"
     }
 
-    fn mutations(&self, source: &str) -> Vec<Mutation> {
-        let Ok(file) = syn::parse_file(source) else {
-            return Vec::new();
-        };
+    fn mutations_from_parsed(&self, source: &str, file: &syn::File) -> Vec<Mutation> {
         let mut visitor = UnaryMinusVisitor {
             source,
             mutations: Vec::new(),
         };
-        visitor.visit_file(&file);
+        visitor.visit_file(file);
         visitor.mutations
     }
 }
@@ -707,16 +686,13 @@ impl Mutator for BinaryOperatorMutator {
         self.name
     }
 
-    fn mutations(&self, source: &str) -> Vec<Mutation> {
-        let Ok(file) = syn::parse_file(source) else {
-            return Vec::new();
-        };
+    fn mutations_from_parsed(&self, source: &str, file: &syn::File) -> Vec<Mutation> {
         let mut visitor = BinaryOperatorVisitor {
             source,
             replacement: self.replacement,
             mutations: Vec::new(),
         };
-        visitor.visit_file(&file);
+        visitor.visit_file(file);
         visitor.mutations
     }
 }
