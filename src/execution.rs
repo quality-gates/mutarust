@@ -3389,6 +3389,87 @@ fn rewrite_configuration_values(
     Ok(())
 }
 
+/// Rewrites absolute path prefixes after a warm clean-suite tree is cloned.
+///
+/// Clean-suite copies rewrite Cargo paths into the template temporary root.
+/// A private worker clone must retarget those bytes to its own root so mutants
+/// change the files Cargo actually builds and tests.
+fn remap_path_prefix_in_tree(
+    root: &Path,
+    from_prefix: &Path,
+    to_prefix: &Path,
+) -> Result<(), RunError> {
+    if from_prefix == to_prefix {
+        return Ok(());
+    }
+    let from = path_remap_bytes(from_prefix);
+    let to = path_remap_bytes(to_prefix);
+    remap_path_prefix_in_entry(root, &from, &to)
+}
+
+fn path_remap_bytes(path: &Path) -> Vec<u8> {
+    path_to_bytes(path)
+}
+
+#[cfg(unix)]
+fn path_to_bytes(path: &Path) -> Vec<u8> {
+    use std::os::unix::ffi::OsStrExt;
+
+    path.as_os_str().as_bytes().to_vec()
+}
+
+#[cfg(not(unix))]
+fn path_to_bytes(path: &Path) -> Vec<u8> {
+    path.to_string_lossy().into_owned().into_bytes()
+}
+
+fn remap_path_prefix_in_entry(path: &Path, from: &[u8], to: &[u8]) -> Result<(), RunError> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| run_error(format!("could not inspect {}: {error}", path.display())))?;
+    if metadata.file_type().is_symlink() {
+        return Ok(());
+    }
+    if metadata.is_dir() {
+        for entry in fs::read_dir(path)
+            .map_err(|error| run_error(format!("could not read {}: {error}", path.display())))?
+        {
+            stop_if_interrupted()?;
+            let entry = entry
+                .map_err(|error| run_error(format!("could not read workspace entry: {error}")))?;
+            remap_path_prefix_in_entry(&entry.path(), from, to)?;
+        }
+        return Ok(());
+    }
+    if !metadata.is_file() {
+        return Ok(());
+    }
+    let data = fs::read(path)
+        .map_err(|error| run_error(format!("could not read {}: {error}", path.display())))?;
+    let Some(updated) = replace_bytes(&data, from, to) else {
+        return Ok(());
+    };
+    fs::write(path, updated)
+        .map_err(|error| run_error(format!("could not write {}: {error}", path.display())))
+}
+
+fn replace_bytes(input: &[u8], from: &[u8], to: &[u8]) -> Option<Vec<u8>> {
+    if from.is_empty() || !input.windows(from.len()).any(|window| window == from) {
+        return None;
+    }
+    let mut output = Vec::with_capacity(input.len());
+    let mut rest = input;
+    while let Some((first, tail)) = rest.split_first() {
+        if rest.starts_with(from) {
+            output.extend_from_slice(to);
+            rest = &rest[from.len()..];
+            continue;
+        }
+        output.push(*first);
+        rest = tail;
+    }
+    Some(output)
+}
+
 /// Copies every file and directory under `source` into an existing `destination`.
 ///
 /// Used to seed a private worker scratch from a warm clean-suite template,
@@ -3641,6 +3722,9 @@ impl WorkerScratch {
     ) -> Result<Self, RunError> {
         let temporary = TemporaryWorkspace::create()?;
         copy_tree(template_root, temporary.path())?;
+        // Manifests, Cargo config, and target fingerprints embed absolute paths
+        // from the clean-suite template. Point them at this private copy.
+        remap_path_prefix_in_tree(temporary.path(), template_root, temporary.path())?;
         let copied_workspace = temporary.path().join(workspace_relative);
         Ok(Self {
             temporary,
