@@ -6,10 +6,80 @@ on:
   pull_request:
     branches: [main]
 
+# Selective CI path classes (parent #83 / child #84):
+# - rust: sources, tests, manifests, lockfile, toolchain config, this workflow
+# - light: agent/docs/changelog/markdown and similar non-code paths
+# run_tests is true when rust matches OR the diff is not pure-light (prefer run over skip).
+# Dual-toolchain test jobs are skipped on light diffs. quality-gate accepts skipped
+# jobs and fails when a required quality job fails, so required checks do not wedge.
+
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
+  changes:
+    name: detect path classes
+    runs-on: ubuntu-latest
+    outputs:
+      rust: ${{ steps.classes.outputs.rust }}
+      light: ${{ steps.classes.outputs.light }}
+      run_tests: ${{ steps.classes.outputs.run_tests }}
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+      - uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3
+        id: filter
+        with:
+          filters: |
+            rust:
+              - 'src/**'
+              - 'tests/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'build.rs'
+              - '.cargo/**'
+              - 'rust-toolchain'
+              - 'rust-toolchain.toml'
+              - 'rustfmt.toml'
+              - 'clippy.toml'
+              - '.github/workflows/quality.yml'
+            light:
+              - 'AGENTS.md'
+              - 'CONTEXT.md'
+              - 'CONTEXT-MAP.md'
+              - 'CHANGELOG.md'
+              - 'CODE_OF_CONDUCT.md'
+              - 'CONTRIBUTING.md'
+              - 'LICENSE'
+              - 'LICENSE.*'
+              - 'README.md'
+              - 'docs/**'
+              - 'mkdocs.yml'
+              - '.agents/**'
+              - '.claude/**'
+              - '**/*.md'
+              - '.gitignore'
+              - '.gitattributes'
+              - '.github/ISSUE_TEMPLATE/**'
+              - '.github/PULL_REQUEST_TEMPLATE*'
+              - '.github/dependabot.yml'
+      - id: classes
+        name: Derive job flags
+        run: |
+          rust='${{ steps.filter.outputs.rust }}'
+          light='${{ steps.filter.outputs.light }}'
+          if [[ "$rust" == "true" || "$light" != "true" ]]; then
+            run_tests=true
+          else
+            run_tests=false
+          fi
+          {
+            echo "rust=$rust"
+            echo "light=$light"
+            echo "run_tests=$run_tests"
+          } >> "$GITHUB_OUTPUT"
+          echo "Path classes: rust=$rust light=$light run_tests=$run_tests"
+
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -22,6 +92,8 @@ jobs:
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
   test:
+    needs: changes
+    if: needs.changes.outputs.run_tests == 'true'
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -70,3 +142,32 @@ jobs:
           cargo install --path "$package_root" --root "$install_root" --locked
           "$install_root/bin/mutarust" --help
           "$install_root/bin/mutarust" --version
+
+  quality-gate:
+    name: quality-gate
+    if: always()
+    needs: [changes, lint, test, build, docs, package]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require quality jobs
+        run: |
+          fail=0
+          check() {
+            local name="$1"
+            local result="$2"
+            echo "$name=$result"
+            case "$result" in
+              success|skipped) ;;
+              *)
+                echo "::error::$name ended with $result"
+                fail=1
+                ;;
+            esac
+          }
+          check changes "${{ needs.changes.result }}"
+          check lint "${{ needs.lint.result }}"
+          check test "${{ needs.test.result }}"
+          check build "${{ needs.build.result }}"
+          check docs "${{ needs.docs.result }}"
+          check package "${{ needs.package.result }}"
+          exit "$fail"
