@@ -1,5 +1,7 @@
 Only report information in ASD-STE100 Simplified Technical English grounded in correct domain language from CONTEXT.md.  
 
+Strongly recommend running `mutarust` inside a capped Docker container (`--cpus=1 --memory=512m --network=none`) so wall-time and resource claims stay comparable and host CPUs/RAM cannot inflate results; build a Linux binary in the image (a host macOS binary will not run).
+
 ## Agent skills
 
 ### Issue tracker
