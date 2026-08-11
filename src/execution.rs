@@ -2522,12 +2522,19 @@ fn test_candidate_with_scratch(
     warm: &WarmBuilds,
 ) -> Result<(MutationState, Option<String>), RunError> {
     let area = prepare_worker_scratch(scratch, &candidate.workspace, warm)?;
-    area.restore_dirty()?;
-    area.capture_original(&candidate.workspace, &candidate.source)?;
+    // Reuse the in-memory original when the same source is mutated again so the
+    // hot path does not restore and re-read the file between mutants.
+    area.write_mutant(candidate)?;
     let temporary = area.temporary.path().to_path_buf();
     let copied_workspace = area.copied_workspace.clone();
-    // test_cargo_mutant writes the mutant once against the restored original source.
-    test_cargo_mutant(candidate, &temporary, &copied_workspace, timeout, execution)
+    run_mutant_cargo_tests(
+        &temporary,
+        &copied_workspace,
+        &candidate.workspace,
+        &candidate.test_selection,
+        timeout,
+        execution,
+    )
 }
 
 fn prepare_worker_scratch<'a>(
@@ -3701,12 +3708,39 @@ impl WorkerScratch {
         })
     }
 
-    fn capture_original(&mut self, workspace: &Workspace, source: &Path) -> Result<(), RunError> {
-        let path = copied_path(workspace, self.temporary.path(), source)?;
-        let original = fs::read_to_string(&path)
-            .map_err(|error| run_error(format!("could not read {}: {error}", path.display())))?;
-        self.dirty = Some(DirtySource { path, original });
-        Ok(())
+    /// Writes one mutant into the scratch without a full restore/re-read cycle.
+    ///
+    /// When the previous mutant used the same source path, the original text is
+    /// already held in memory. The new mutant is built from that text and written
+    /// over the previous mutant bytes. A different source restores the prior file
+    /// first so isolation still holds across paths.
+    fn write_mutant(&mut self, candidate: &MutationCandidate) -> Result<(), RunError> {
+        let path = copied_path(
+            &candidate.workspace,
+            self.temporary.path(),
+            &candidate.source,
+        )?;
+        let reuse = self
+            .dirty
+            .as_ref()
+            .filter(|dirty| dirty.path == path)
+            .map(|dirty| dirty.original.clone());
+        let original = if let Some(original) = reuse {
+            original
+        } else {
+            self.restore_dirty()?;
+            let original = fs::read_to_string(&path).map_err(|error| {
+                run_error(format!("could not read {}: {error}", path.display()))
+            })?;
+            self.dirty = Some(DirtySource {
+                path: path.clone(),
+                original: original.clone(),
+            });
+            original
+        };
+        let mutant = apply_candidate_mutation(candidate, &original)?;
+        fs::write(&path, mutant)
+            .map_err(|error| run_error(format!("could not write {}: {error}", path.display())))
     }
 }
 

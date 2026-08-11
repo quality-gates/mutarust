@@ -6,6 +6,11 @@ This file records important user changes.
 
 ### Changed
 
+- Capped Docker bench (`--cpus=1 --memory=512m --workers 1`, 21-mutant value
+  fixture): wall time about 5.10s versus the 5.46s baseline. Remaining time is
+  almost all rustc/Cargo work on each mutant; see parent PRD #68 for the
+  residual list toward the 2.73s bar.
+
 - After a clean Cargo test passes, Mutarust keeps that workspace copy and its
   target directory for the first mutation worker. The first mutant no longer
   starts from a cold Cargo build for that layout.
@@ -14,6 +19,9 @@ This file records important user changes.
 - The default Cargo path runs one `cargo test` per mutant. Compile failures
   are still skipped and test failures are still killed from that single
   command.
+- Mutation workers no longer restore and re-read the same source file between
+  mutants. The original text stays in memory and only the new mutant bytes are
+  written.
 
 ## 0.1.2 — 2026-08-05
 
