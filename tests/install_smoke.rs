@@ -4291,6 +4291,74 @@ fn installed_command_no_exec_keeps_generated_mutants() {
 
 #[cfg(unix)]
 #[test]
+fn installed_command_reuses_clean_suite_target_for_first_mutant() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_mutation_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    let source_before = fs::read(&source).expect("source must be readable");
+    let temporary_root = root.join("clean-reuse-temporary");
+    let fake_cargo = root.join("clean-reuse-cargo");
+    let record = root.join("clean-reuse-record");
+    fs::create_dir(&temporary_root).expect("temporary root must be created");
+    fs::write(
+        &fake_cargo,
+        "#!/bin/sh\nif [ \"$1\" = \"metadata\" ]; then\n  exec \"$MUTARUST_REAL_CARGO\" \"$@\"\nfi\ntarget=\nprevious=\nfor argument in \"$@\"; do\n  if [ \"$previous\" = \"--target-dir\" ]; then\n    target=$argument\n  fi\n  previous=$argument\ndone\nmutated=no\nif grep -q false checked/src/lib.rs 2>/dev/null; then\n  mutated=yes\nfi\nprintf '%s|%s\\n' \"$mutated\" \"$target\" >> \"$MUTARUST_TARGET_RECORD\"\nexec \"$MUTARUST_REAL_CARGO\" \"$@\"\n",
+    )
+    .expect("recording Cargo command must be written");
+    fs::set_permissions(&fake_cargo, fs::Permissions::from_mode(0o755))
+        .expect("recording Cargo command must be executable");
+
+    let output = Command::new(command_path(&install))
+        .args(["--workers", "1"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .env("CARGO", &fake_cargo)
+        .env("MUTARUST_REAL_CARGO", env!("CARGO"))
+        .env("MUTARUST_TARGET_RECORD", &record)
+        .env("TMPDIR", &temporary_root)
+        .output()
+        .expect("installed mutarust must start");
+
+    assert!(
+        output.status.success(),
+        "clean-suite reuse run must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(fs::read(&source).unwrap(), source_before);
+    assert!(
+        mutarust_temp_entries(&temporary_root).is_empty(),
+        "normal run must remove temporary clean and mutation workspaces"
+    );
+
+    let records = fs::read_to_string(&record).expect("target record must be readable");
+    let records = records
+        .lines()
+        .filter_map(|line| {
+            let (mutated, target) = line.split_once('|')?;
+            Some((mutated.to_owned(), target.to_owned()))
+        })
+        .collect::<Vec<_>>();
+    let clean_target = records
+        .iter()
+        .find(|(mutated, _)| mutated == "no")
+        .map(|(_, target)| target.as_str())
+        .expect("clean suite must run cargo test");
+    let first_mutant_target = records
+        .iter()
+        .find(|(mutated, _)| mutated == "yes")
+        .map(|(_, target)| target.as_str())
+        .expect("first mutant must run cargo");
+    assert_eq!(
+        first_mutant_target, clean_target,
+        "first mutation worker must reuse the clean suite target directory; records: {records:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn installed_command_keeps_requested_mutation_workspaces() {
     let root = smoke_root();
     let install = install_command(&root);

@@ -2,6 +2,14 @@
 
 This file records important user changes.
 
+## Unreleased
+
+### Changed
+
+- After a clean Cargo test passes, Mutarust keeps that workspace copy and its
+  target directory for the first mutation worker. The first mutant no longer
+  starts from a cold Cargo build for that layout.
+
 ## 0.1.2 — 2026-08-05
 
 A compatible fix release. The public library interface does not change.

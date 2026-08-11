@@ -616,20 +616,27 @@ pub fn run_mutation_tests_with_controls(
     }
     let coverage = collect_coverage(&plan.workspaces, timeout, execution, controls)?;
     apply_coverage_selection(&mut plan.candidates, &coverage);
-    let timeout = if controls.no_exec || !execution.uses_cargo() {
-        timeout
+    let (timeout, warm) = if controls.no_exec || !execution.uses_cargo() {
+        (timeout, WarmBuilds::default())
     } else {
-        adaptive_timeout(
-            timeout,
-            controls.timeout_coefficient,
-            test_clean_workspaces(&plan.workspaces, timeout, execution)?,
+        let clean = test_clean_workspaces(&plan.workspaces, timeout, execution)?;
+        (
+            adaptive_timeout(timeout, controls.timeout_coefficient, clean.duration),
+            clean.warm,
         )
     };
     let counters = Arc::new(ProgressCounters::new());
     let monitor = controls
         .progress
         .then(|| ProgressMonitor::start(Arc::clone(&counters)));
-    let results = test_candidates(plan.candidates, timeout, execution, controls, &counters)?;
+    let results = test_candidates(
+        plan.candidates,
+        timeout,
+        execution,
+        controls,
+        &counters,
+        &warm,
+    )?;
     drop(monitor);
     Ok(MutationRun {
         results,
@@ -1026,6 +1033,7 @@ fn test_candidates(
     execution: &TestExecution,
     controls: &ExecutionControls,
     counters: &Arc<ProgressCounters>,
+    warm: &WarmBuilds,
 ) -> Result<Vec<MutationResult>, RunError> {
     let workers = active_worker_count(candidates.len(), execution, controls);
     log_worker_count(execution, workers);
@@ -1033,9 +1041,13 @@ fn test_candidates(
     let mut execution = execution.clone();
     execution.build_jobs = NonZeroUsize::new(cargo_build_jobs(workers));
     if workers < 2 {
-        return test_candidates_sequential(candidates, timeout, &execution, controls, counters);
+        return test_candidates_sequential(
+            candidates, timeout, &execution, controls, counters, warm,
+        );
     }
-    test_candidates_in_parallel(candidates, workers, timeout, &execution, controls, counters)
+    test_candidates_in_parallel(
+        candidates, workers, timeout, &execution, controls, counters, warm,
+    )
 }
 
 fn active_worker_count(
@@ -1066,6 +1078,7 @@ fn test_candidates_sequential(
     execution: &TestExecution,
     controls: &ExecutionControls,
     counters: &ProgressCounters,
+    warm: &WarmBuilds,
 ) -> Result<Vec<MutationResult>, RunError> {
     let mut results = Vec::with_capacity(candidates.len());
     let mut scratch = None;
@@ -1080,6 +1093,7 @@ fn test_candidates_sequential(
             controls,
             counters,
             &mut scratch,
+            warm,
         ));
         if mutation_run_was_interrupted() {
             return Err(run_error("mutation run interrupted"));
@@ -1095,6 +1109,7 @@ fn test_candidates_in_parallel(
     execution: &TestExecution,
     controls: &ExecutionControls,
     counters: &Arc<ProgressCounters>,
+    warm: &WarmBuilds,
 ) -> Result<Vec<MutationResult>, RunError> {
     let candidates = Arc::new(Mutex::new(indexed_candidates(candidates)));
     let indexed_results = thread::scope(|scope| {
@@ -1105,7 +1120,7 @@ fn test_candidates_in_parallel(
             let controls = controls.clone();
             let counters = Arc::clone(counters);
             handles.push(scope.spawn(move || {
-                test_mutation_worker(candidates, timeout, execution, controls, &counters)
+                test_mutation_worker(candidates, timeout, execution, controls, &counters, warm)
             }));
         }
         collect_worker_results(handles)
@@ -1130,6 +1145,7 @@ fn test_mutation_worker(
     execution: TestExecution,
     controls: ExecutionControls,
     counters: &ProgressCounters,
+    warm: &WarmBuilds,
 ) -> Result<Vec<IndexedResult>, RunError> {
     let mut results = Vec::new();
     let mut scratch = None;
@@ -1144,6 +1160,7 @@ fn test_mutation_worker(
             &controls,
             counters,
             &mut scratch,
+            warm,
         );
         results.push(IndexedResult {
             index: candidate.index,
@@ -1391,49 +1408,80 @@ fn test_clean_workspaces(
     workspaces: &[Workspace],
     timeout: Duration,
     execution: &TestExecution,
-) -> Result<Duration, RunError> {
+) -> Result<CleanSuite, RunError> {
+    let mut groups = BTreeMap::<PathBuf, Vec<&Workspace>>::new();
     let mut tested_manifests = BTreeSet::new();
-    let mut longest = Duration::ZERO;
     for workspace in workspaces {
-        stop_if_interrupted()?;
         if !tested_manifests.insert(workspace.manifest.clone()) {
             continue;
         }
-        longest = longest.max(test_clean_workspace(workspace, timeout, execution)?);
+        groups
+            .entry(workspace.layout_root.clone())
+            .or_default()
+            .push(workspace);
     }
-    Ok(longest)
+    let mut longest = Duration::ZERO;
+    let warm = WarmBuilds::default();
+    for group in groups.into_values() {
+        stop_if_interrupted()?;
+        let (duration, scratch) = test_clean_layout(&group, timeout, execution)?;
+        longest = longest.max(duration);
+        warm.insert(scratch)?;
+    }
+    Ok(CleanSuite {
+        duration: longest,
+        warm,
+    })
 }
 
-fn test_clean_workspace(
-    workspace: &Workspace,
+fn test_clean_layout(
+    workspaces: &[&Workspace],
     timeout: Duration,
     execution: &TestExecution,
-) -> Result<Duration, RunError> {
+) -> Result<(Duration, WorkerScratch), RunError> {
+    let workspace = workspaces
+        .first()
+        .copied()
+        .ok_or_else(|| run_error("clean suite needs at least one workspace"))?;
     let temporary = TemporaryWorkspace::create()?;
-    let result = (|| {
-        let copied_workspace = copy_workspace(workspace, temporary.path())?;
+    let copied_workspace = copy_workspace(workspace, temporary.path())?;
+    let mut longest = Duration::ZERO;
+    for package in workspaces {
+        stop_if_interrupted()?;
         let outcome = run_cargo_command(
             temporary.path(),
             &copied_workspace,
-            workspace,
+            package,
             CargoAction::Test,
             timeout,
             execution,
             None,
         )?;
         match outcome.outcome {
-            CargoOutcome::Passed => Ok(outcome.duration),
-            CargoOutcome::Failed(detail) => Err(run_error(format!(
-                "clean cargo test failed: {}",
-                cargo_detail(detail)
-            ))),
-            CargoOutcome::TimedOut => Err(run_error(format!(
-                "clean cargo test timed out after {} seconds",
-                timeout.as_secs()
-            ))),
+            CargoOutcome::Passed => longest = longest.max(outcome.duration),
+            CargoOutcome::Failed(detail) => {
+                return Err(run_error(format!(
+                    "clean cargo test failed: {}",
+                    cargo_detail(detail)
+                )));
+            }
+            CargoOutcome::TimedOut => {
+                return Err(run_error(format!(
+                    "clean cargo test timed out after {} seconds",
+                    timeout.as_secs()
+                )));
+            }
         }
-    })();
-    temporary.finish(result, false)
+    }
+    Ok((
+        longest,
+        WorkerScratch {
+            temporary,
+            layout_root: workspace.layout_root.clone(),
+            copied_workspace,
+            dirty: None,
+        },
+    ))
 }
 
 #[cfg(unix)]
@@ -2336,10 +2384,12 @@ fn test_candidate(
     controls: &ExecutionControls,
     counters: &ProgressCounters,
     scratch: &mut Option<WorkerScratch>,
+    warm: &WarmBuilds,
 ) -> MutationResult {
     log_candidate_start(execution, &candidate);
-    let (state, error) = test_candidate_state(&candidate, timeout, execution, controls, scratch)
-        .unwrap_or_else(|error| (MutationState::Errored, Some(error.to_string())));
+    let (state, error) =
+        test_candidate_state(&candidate, timeout, execution, controls, scratch, warm)
+            .unwrap_or_else(|error| (MutationState::Errored, Some(error.to_string())));
     log_candidate_finish(execution, controls, &candidate, state);
     counters.record(state);
     MutationResult {
@@ -2409,13 +2459,14 @@ fn test_candidate_state(
     execution: &TestExecution,
     controls: &ExecutionControls,
     scratch: &mut Option<WorkerScratch>,
+    warm: &WarmBuilds,
 ) -> Result<(MutationState, Option<String>), RunError> {
     stop_if_interrupted()?;
     if candidate.test_selection == CandidateTestSelection::NotCovered {
         return Ok((MutationState::NotCovered, None));
     }
     if reuses_worker_scratch(execution, controls) {
-        return test_candidate_with_scratch(candidate, timeout, execution, scratch);
+        return test_candidate_with_scratch(candidate, timeout, execution, scratch, warm);
     }
     test_candidate_in_fresh_workspace(candidate, timeout, execution, controls)
 }
@@ -2467,8 +2518,9 @@ fn test_candidate_with_scratch(
     timeout: Duration,
     execution: &TestExecution,
     scratch: &mut Option<WorkerScratch>,
+    warm: &WarmBuilds,
 ) -> Result<(MutationState, Option<String>), RunError> {
-    let area = prepare_worker_scratch(scratch, &candidate.workspace)?;
+    let area = prepare_worker_scratch(scratch, &candidate.workspace, warm)?;
     area.restore_dirty()?;
     area.capture_original(&candidate.workspace, &candidate.source)?;
     let temporary = area.temporary.path().to_path_buf();
@@ -2480,12 +2532,16 @@ fn test_candidate_with_scratch(
 fn prepare_worker_scratch<'a>(
     scratch: &'a mut Option<WorkerScratch>,
     workspace: &Workspace,
+    warm: &WarmBuilds,
 ) -> Result<&'a mut WorkerScratch, RunError> {
     let needs_new = scratch
         .as_ref()
         .is_none_or(|area| area.layout_root != workspace.layout_root);
     if needs_new {
-        *scratch = Some(WorkerScratch::create(workspace)?);
+        *scratch = Some(match warm.take(&workspace.layout_root) {
+            Some(existing) => existing,
+            None => WorkerScratch::create(workspace)?,
+        });
     }
     Ok(scratch
         .as_mut()
@@ -3425,10 +3481,40 @@ fn create_symbolic_link(_target: &Path, _destination: &Path) -> io::Result<()> {
     ))
 }
 
+/// Warm clean-suite workspace copies that mutation workers can claim.
+#[derive(Default)]
+struct WarmBuilds {
+    by_layout: Mutex<BTreeMap<PathBuf, WorkerScratch>>,
+}
+
+impl WarmBuilds {
+    fn insert(&self, scratch: WorkerScratch) -> Result<(), RunError> {
+        let mut builds = self
+            .by_layout
+            .lock()
+            .map_err(|_| run_error("could not store clean suite build after a previous panic"))?;
+        builds.entry(scratch.layout_root.clone()).or_insert(scratch);
+        Ok(())
+    }
+
+    fn take(&self, layout_root: &Path) -> Option<WorkerScratch> {
+        self.by_layout
+            .lock()
+            .ok()
+            .and_then(|mut builds| builds.remove(layout_root))
+    }
+}
+
+struct CleanSuite {
+    duration: Duration,
+    warm: WarmBuilds,
+}
+
 /// A long-lived copy of one Cargo workspace for one mutation worker.
 ///
 /// The worker reuses the copy and its Cargo target directory across mutants so
-/// later mutants rebuild only the changed crate.
+/// later mutants rebuild only the changed crate. The first worker for a layout
+/// may claim the clean-suite copy instead of starting from a cold target.
 struct WorkerScratch {
     temporary: TemporaryWorkspace,
     layout_root: PathBuf,
