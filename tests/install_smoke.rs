@@ -4454,6 +4454,105 @@ fn installed_command_reuses_clean_suite_target_for_first_mutant() {
     );
 }
 
+/// Each parallel mutation worker gets its own warm clean-suite build copy.
+///
+/// Workers never share a writable target directory. Each first mutant compile
+/// for a worker sees an already-populated target tree from the clean suite.
+#[cfg(unix)]
+#[test]
+fn installed_command_seeds_each_parallel_worker_from_clean_suite() {
+    use std::collections::BTreeSet;
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_mutation_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    let source_before = fs::read(&source).expect("source must be readable");
+    let temporary_root = root.join("parallel-seed-temporary");
+    let fake_cargo = root.join("parallel-seed-cargo");
+    let record = root.join("parallel-seed-record");
+    fs::create_dir(&temporary_root).expect("temporary root must be created");
+    fs::write(
+        &fake_cargo,
+        "#!/bin/sh\nif [ \"$1\" = \"metadata\" ]; then\n  exec \"$MUTARUST_REAL_CARGO\" \"$@\"\nfi\ntarget=\nprevious=\nfor argument in \"$@\"; do\n  if [ \"$previous\" = \"--target-dir\" ]; then\n    target=$argument\n  fi\n  previous=$argument\ndone\nmutated=no\nif grep -q false checked/src/lib.rs 2>/dev/null; then\n  mutated=yes\nfi\nwarm=no\nif [ -n \"$target\" ] && [ -d \"$target\" ] && [ -n \"$(ls -A \"$target\" 2>/dev/null)\" ]; then\n  warm=yes\nfi\nprintf '%s|%s|%s\n' \"$mutated\" \"$warm\" \"$target\" >> \"$MUTARUST_TARGET_RECORD\"\nexec \"$MUTARUST_REAL_CARGO\" \"$@\"\n",
+    )
+    .expect("recording Cargo command must be written");
+    fs::set_permissions(&fake_cargo, fs::Permissions::from_mode(0o755))
+        .expect("recording Cargo command must be executable");
+
+    let sequential = Command::new(command_path(&install))
+        .args(["--workers", "1"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .output()
+        .expect("sequential baseline must start");
+    let parallel = Command::new(command_path(&install))
+        .args(["--workers", "2"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .env("CARGO", &fake_cargo)
+        .env("MUTARUST_REAL_CARGO", env!("CARGO"))
+        .env("MUTARUST_TARGET_RECORD", &record)
+        .env("TMPDIR", &temporary_root)
+        .output()
+        .expect("parallel seed run must start");
+
+    assert!(
+        sequential.status.success(),
+        "sequential baseline must succeed: {}",
+        String::from_utf8_lossy(&sequential.stderr)
+    );
+    assert!(
+        parallel.status.success(),
+        "parallel seed run must succeed: {}",
+        String::from_utf8_lossy(&parallel.stderr)
+    );
+    let sequential_stdout =
+        String::from_utf8(sequential.stdout).expect("sequential output must be UTF-8");
+    let parallel_stdout =
+        String::from_utf8(parallel.stdout).expect("parallel output must be UTF-8");
+    assert_eq!(
+        parallel_stdout, sequential_stdout,
+        "parallel workers must keep the same mutant results as one worker"
+    );
+    assert_eq!(fs::read(&source).unwrap(), source_before);
+    assert!(
+        mutarust_temp_entries(&temporary_root).is_empty(),
+        "normal parallel run must remove temporary build copies"
+    );
+
+    let records = fs::read_to_string(&record).expect("target record must be readable");
+    let mutant_targets = records
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.splitn(3, '|');
+            let mutated = parts.next()?;
+            let warm = parts.next()?;
+            let target = parts.next()?;
+            (mutated == "yes").then(|| (warm.to_owned(), target.to_owned()))
+        })
+        .collect::<Vec<_>>();
+    let first_targets_by_dir = {
+        let mut seen = BTreeSet::new();
+        let mut firsts = Vec::new();
+        for (warm, target) in &mutant_targets {
+            if seen.insert(target.clone()) {
+                firsts.push((warm.clone(), target.clone()));
+            }
+        }
+        firsts
+    };
+    assert!(
+        first_targets_by_dir.len() >= 2,
+        "two workers must use distinct target directories; records: {records}"
+    );
+    assert!(
+        first_targets_by_dir.iter().all(|(warm, _)| warm == "yes"),
+        "each worker's first mutant compile must see a warm clean-suite target; records: {records}"
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn installed_command_keeps_requested_mutation_workspaces() {

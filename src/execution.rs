@@ -1045,6 +1045,8 @@ fn test_candidates(
             candidates, timeout, &execution, controls, counters, warm,
         );
     }
+    // Parallel workers each need a private writable copy of the clean suite build.
+    warm.seed_each_worker()?;
     test_candidates_in_parallel(
         candidates, workers, timeout, &execution, controls, counters, warm,
     )
@@ -2538,7 +2540,7 @@ fn prepare_worker_scratch<'a>(
         .as_ref()
         .is_none_or(|area| area.layout_root != workspace.layout_root);
     if needs_new {
-        *scratch = Some(match warm.take(&workspace.layout_root) {
+        *scratch = Some(match warm.claim(&workspace.layout_root)? {
             Some(existing) => existing,
             None => WorkerScratch::create(workspace)?,
         });
@@ -3387,6 +3389,132 @@ fn rewrite_configuration_values(
     Ok(())
 }
 
+/// Rewrites absolute path prefixes after a warm clean-suite tree is cloned.
+///
+/// Clean-suite copies rewrite Cargo paths into the template temporary root.
+/// A private worker clone must retarget those bytes to its own root so mutants
+/// change the files Cargo actually builds and tests.
+fn remap_path_prefix_in_tree(
+    root: &Path,
+    from_prefix: &Path,
+    to_prefix: &Path,
+) -> Result<(), RunError> {
+    if from_prefix == to_prefix {
+        return Ok(());
+    }
+    let from = path_remap_bytes(from_prefix);
+    let to = path_remap_bytes(to_prefix);
+    remap_path_prefix_in_entry(root, &from, &to)
+}
+
+fn path_remap_bytes(path: &Path) -> Vec<u8> {
+    path_to_bytes(path)
+}
+
+#[cfg(unix)]
+fn path_to_bytes(path: &Path) -> Vec<u8> {
+    use std::os::unix::ffi::OsStrExt;
+
+    path.as_os_str().as_bytes().to_vec()
+}
+
+#[cfg(not(unix))]
+fn path_to_bytes(path: &Path) -> Vec<u8> {
+    path.to_string_lossy().into_owned().into_bytes()
+}
+
+fn remap_path_prefix_in_entry(path: &Path, from: &[u8], to: &[u8]) -> Result<(), RunError> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| run_error(format!("could not inspect {}: {error}", path.display())))?;
+    if metadata.file_type().is_symlink() {
+        return Ok(());
+    }
+    if metadata.is_dir() {
+        for entry in fs::read_dir(path)
+            .map_err(|error| run_error(format!("could not read {}: {error}", path.display())))?
+        {
+            stop_if_interrupted()?;
+            let entry = entry
+                .map_err(|error| run_error(format!("could not read workspace entry: {error}")))?;
+            remap_path_prefix_in_entry(&entry.path(), from, to)?;
+        }
+        return Ok(());
+    }
+    if !metadata.is_file() {
+        return Ok(());
+    }
+    let data = fs::read(path)
+        .map_err(|error| run_error(format!("could not read {}: {error}", path.display())))?;
+    let Some(updated) = replace_bytes(&data, from, to) else {
+        return Ok(());
+    };
+    fs::write(path, updated)
+        .map_err(|error| run_error(format!("could not write {}: {error}", path.display())))
+}
+
+fn replace_bytes(input: &[u8], from: &[u8], to: &[u8]) -> Option<Vec<u8>> {
+    if from.is_empty() || !input.windows(from.len()).any(|window| window == from) {
+        return None;
+    }
+    let mut output = Vec::with_capacity(input.len());
+    let mut rest = input;
+    while let Some((first, tail)) = rest.split_first() {
+        if rest.starts_with(from) {
+            output.extend_from_slice(to);
+            rest = &rest[from.len()..];
+            continue;
+        }
+        output.push(*first);
+        rest = tail;
+    }
+    Some(output)
+}
+
+/// Copies every file and directory under `source` into an existing `destination`.
+///
+/// Used to seed a private worker scratch from a warm clean-suite template,
+/// including the Cargo target directory.
+fn copy_tree(source: &Path, destination: &Path) -> Result<(), RunError> {
+    for entry in fs::read_dir(source)
+        .map_err(|error| run_error(format!("could not read {}: {error}", source.display())))?
+    {
+        stop_if_interrupted()?;
+        let entry =
+            entry.map_err(|error| run_error(format!("could not read workspace entry: {error}")))?;
+        let from = entry.path();
+        let to = destination.join(entry.file_name());
+        let file_type = fs::symlink_metadata(&from)
+            .map_err(|error| run_error(format!("could not inspect {}: {error}", from.display())))?
+            .file_type();
+        if file_type.is_symlink() {
+            copy_symbolic_link(&from, &to)?;
+            continue;
+        }
+        if file_type.is_dir() {
+            fs::create_dir(&to).map_err(|error| {
+                run_error(format!("could not create {}: {error}", to.display()))
+            })?;
+            copy_tree(&from, &to)?;
+            continue;
+        }
+        if file_type.is_file() {
+            fs::copy(&from, &to).map_err(|error| {
+                run_error(format!(
+                    "could not copy {} to {}: {error}",
+                    from.display(),
+                    to.display()
+                ))
+            })?;
+            continue;
+        }
+        return Err(run_error(format!(
+            "could not copy unsupported workspace entry: {}",
+            from.display()
+        )));
+    }
+    Ok(())
+}
+
 fn copy_directory(
     workspace: &Workspace,
     source: &Path,
@@ -3482,9 +3610,13 @@ fn create_symbolic_link(_target: &Path, _destination: &Path) -> io::Result<()> {
 }
 
 /// Warm clean-suite workspace copies that mutation workers can claim.
+///
+/// A single sequential worker takes the original clean build. Parallel workers
+/// each receive a private clone so no two workers share a writable target dir.
 #[derive(Default)]
 struct WarmBuilds {
     by_layout: Mutex<BTreeMap<PathBuf, WorkerScratch>>,
+    clone_for_each_worker: Mutex<bool>,
 }
 
 impl WarmBuilds {
@@ -3497,11 +3629,55 @@ impl WarmBuilds {
         Ok(())
     }
 
+    fn seed_each_worker(&self) -> Result<(), RunError> {
+        let mut clone = self.clone_for_each_worker.lock().map_err(|_| {
+            run_error("could not configure clean suite build sharing after a previous panic")
+        })?;
+        *clone = true;
+        Ok(())
+    }
+
+    fn claim(&self, layout_root: &Path) -> Result<Option<WorkerScratch>, RunError> {
+        let clone = *self.clone_for_each_worker.lock().map_err(|_| {
+            run_error("could not read clean suite build sharing after a previous panic")
+        })?;
+        if clone {
+            self.clone_from(layout_root)
+        } else {
+            Ok(self.take(layout_root))
+        }
+    }
+
     fn take(&self, layout_root: &Path) -> Option<WorkerScratch> {
         self.by_layout
             .lock()
             .ok()
             .and_then(|mut builds| builds.remove(layout_root))
+    }
+
+    fn clone_from(&self, layout_root: &Path) -> Result<Option<WorkerScratch>, RunError> {
+        let template = {
+            let builds = self.by_layout.lock().map_err(|_| {
+                run_error("could not read clean suite build after a previous panic")
+            })?;
+            let Some(template) = builds.get(layout_root) else {
+                return Ok(None);
+            };
+            (
+                template.temporary.path().to_path_buf(),
+                template.layout_root.clone(),
+                template
+                    .copied_workspace
+                    .strip_prefix(template.temporary.path())
+                    .map_err(|_| run_error("clean suite workspace path left the temporary root"))?
+                    .to_path_buf(),
+            )
+        };
+        Ok(Some(WorkerScratch::clone_from_template(
+            &template.0,
+            template.1,
+            &template.2,
+        )?))
     }
 }
 
@@ -3513,8 +3689,8 @@ struct CleanSuite {
 /// A long-lived copy of one Cargo workspace for one mutation worker.
 ///
 /// The worker reuses the copy and its Cargo target directory across mutants so
-/// later mutants rebuild only the changed crate. The first worker for a layout
-/// may claim the clean-suite copy instead of starting from a cold target.
+/// later mutants rebuild only the changed crate. Workers claim a clean-suite
+/// build (original or private clone) instead of starting from a cold target.
 struct WorkerScratch {
     temporary: TemporaryWorkspace,
     layout_root: PathBuf,
@@ -3534,6 +3710,25 @@ impl WorkerScratch {
         Ok(Self {
             temporary,
             layout_root: workspace.layout_root.clone(),
+            copied_workspace,
+            dirty: None,
+        })
+    }
+
+    fn clone_from_template(
+        template_root: &Path,
+        layout_root: PathBuf,
+        workspace_relative: &Path,
+    ) -> Result<Self, RunError> {
+        let temporary = TemporaryWorkspace::create()?;
+        copy_tree(template_root, temporary.path())?;
+        // Manifests, Cargo config, and target fingerprints embed absolute paths
+        // from the clean-suite template. Point them at this private copy.
+        remap_path_prefix_in_tree(temporary.path(), template_root, temporary.path())?;
+        let copied_workspace = temporary.path().join(workspace_relative);
+        Ok(Self {
+            temporary,
+            layout_root,
             copied_workspace,
             dirty: None,
         })

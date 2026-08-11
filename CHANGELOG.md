@@ -9,6 +9,8 @@ This file records important user changes.
 - After a clean Cargo test passes, Mutarust keeps that workspace copy and its
   target directory for the first mutation worker. The first mutant no longer
   starts from a cold Cargo build for that layout.
+- Parallel mutation workers each receive a private copy of the clean suite
+  build. Workers never share a writable Cargo target directory.
 
 ## 0.1.2 — 2026-08-05
 
