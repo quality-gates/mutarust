@@ -3486,6 +3486,65 @@ fn installed_command_skips_mutants_that_do_not_compile() {
     );
 }
 
+/// Default Cargo path starts one child process per mutant attempt.
+#[cfg(unix)]
+#[test]
+fn installed_command_runs_one_cargo_command_per_mutant() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_mutation_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    let fake_cargo = root.join("one-cargo-per-mutant");
+    let record = root.join("one-cargo-per-mutant-record");
+    fs::write(
+        &fake_cargo,
+        "#!/bin/sh\nif [ \"$1\" = \"metadata\" ]; then\n  exec \"$MUTARUST_REAL_CARGO\" \"$@\"\nfi\nprintf '%s\n' \"$*\" >> \"$MUTARUST_CARGO_RECORD\"\nexec \"$MUTARUST_REAL_CARGO\" \"$@\"\n",
+    )
+    .expect("recording Cargo command must be written");
+    fs::set_permissions(&fake_cargo, fs::Permissions::from_mode(0o755))
+        .expect("recording Cargo command must be executable");
+
+    let output = Command::new(command_path(&install))
+        .args(["--workers", "1"])
+        .arg(&source)
+        .current_dir(&fixture)
+        .env("CARGO", &fake_cargo)
+        .env("MUTARUST_REAL_CARGO", env!("CARGO"))
+        .env("MUTARUST_CARGO_RECORD", &record)
+        .output()
+        .expect("installed mutarust must start");
+
+    assert!(
+        output.status.success(),
+        "one-cargo run must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("output must be UTF-8");
+    assert!(
+        stdout.contains("Killed: 1") && stdout.contains("Escaped: 1"),
+        "mutant states must stay classified: {stdout}"
+    );
+    let records = fs::read_to_string(&record).expect("cargo record must be readable");
+    let mutant_commands = records
+        .lines()
+        .filter(|line| line.contains("test") && !line.contains("--no-run"))
+        .count();
+    let compile_only = records
+        .lines()
+        .filter(|line| line.contains("--no-run"))
+        .count();
+    assert_eq!(
+        compile_only, 0,
+        "default Cargo path must not run a separate compile command: {records}"
+    );
+    assert_eq!(
+        mutant_commands, 3,
+        "clean suite plus two mutants must each run one cargo test: {records}"
+    );
+}
+
 /// Locks the three Cargo mutant states for later single-invocation classification.
 ///
 /// A mutant that does not build is skipped. A mutant that builds and fails a test
@@ -3600,7 +3659,7 @@ fn installed_command_reports_a_failed_test_command_as_errored() {
     let fake_cargo = root.join("vanishing-cargo");
     fs::write(
         &fake_cargo,
-        "#!/bin/sh\nif [ \"$1\" = \"metadata\" ]; then\n  exec \"$MUTARUST_REAL_CARGO\" \"$@\"\nfi\n\"$MUTARUST_REAL_CARGO\" \"$@\"\nstatus=$?\ncase \" $* \" in\n  *\" --no-run \"*) rm \"$0\" ;;\nesac\nexit $status\n",
+        "#!/bin/sh\nif [ \"$1\" = \"metadata\" ]; then\n  exec \"$MUTARUST_REAL_CARGO\" \"$@\"\nfi\nif ! grep -q false checked/src/lib.rs 2>/dev/null; then\n  \"$MUTARUST_REAL_CARGO\" \"$@\"\n  status=$?\n  rm \"$0\"\n  exit $status\nfi\nexit 1\n",
     )
     .expect("temporary Cargo command must be written");
     fs::set_permissions(&fake_cargo, fs::Permissions::from_mode(0o755))
@@ -4603,7 +4662,7 @@ fn installed_command_reports_retained_area_after_a_test_command_error() {
     fs::create_dir(&temporary_root).expect("temporary root must be created");
     fs::write(
         &fake_cargo,
-        "#!/bin/sh\nif [ \"$1\" = \"metadata\" ]; then\n  exec \"$MUTARUST_REAL_CARGO\" \"$@\"\nfi\ncase \" $* \" in\n  *\" --no-run \"*) chmod 000 \"$0\"; exit 0 ;;\nesac\nexit 0\n",
+        "#!/bin/sh\nif [ \"$1\" = \"metadata\" ]; then\n  exec \"$MUTARUST_REAL_CARGO\" \"$@\"\nfi\nif ! grep -q false checked/src/lib.rs 2>/dev/null; then\n  chmod 000 \"$0\"\n  exit 0\nfi\nexit 0\n",
     )
     .expect("retained-error Cargo command must be written");
     fs::set_permissions(&fake_cargo, fs::Permissions::from_mode(0o755))
