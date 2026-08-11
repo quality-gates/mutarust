@@ -11,10 +11,7 @@ impl Mutator for ErrorWrapMutator {
         "expression/errorf-wrap"
     }
 
-    fn mutations(&self, source: &str) -> Vec<Mutation> {
-        let Ok(file) = syn::parse_file(source) else {
-            return Vec::new();
-        };
+    fn mutations_from_parsed(&self, source: &str, file: &syn::File) -> Vec<Mutation> {
         let crates = standard_crates(&file.items);
         if !crates.core_available {
             return Vec::new();

@@ -17,15 +17,12 @@ impl Mutator for CleanupMutator {
         "statement/defer-remove"
     }
 
-    fn mutations(&self, source: &str) -> Vec<Mutation> {
-        let Ok(file) = syn::parse_file(source) else {
-            return Vec::new();
-        };
+    fn mutations_from_parsed(&self, source: &str, file: &syn::File) -> Vec<Mutation> {
         let crates = standard_crates(&file.items);
         let mut drop_types = DropTypeVisitor::new(crates);
-        drop_types.visit_file(&file);
+        drop_types.visit_file(file);
         let mut shadow_visitor = DropShadowVisitor::default();
-        shadow_visitor.visit_file(&file);
+        shadow_visitor.visit_file(file);
         let mut visitor = CleanupVisitor {
             source,
             crates,
@@ -35,7 +32,7 @@ impl Mutator for CleanupMutator {
             scopes: Vec::new(),
             mutations: Vec::new(),
         };
-        visitor.visit_file(&file);
+        visitor.visit_file(file);
         visitor.mutations
     }
 }

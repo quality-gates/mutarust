@@ -63,18 +63,15 @@ impl Mutator for ControlFlowMutator {
         self.name
     }
 
-    fn mutations(&self, source: &str) -> Vec<Mutation> {
-        let Ok(file) = syn::parse_file(source) else {
-            return Vec::new();
-        };
+    fn mutations_from_parsed(&self, source: &str, file: &syn::File) -> Vec<Mutation> {
         match self.kind {
-            ControlFlowKind::BranchCase => BranchCaseVisitor::collect(source, &file),
-            ControlFlowKind::BranchElse => BranchElseVisitor::collect(source, &file),
-            ControlFlowKind::BranchIf => BranchIfVisitor::collect(source, &file),
-            ControlFlowKind::LoopBreak => collect_loop_control(source, &file),
-            ControlFlowKind::LoopCondition => LoopConditionVisitor::collect(source, &file),
-            ControlFlowKind::LoopRangeBreak => LoopRangeBreakVisitor::collect(source, &file),
-            ControlFlowKind::StatementRemove => StatementRemoveVisitor::collect(source, &file),
+            ControlFlowKind::BranchCase => BranchCaseVisitor::collect(source, file),
+            ControlFlowKind::BranchElse => BranchElseVisitor::collect(source, file),
+            ControlFlowKind::BranchIf => BranchIfVisitor::collect(source, file),
+            ControlFlowKind::LoopBreak => collect_loop_control(source, file),
+            ControlFlowKind::LoopCondition => LoopConditionVisitor::collect(source, file),
+            ControlFlowKind::LoopRangeBreak => LoopRangeBreakVisitor::collect(source, file),
+            ControlFlowKind::StatementRemove => StatementRemoveVisitor::collect(source, file),
         }
     }
 }

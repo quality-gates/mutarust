@@ -51,26 +51,23 @@ impl Mutator for ValueMutator {
         self.name
     }
 
-    fn mutations(&self, source: &str) -> Vec<Mutation> {
-        let Ok(file) = syn::parse_file(source) else {
-            return Vec::new();
-        };
+    fn mutations_from_parsed(&self, source: &str, file: &syn::File) -> Vec<Mutation> {
         let shadows = ShadowedNames::collect_items(file.items.iter());
 
         match self.kind {
             ValueKind::CompositeFieldClear => CompositeVisitor::mutations(
                 source,
-                &file,
+                file,
                 shadows,
                 derived_default_names(file.items.iter()),
             ),
             ValueKind::ContextNil => ContextVisitor::mutations(
                 source,
-                &file,
+                file,
                 shadows,
                 context_signatures_for_items(&file.items),
             ),
-            ValueKind::RemoveSelfAssign => SelfAssignVisitor::mutations(source, &file),
+            ValueKind::RemoveSelfAssign => SelfAssignVisitor::mutations(source, file),
         }
     }
 }
