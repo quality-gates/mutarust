@@ -2,50 +2,54 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://quality-gates.github.io/mutarust/</loc>
-         <lastmod>2026-08-05</lastmod>
+         <lastmod>2026-08-11</lastmod>
     </url>
     <url>
          <loc>https://quality-gates.github.io/mutarust/ci/</loc>
-         <lastmod>2026-08-05</lastmod>
+         <lastmod>2026-08-11</lastmod>
     </url>
     <url>
          <loc>https://quality-gates.github.io/mutarust/cli/</loc>
-         <lastmod>2026-08-05</lastmod>
+         <lastmod>2026-08-11</lastmod>
     </url>
     <url>
          <loc>https://quality-gates.github.io/mutarust/config/</loc>
-         <lastmod>2026-08-05</lastmod>
+         <lastmod>2026-08-11</lastmod>
     </url>
     <url>
          <loc>https://quality-gates.github.io/mutarust/custom-mutators/</loc>
-         <lastmod>2026-08-05</lastmod>
+         <lastmod>2026-08-11</lastmod>
     </url>
     <url>
          <loc>https://quality-gates.github.io/mutarust/glossary/</loc>
-         <lastmod>2026-08-05</lastmod>
+         <lastmod>2026-08-11</lastmod>
     </url>
     <url>
          <loc>https://quality-gates.github.io/mutarust/install/</loc>
-         <lastmod>2026-08-05</lastmod>
+         <lastmod>2026-08-11</lastmod>
     </url>
     <url>
          <loc>https://quality-gates.github.io/mutarust/json-outputs/</loc>
-         <lastmod>2026-08-05</lastmod>
+         <lastmod>2026-08-11</lastmod>
     </url>
     <url>
          <loc>https://quality-gates.github.io/mutarust/mutators/</loc>
-         <lastmod>2026-08-05</lastmod>
+         <lastmod>2026-08-11</lastmod>
     </url>
     <url>
          <loc>https://quality-gates.github.io/mutarust/parity/</loc>
-         <lastmod>2026-08-05</lastmod>
+         <lastmod>2026-08-11</lastmod>
     </url>
     <url>
          <loc>https://quality-gates.github.io/mutarust/quickstart/</loc>
-         <lastmod>2026-08-05</lastmod>
+         <lastmod>2026-08-11</lastmod>
     </url>
     <url>
          <loc>https://quality-gates.github.io/mutarust/release/</loc>
-         <lastmod>2026-08-05</lastmod>
+         <lastmod>2026-08-11</lastmod>
+    </url>
+    <url>
+         <loc>https://quality-gates.github.io/mutarust/selective-ci/</loc>
+         <lastmod>2026-08-11</lastmod>
     </url>
 </urlset>

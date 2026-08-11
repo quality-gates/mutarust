@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://quality-gates.github.io/mutarust/glossary/">
+        <link rel="canonical" href="https://quality-gates.github.io/mutarust/selective-ci/">
       
       
-        <link rel="prev" href="../release/">
+        <link rel="prev" href="../ci/">
       
       
-        <link rel="next" href="../parity/">
+        <link rel="next" href="../release/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Domain Glossary - mutarust</title>
+        <title>Selective CI - mutarust</title>
       
     
     
@@ -78,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#domain-glossary" class="md-skip">
+        <a href="#selective-ci" class="md-skip">
           Skip to content
         </a>
       
@@ -114,7 +114,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Domain Glossary
+              Selective CI
             
           </span>
         </div>
@@ -500,10 +500,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../selective-ci/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Selective CI
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -519,6 +546,70 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#safe-default" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Safe default
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#path-classes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Path classes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#workflows-and-gates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workflows and gates
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mutation-scope-on-main" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mutation scope on main
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -554,37 +645,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Domain Glossary
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../glossary/" class="md-nav__link">
         
   
   
@@ -600,180 +664,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#mutation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Mutation
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#mutant" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Mutant
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#killed" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Killed
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#escaped" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Escaped
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#errored" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Errored
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#not-covered" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Not covered
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#skipped" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Skipped
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#mutation-score" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Mutation score
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#covered-code-mutation-score" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Covered-code mutation score
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#mutator" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Mutator
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#baseline" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Baseline
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#blacklist" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Blacklist
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#stable-mutant-id" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Stable mutant ID
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#source-candidate" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Source candidate
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -832,10 +722,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#mutation" class="md-nav__link">
+  <a href="#safe-default" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Mutation
+        Safe default
       
     </span>
   </a>
@@ -843,10 +733,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#mutant" class="md-nav__link">
+  <a href="#path-classes" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Mutant
+        Path classes
       
     </span>
   </a>
@@ -854,10 +744,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#killed" class="md-nav__link">
+  <a href="#workflows-and-gates" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Killed
+        Workflows and gates
       
     </span>
   </a>
@@ -865,120 +755,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#escaped" class="md-nav__link">
+  <a href="#mutation-scope-on-main" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Escaped
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#errored" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Errored
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#not-covered" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Not covered
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#skipped" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Skipped
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#mutation-score" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Mutation score
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#covered-code-mutation-score" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Covered-code mutation score
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#mutator" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Mutator
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#baseline" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Baseline
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#blacklist" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Blacklist
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#stable-mutant-id" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Stable mutant ID
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#source-candidate" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Source candidate
+        Mutation scope on main
       
     </span>
   </a>
@@ -1005,38 +785,120 @@
   
 
 
-<h1 id="domain-glossary">Domain Glossary<a class="headerlink" href="#domain-glossary" title="Permanent link">&para;</a></h1>
-<p>These terms are the project language for mutation testing.</p>
-<h2 id="mutation">Mutation<a class="headerlink" href="#mutation" title="Permanent link">&para;</a></h2>
-<p>One source change made for a test run.</p>
-<h2 id="mutant">Mutant<a class="headerlink" href="#mutant" title="Permanent link">&para;</a></h2>
-<p>The source produced by one mutation.</p>
-<h2 id="killed">Killed<a class="headerlink" href="#killed" title="Permanent link">&para;</a></h2>
-<p>A test detects a mutant.</p>
-<h2 id="escaped">Escaped<a class="headerlink" href="#escaped" title="Permanent link">&para;</a></h2>
-<p>Tests do not detect a mutant.</p>
-<h2 id="errored">Errored<a class="headerlink" href="#errored" title="Permanent link">&para;</a></h2>
-<p>Mutarust cannot complete a mutation run for the mutant.</p>
-<h2 id="not-covered">Not covered<a class="headerlink" href="#not-covered" title="Permanent link">&para;</a></h2>
-<p>No test covers the changed source location.</p>
-<h2 id="skipped">Skipped<a class="headerlink" href="#skipped" title="Permanent link">&para;</a></h2>
-<p>Mutarust does not run a mutation.</p>
-<h2 id="mutation-score">Mutation score<a class="headerlink" href="#mutation-score" title="Permanent link">&para;</a></h2>
-<p>The proportion of successful mutation results. Mutarust prints this as a
-percentage. JSON reports store the same value as a ratio from zero to one.</p>
-<h2 id="covered-code-mutation-score">Covered-code mutation score<a class="headerlink" href="#covered-code-mutation-score" title="Permanent link">&para;</a></h2>
-<p>The mutation score for covered source only. Mutants with the <code>not covered</code>
-state are excluded from this score.</p>
-<h2 id="mutator">Mutator<a class="headerlink" href="#mutator" title="Permanent link">&para;</a></h2>
-<p>A component that produces mutations.</p>
-<h2 id="baseline">Baseline<a class="headerlink" href="#baseline" title="Permanent link">&para;</a></h2>
-<p>A set of accepted escaped mutant IDs.</p>
-<h2 id="blacklist">Blacklist<a class="headerlink" href="#blacklist" title="Permanent link">&para;</a></h2>
-<p>A set of accepted mutation checksums.</p>
-<h2 id="stable-mutant-id">Stable mutant ID<a class="headerlink" href="#stable-mutant-id" title="Permanent link">&para;</a></h2>
-<p>An ID from a source name, mutator name, and mutation diff.</p>
-<h2 id="source-candidate">Source candidate<a class="headerlink" href="#source-candidate" title="Permanent link">&para;</a></h2>
-<p>A Rust production source file selected as a possible input.</p>
+<h1 id="selective-ci">Selective CI<a class="headerlink" href="#selective-ci" title="Permanent link">&para;</a></h1>
+<p>Maintainer note for path-based job selection in this repository. The workflow
+files under <code>.github/workflows/</code> are the source of truth. Update this page when
+those filters change.</p>
+<p>Selective CI only chooses which GitHub Actions jobs run. Product mutation
+semantics, CLI behavior, and score gates are unchanged.</p>
+<h2 id="safe-default">Safe default<a class="headerlink" href="#safe-default" title="Permanent link">&para;</a></h2>
+<p>Prefer run over skip when unsure. Quality, Messrust, and Security derive a
+<code>*_or_unknown</code> flag that is true when:</p>
+<ul>
+<li>the heavy path class matches, or</li>
+<li>no light path matched (<code>light != true</code>), so a pure unclassified diff still
+  runs the heavy jobs.</li>
+</ul>
+<p>Skip only when the heavy class is false and light is true. Mutation uses a
+top-level workflow <code>paths</code> filter instead of that flag (see below).</p>
+<p>A false skip — a heavy job skipped when the change could affect it — is a
+defect. Fix the path filters. Do not weaken the always-on gates to hide the
+miss.</p>
+<h2 id="path-classes">Path classes<a class="headerlink" href="#path-classes" title="Permanent link">&para;</a></h2>
+<p>Shared light paths (docs, agent files, changelog, licenses, Markdown, git
+metadata, issue templates, Dependabot config) appear in Quality, Messrust, and
+Security. Exact globs live in the workflows.</p>
+<table>
+<thead>
+<tr>
+<th>Class</th>
+<th>Typical paths</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Light</td>
+<td><code>docs/**</code>, <code>**/*.md</code>, <code>.agents/**</code>, <code>AGENTS.md</code>, <code>CHANGELOG.md</code>, licenses</td>
+<td>Heavy Rust jobs may skip when the diff is pure-light</td>
+</tr>
+<tr>
+<td>Rust (Quality)</td>
+<td><code>src/**</code>, <code>tests/**</code>, <code>Cargo.toml</code>, <code>Cargo.lock</code>, <code>build.rs</code>, <code>.cargo/**</code>, toolchain/lint config, <code>quality.yml</code></td>
+<td>Runs lint, dual-toolchain tests, release build, and rustdoc</td>
+</tr>
+<tr>
+<td>Package (Quality)</td>
+<td><code>README.md</code>, or any rust / non-light diff</td>
+<td>Runs <code>cargo package</code> and install smoke</td>
+</tr>
+<tr>
+<td>Production (Messrust)</td>
+<td><code>src/**</code>, <code>messrust.yml</code></td>
+<td>Runs strict messrust on production source</td>
+</tr>
+<tr>
+<td>Dependencies (Security)</td>
+<td><code>Cargo.toml</code>, <code>Cargo.lock</code>, <code>security.yml</code></td>
+<td>Runs <code>cargo audit</code></td>
+</tr>
+<tr>
+<td>Mutation inputs</td>
+<td><code>**/*.rs</code>, <code>Cargo.toml</code>, <code>Cargo.lock</code>, <code>mutation.yml</code></td>
+<td>Workflow-level filter; mutation job runs only for these paths</td>
+</tr>
+<tr>
+<td>Docs site</td>
+<td><code>docs/**</code>, <code>mkdocs.yml</code>, <code>docs.yml</code></td>
+<td>Existing MkDocs path filter (not introduced by selective CI)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="workflows-and-gates">Workflows and gates<a class="headerlink" href="#workflows-and-gates" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Workflow</th>
+<th>Skip behavior</th>
+<th>Always-on gate</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>quality.yml</code></td>
+<td><code>lint</code> / <code>test</code> / <code>build</code> / <code>docs</code> need <code>run_rust_or_unknown</code>; <code>package</code> needs <code>run_package</code></td>
+<td><code>quality-gate</code> — <code>always()</code>; accepts <code>success</code> or <code>skipped</code> per job; fails on any other result</td>
+</tr>
+<tr>
+<td><code>mutation.yml</code></td>
+<td>Top-level <code>paths</code> on mutation inputs for push and pull_request</td>
+<td>None (workflow does not start off-path)</td>
+</tr>
+<tr>
+<td><code>messrust.yml</code></td>
+<td><code>messrust</code> needs <code>run_messrust_or_unknown</code></td>
+<td><code>messrust-gate</code> — path detection must succeed; job may be skipped</td>
+</tr>
+<tr>
+<td><code>security.yml</code></td>
+<td><code>audit</code> needs <code>run_audit_or_unknown</code>; schedule always runs audit</td>
+<td><code>audit-gate</code> — same pattern as messrust</td>
+</tr>
+<tr>
+<td><code>docs.yml</code></td>
+<td>Pre-existing path filter on docs site inputs</td>
+<td>None</td>
+</tr>
+</tbody>
+</table>
+<p>Branch protection should require the gate job names (<code>quality-gate</code>,
+<code>messrust-gate</code>, <code>audit-gate</code>), not the skippable leaf jobs alone. Skipped
+leaves must not block merge; a needed failure must still fail the gate.</p>
+<h2 id="mutation-scope-on-main">Mutation scope on main<a class="headerlink" href="#mutation-scope-on-main" title="Permanent link">&para;</a></h2>
+<p>When mutation runs, pull requests still limit mutants with <code>--git-diff-lines</code>.
+Pushes to <code>main</code> still use the full approved production scope. Path filters only
+decide whether the workflow starts. They do not change mutarust flags or score
+thresholds.</p>
 
 
 
