@@ -271,6 +271,28 @@ fn user_guides_cover_the_release_documentation_set() {
 }
 
 #[test]
+fn git_config_path_follows_linked_worktree_gitdir_indirection() {
+    let fixture = TemporaryDirectory::new("worktree-gitdir-config");
+    let git_dir = fixture.path.join("common.git/worktrees/check-out");
+    fs::create_dir_all(&git_dir).expect("linked worktree Git directory must be created");
+    fs::write(
+        fixture.path.join(".git"),
+        "gitdir: common.git/worktrees/check-out\n",
+    )
+    .expect("linked worktree Git file must be written");
+    fs::write(git_dir.join("commondir"), "../..\n")
+        .expect("linked worktree common directory file must be written");
+    let config = fixture.path.join("common.git/config");
+    fs::write(&config, "[core]\n").expect("common Git config must be written");
+
+    assert_eq!(
+        fs::read_to_string(git_config_path(&fixture.path))
+            .expect("linked worktree Git config must be readable"),
+        "[core]\n"
+    );
+}
+
+#[test]
 fn optional_hooks_mirror_fast_ci_and_are_not_activated_automatically() {
     let pre_commit = read_repo_file("githooks/pre-commit");
     let pre_push = read_repo_file("githooks/pre-push");
@@ -303,7 +325,8 @@ fn optional_hooks_mirror_fast_ci_and_are_not_activated_automatically() {
     );
     assert!(is_executable(&pre_push_path), "pre-push must be executable");
 
-    let git_config = read_repo_file(".git/config");
+    let git_config = fs::read_to_string(git_config_path(&repo_path("")))
+        .expect("repository Git config must be readable");
     assert!(
         !git_config.contains("hooksPath = githooks") && !git_config.contains("hooksPath=githooks"),
         "repository hooks must not activate automatically"
@@ -315,6 +338,53 @@ fn optional_hooks_mirror_fast_ci_and_are_not_activated_automatically() {
                 .contains("messrust"),
         "Git must not install the optional pre-commit hook by default"
     );
+}
+
+struct TemporaryDirectory {
+    path: PathBuf,
+}
+
+impl TemporaryDirectory {
+    fn new(name: &str) -> Self {
+        let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(name);
+        let _ = fs::remove_dir_all(&path);
+        fs::create_dir_all(&path).expect("temporary test directory must be created");
+        Self { path }
+    }
+}
+
+impl Drop for TemporaryDirectory {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.path);
+    }
+}
+
+fn git_config_path(checkout: &Path) -> PathBuf {
+    let git_path = checkout.join(".git");
+    if git_path.is_dir() {
+        return git_path.join("config");
+    }
+
+    let git_dir: PathBuf = fs::read_to_string(&git_path)
+        .expect("linked worktree Git file must be readable")
+        .strip_prefix("gitdir: ")
+        .expect("linked worktree Git file must name its Git directory")
+        .trim()
+        .into();
+    let git_dir = if git_dir.is_relative() {
+        checkout.join(git_dir)
+    } else {
+        git_dir
+    };
+    let common_dir: PathBuf = fs::read_to_string(git_dir.join("commondir"))
+        .expect("linked worktree common directory file must be readable")
+        .trim()
+        .into();
+    if common_dir.is_relative() {
+        git_dir.join(common_dir).join("config")
+    } else {
+        common_dir.join("config")
+    }
 }
 
 fn read_repo_file(relative: &str) -> String {
