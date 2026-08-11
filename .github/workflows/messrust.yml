@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
 
 # Run Messrust for production changes. A non-light change also runs it, so an
 # unclassified path cannot skip this check.
@@ -53,13 +54,14 @@ jobs:
         run: |
           production='${{ steps.filter.outputs.production }}'
           light='${{ steps.filter.outputs.light }}'
-          if [[ "$production" == "true" || "$light" != "true" ]]; then
+          force_full="${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci-full') }}"
+          if [[ "$force_full" == "true" || "$production" == "true" || "$light" != "true" ]]; then
             run_messrust_or_unknown=true
           else
             run_messrust_or_unknown=false
           fi
           echo "run_messrust_or_unknown=$run_messrust_or_unknown" >> "$GITHUB_OUTPUT"
-          echo "Messrust paths: production=$production light=$light run_messrust_or_unknown=$run_messrust_or_unknown"
+          echo "Messrust paths: production=$production light=$light force_full=$force_full run_messrust_or_unknown=$run_messrust_or_unknown"
 
   messrust:
     name: Production code

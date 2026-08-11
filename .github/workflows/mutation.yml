@@ -10,17 +10,51 @@ on:
       - .github/workflows/mutation.yml
   pull_request:
     branches: [main]
-    paths:
-      - "**/*.rs"
-      - Cargo.toml
-      - Cargo.lock
-      - .github/workflows/mutation.yml
+    types: [opened, synchronize, reopened, labeled, unlabeled]
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
+  changes:
+    name: detect mutation inputs
+    runs-on: ubuntu-latest
+    outputs:
+      run_mutation: ${{ steps.classes.outputs.run_mutation }}
+    steps:
+      - if: github.event_name == 'pull_request'
+        uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+      - if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3
+        id: filter
+        with:
+          filters: |
+            mutation:
+              - '**/*.rs'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - '.github/workflows/mutation.yml'
+      - id: classes
+        name: Derive mutation flag
+        run: |
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            run_mutation=true
+          else
+            mutation='${{ steps.filter.outputs.mutation }}'
+            force_full="${{ contains(github.event.pull_request.labels.*.name, 'ci-full') }}"
+            if [[ "$force_full" == "true" || "$mutation" == "true" ]]; then
+              run_mutation=true
+            else
+              run_mutation=false
+            fi
+          fi
+          echo "run_mutation=$run_mutation" >> "$GITHUB_OUTPUT"
+          echo "Mutation inputs: event=${{ github.event_name }} force_full=${force_full:-false} run_mutation=$run_mutation"
+
   mutation:
+    needs: changes
+    if: needs.changes.outputs.run_mutation == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:

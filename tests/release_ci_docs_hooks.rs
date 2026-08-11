@@ -98,6 +98,90 @@ fn package_gate_installs_the_locked_artifact_and_checks_help_and_version() {
 }
 
 #[test]
+fn ci_full_label_forces_heavy_jobs_without_disabling_light_path_skips() {
+    let forced_workflows = [
+        ("quality.yml", "run_rust_or_unknown", "run_package"),
+        ("messrust.yml", "run_messrust_or_unknown", ""),
+        ("security.yml", "run_audit_or_unknown", ""),
+    ];
+
+    for (name, primary_flag, secondary_flag) in forced_workflows {
+        let workflow = read_repo_file(&format!(".github/workflows/{name}"));
+        assert!(
+            workflow.contains("types: [opened, synchronize, reopened, labeled, unlabeled]"),
+            "{name} must evaluate ci-full when a pull request label changes"
+        );
+        assert!(
+            workflow.contains("ci-full"),
+            "{name} must recognize the ci-full pull request label"
+        );
+        assert!(
+            workflow.contains("force_full=\"${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci-full') }}\"")
+                && workflow.contains("if [[ \"$force_full\" == \"true\" ||"),
+            "{name} must make ci-full force its normal path-selection flag"
+        );
+        assert!(
+            workflow.contains(primary_flag),
+            "{name} must use its normal path-selection flag"
+        );
+        if !secondary_flag.is_empty() {
+            assert!(
+                workflow.contains(secondary_flag),
+                "{name} must force its package job as well"
+            );
+        }
+    }
+
+    let quality = read_repo_file(".github/workflows/quality.yml");
+    assert_eq!(
+        quality
+            .matches("if: needs.changes.outputs.run_rust_or_unknown == 'true'")
+            .count(),
+        4,
+        "ci-full must make Quality lint, test, build, and rustdoc eligible to run"
+    );
+    assert!(
+        quality.contains("if: needs.changes.outputs.run_package == 'true'"),
+        "ci-full must make the Quality package job eligible to run"
+    );
+
+    let mutation = read_repo_file(".github/workflows/mutation.yml");
+    assert!(
+        mutation.contains("types: [opened, synchronize, reopened, labeled, unlabeled]"),
+        "mutation CI must evaluate ci-full when a pull request label changes"
+    );
+    assert!(
+        mutation.contains(
+            "force_full=\"${{ contains(github.event.pull_request.labels.*.name, 'ci-full') }}\""
+        ) && mutation.contains("if [[ \"$force_full\" == \"true\" || \"$mutation\" == \"true\" ]]"),
+        "mutation CI must make ci-full force the mutation job"
+    );
+    let pull_request_trigger = mutation
+        .split("pull_request:")
+        .nth(1)
+        .and_then(|section| section.split("permissions:").next())
+        .expect("mutation CI must define a pull request trigger");
+    assert!(
+        !pull_request_trigger.contains("paths:"),
+        "mutation CI must not block a ci-full label event with a pull request path filter"
+    );
+    assert!(
+        mutation.contains("run_mutation"),
+        "mutation CI must detect whether it must run"
+    );
+    assert!(
+        mutation.contains("if: needs.changes.outputs.run_mutation == 'true'"),
+        "mutation CI must not queue mutation testing for a light pull request without ci-full"
+    );
+
+    let selective_ci = read_repo_file("docs/selective-ci.md");
+    assert!(
+        selective_ci.contains("ci-full"),
+        "the selective-CI documentation must describe the ci-full escape hatch"
+    );
+}
+
+#[test]
 fn third_party_actions_use_full_commit_ids_with_minimal_permissions_and_dependabot() {
     for name in [
         "quality.yml",
