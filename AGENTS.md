@@ -1,4 +1,4 @@
-Only report information in ASD-STE100 Simplified Technical English. 
+Only report information in ASD-STE100 Simplified Technical English grounded in correct domain language from CONTEXT.md.  
 
 ## Agent skills
 
