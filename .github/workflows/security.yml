@@ -10,9 +10,66 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
+  changes:
+    name: detect audit paths
+    runs-on: ubuntu-latest
+    outputs:
+      run_audit_or_unknown: ${{ steps.classes.outputs.run_audit_or_unknown }}
+    steps:
+      - if: github.event_name != 'schedule'
+        uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+      - if: github.event_name != 'schedule'
+        uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3
+        id: filter
+        with:
+          filters: |
+            dependencies:
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - '.github/workflows/security.yml'
+            light:
+              - 'AGENTS.md'
+              - 'CONTEXT.md'
+              - 'CONTEXT-MAP.md'
+              - 'CHANGELOG.md'
+              - 'CODE_OF_CONDUCT.md'
+              - 'CONTRIBUTING.md'
+              - 'LICENSE'
+              - 'LICENSE.*'
+              - 'README.md'
+              - 'docs/**'
+              - 'mkdocs.yml'
+              - '.agents/**'
+              - '.claude/**'
+              - '**/*.md'
+              - '.gitignore'
+              - '.gitattributes'
+              - '.github/ISSUE_TEMPLATE/**'
+              - '.github/PULL_REQUEST_TEMPLATE*'
+              - '.github/dependabot.yml'
+      - id: classes
+        name: Derive audit flag
+        run: |
+          if [[ "${{ github.event_name }}" == "schedule" ]]; then
+            run_audit_or_unknown=true
+          else
+            dependencies='${{ steps.filter.outputs.dependencies }}'
+            light='${{ steps.filter.outputs.light }}'
+            if [[ "$dependencies" == "true" || "$light" != "true" ]]; then
+              run_audit_or_unknown=true
+            else
+              run_audit_or_unknown=false
+            fi
+          fi
+          echo "run_audit_or_unknown=$run_audit_or_unknown" >> "$GITHUB_OUTPUT"
+          echo "Audit paths: event=${{ github.event_name }} run_audit_or_unknown=$run_audit_or_unknown"
+
   audit:
+    needs: changes
+    if: needs.changes.outputs.run_audit_or_unknown == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
@@ -21,3 +78,20 @@ jobs:
           toolchain: stable
       - run: cargo install cargo-audit --version 0.22.2 --locked
       - run: cargo audit --deny warnings
+
+  audit-gate:
+    name: audit-gate
+    if: always()
+    needs: [changes, audit]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require audit result
+        run: |
+          if [[ "${{ needs.changes.result }}" != "success" ]]; then
+            echo "Path detection failed."
+            exit 1
+          fi
+          if [[ "${{ needs.audit.result }}" != "success" && "${{ needs.audit.result }}" != "skipped" ]]; then
+            echo "Audit result: ${{ needs.audit.result }}"
+            exit 1
+          fi
