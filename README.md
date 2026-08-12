@@ -1,48 +1,106 @@
-# mutarust [![Crates.io](https://img.shields.io/crates/v/mutarust.svg)](https://crates.io/crates/mutarust) [![Docs](https://img.shields.io/docsrs/mutarust)](https://docs.rs/mutarust) [![Mutation Testing](https://github.com/quality-gates/mutarust/actions/workflows/mutation.yml/badge.svg)](https://github.com/quality-gates/mutarust/actions/workflows/mutation.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Rust 1.85+](https://img.shields.io/badge/Rust-1.85+-dea584.svg)](https://www.rust-lang.org)
+# mutarust
 
-`mutarust` is a mutation testing tool for Rust.
+Catch weak tests in Rust before they calcify: small source changes that should
+fail the suite and do not. Mutation testing answers whether the tests would
+catch a real bug of that shape — not only whether lines executed.
 
-Install a released version with Cargo:
+`mutarust` is a local CLI. It mutates Rust production source, runs your Cargo
+tests against each mutant, and reports kills, escapes, and scores. Rust 1.85+.
 
-```text
+## Quick start
+
+```console
 cargo install mutarust
-mutarust --help
+mutarust .
 ```
 
-For a source checkout:
+That mutates the crate and prints each mutant status on stdout. Exit `0` is
+clean against any configured gates, `4` means a score gate failed, and other
+non-zero codes mean the tool or the test run failed.
 
-```text
+Common next steps:
+
+```console
+mutarust --coverage .
+mutarust --coverage --min-msi 75 --min-covered-msi 80 .
+mutarust --quiet --coverage --logger-github .
+```
+
+Full command guide: [docs/cli.md](docs/cli.md).
+Configuration: [docs/config.md](docs/config.md).
+Mutators: [docs/mutators.md](docs/mutators.md).
+Reports: [docs/json-outputs.md](docs/json-outputs.md).
+
+## Install
+
+```console
+cargo install mutarust
+mutarust --version
+```
+
+From a local checkout:
+
+```console
 cargo install --path .
 ```
 
-List Rust production source files before mutation testing:
+## Tune the gate
 
-```text
-mutarust --list-files .
+Start without score floors while you learn the escape set. Add coverage so
+uncovered lines do not drag the total score, then pin floors the suite can hold:
+
+```console
+mutarust --coverage --min-msi 75 --min-covered-msi 80 .
 ```
 
-Print the parsed Rust syntax for a selected source:
+Put the same policy in `mutarust.yml` when thresholds need to live in the repo.
+See [docs/config.md](docs/config.md).
 
-```text
-mutarust --print-ast src/lib.rs
+On a legacy crate with accepted survivors, record a baseline and fail only on
+new escapes:
+
+```console
+mutarust --update-baseline .
+mutarust --baseline mutarust-baseline.json --fail-on-escaped .
 ```
 
-## Documentation
+## Suppress one intentional exception
 
-- [Install](docs/install.md)
-- [Quick Start](docs/quickstart.md)
-- [Command guide](docs/cli.md)
-- [Configuration](docs/config.md)
-- [Mutators](docs/mutators.md)
-- [Reports](docs/json-outputs.md)
-- [Custom mutators](docs/custom-mutators.md)
-- [CI integration](docs/ci.md)
-- [Release](docs/release.md)
-- [Domain glossary](docs/glossary.md)
-- [Mutago v2.7.7 parity table](docs/parity.md)
+Blacklist a known false positive by checksum, or skip source lines with config
+patterns. See [docs/cli.md](docs/cli.md) (`--blacklist`) and
+[docs/config.md](docs/config.md) (`ignore_source_lines`, `disable_mutators`).
 
-Optional local hooks live in `githooks/`. They are not active by default. Enable
-them with `git config core.hooksPath githooks`.
+## Drop it into CI
+
+```yaml
+# GitHub Actions
+- uses: dtolnay/rust-toolchain@stable
+  with:
+    components: llvm-tools-preview
+- run: cargo install cargo-llvm-cov mutarust --locked
+- run: mutarust --coverage --min-msi 75 --min-covered-msi 80 --logger-github .
+```
+
+```yaml
+# GitLab Code Quality
+script: mutarust --coverage --logger-gitlab --min-msi 75 .
+artifacts:
+  reports:
+    codequality: mutarust-gitlab.json
+```
+
+Full workflows and baseline adoption: [docs/ci.md](docs/ci.md).
+
+## Maintainers
+
+Install details: [docs/install.md](docs/install.md).
+Release process: [docs/release.md](docs/release.md).
+Domain glossary: [docs/glossary.md](docs/glossary.md).
+Mutago parity table: [docs/parity.md](docs/parity.md).
+Custom mutators: [docs/custom-mutators.md](docs/custom-mutators.md).
+
+Optional local hooks live in `githooks/`. Enable with
+`git config core.hooksPath githooks`.
 
 ## License
 
