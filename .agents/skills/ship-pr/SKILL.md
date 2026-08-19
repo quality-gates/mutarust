@@ -1,56 +1,58 @@
 ---
 name: ship-pr
-description: Ship a green pull request onto its target branch and close any linked issue.
+description: "Ship current work through a pull request: create or reuse it, pass required checks, merge it, close linked issues, and verify the remote result."
 disable-model-invocation: true
 ---
 
 # Ship a PR
 
-Merge one open pull request onto its target branch after CI is green. Close the
-linked issue on merge when one is attached.
+## 1. Resolve or create
 
-## 1. Identify the PR
+Use an explicitly supplied PR. Otherwise treat the current branch as the work to
+ship.
 
-Resolve the open PR from, in order: the user's argument, the current branch's
-PR, the PR just raised in this session.
+Reuse the branch's open PR. When none exists, commit the intended work, push the
+branch, and create a PR against the user-named target or the repository default
+branch. Use the repository PR template.
 
-Complete when exactly one open PR is identified.
+An explicit PR is authoritative: report it when it is missing or not open rather
+than selecting another PR.
 
-## 2. Resolve target and issue
+Treat an existing PR's base as the target. When the user names another target,
+retarget the PR before continuing.
 
-Target branch, in order: the branch the user named, the PR's base, the
-repository default branch.
+Record the repository, base, head branch and SHA, draft and review state,
+required checks, and host-native closing issue links.
 
-Linked issue, in order: the issue the user named, the issue the PR already
-closes or references, none.
+## 2. Gate
 
-Complete when the target branch is known and the linked-issue decision is made
-(one issue, or none).
+Resolve linked issues from explicit arguments, otherwise the PR's host-native
+closing links. Bare mentions do not count. Add missing closing links to the PR
+body when it targets the default branch.
 
-## 3. Wait for green
+Mark a draft ready. Watch every required check on the recorded head SHA and fail
+fast on failure or cancellation. If the head changes, repeat the gate on the new
+SHA.
 
-Watch required checks on the PR until every required check has passed. If any
-required check fails, stop and report the failure.
+Require approvals, rulesets, and other branch protections. Never bypass them
+with administrator privileges.
 
-Complete only when the PR is mergeable and every required check is green.
+## 3. Merge
 
-## 4. Merge
+Use the user's merge method, otherwise the repository convention, otherwise
+squash.
 
-Merge through the host's pull-request merge (for GitHub: `gh pr merge`). Use the
-repository's configured merge method.
+Merge through the host. On GitHub, pass `--match-head-commit <sha>` and
+`--delete-branch`. A head mismatch restarts the gate.
 
-When a linked issue exists, include a `Closes #<n>` trailer on the merge so the
-issue closes with it. Omit the trailer when there is no linked issue.
+Wait through any merge queue until the PR state is `MERGED`.
 
-Delete the head branch on merge when the remote allows it.
+## 4. Verify
 
-Complete when the PR shows merged.
+Read the PR back. Fetch the target from the base repository and verify the
+host-reported merge commit is reachable from that remote branch.
 
-## 5. Confirm
+Close any selected issue still open, linking the merged PR. Verify the remote
+head branch was deleted where permitted; otherwise report why it remains.
 
-Fetch the remote target branch.
-
-Complete only when:
-
-- the merge commit is reachable from the remote target branch;
-- the linked issue is closed, if one was attached.
+Report the PR URL, merge commit, target, issue results, and branch result.
