@@ -2,7 +2,9 @@
 
 This file records important user changes.
 
-## Unreleased
+## 0.1.3 — 2026-08-27
+
+A compatible fix release. The public library interface does not change.
 
 ### Changed
 
@@ -23,6 +25,11 @@ This file records important user changes.
 - Mutation workers no longer restore and re-read the same source file between
   mutants. The original text stays in memory and only the new mutant bytes are
   written.
+
+### Fixed
+
+- Planning reuses the Cargo workspace description for source candidates in the
+  same package. This decreases dry-run planning time for large workspaces.
 
 ## 0.1.2 — 2026-08-05
 

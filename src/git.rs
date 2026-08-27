@@ -210,7 +210,7 @@ fn parse_hunk_range(header: &str) -> Result<Option<LineRange>, String> {
     if fields.next() != Some("@@") {
         return Err("could not parse changed Git hunk".to_owned());
     }
-    let (start, count) = new.split_once(',').map_or((new, "1"), |range| range);
+    let (start, count) = new.split_once(',').unwrap_or((new, "1"));
     let start = start
         .parse::<usize>()
         .map_err(|_| "could not parse changed Git hunk".to_owned())?;
