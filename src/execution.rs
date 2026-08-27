@@ -1604,6 +1604,7 @@ fn mutation_plan(
     let mut workspaces = Vec::new();
     let mut candidates = Vec::new();
     let mut metadata_cache = Vec::new();
+    let mut workspace_cache = Vec::new();
     for source in sources {
         let source = fs::canonicalize(&source).map_err(|error| {
             run_error(format!("could not resolve {}: {error}", source.display()))
@@ -1614,7 +1615,7 @@ fn mutation_plan(
         if !filters.allows_source_before_workspace(&source) {
             continue;
         }
-        let workspace = workspace_for(&source, &mut metadata_cache)?;
+        let workspace = workspace_for(&source, &mut metadata_cache, &mut workspace_cache)?;
         if !filters.allows_source(&source, &workspace.source_root) {
             continue;
         }
@@ -1654,7 +1655,11 @@ fn deduplicate_candidates(candidates: &mut Vec<MutationCandidate>) {
     });
 }
 
-fn workspace_for(source: &Path, metadata_cache: &mut Vec<Metadata>) -> Result<Workspace, RunError> {
+fn workspace_for(
+    source: &Path,
+    metadata_cache: &mut Vec<Metadata>,
+    workspace_cache: &mut Vec<Workspace>,
+) -> Result<Workspace, RunError> {
     let metadata = if let Some(metadata) = metadata_cache
         .iter()
         .find(|metadata| package_for(metadata, source).is_ok())
@@ -1678,17 +1683,28 @@ fn workspace_for(source: &Path, metadata_cache: &mut Vec<Metadata>) -> Result<Wo
             .last()
             .expect("metadata cache must contain the inserted value")
     };
-    workspace_from_metadata(source, metadata)
+    let package = package_for(metadata, source)?;
+    if let Some(workspace) = workspace_cache.iter().find(|workspace| {
+        workspace.manifest == package.manifest && source.starts_with(&workspace.root)
+    }) {
+        return Ok(workspace.clone());
+    }
+    let workspace = workspace_from_metadata(source, metadata, package)?;
+    workspace_cache.push(workspace.clone());
+    Ok(workspace)
 }
 
-fn workspace_from_metadata(source: &Path, metadata: &Metadata) -> Result<Workspace, RunError> {
+fn workspace_from_metadata(
+    source: &Path,
+    metadata: &Metadata,
+    package: CargoPackage,
+) -> Result<Workspace, RunError> {
     let root = fs::canonicalize(metadata.workspace_root.as_std_path()).map_err(|error| {
         run_error(format!(
             "could not resolve Cargo workspace for {}: {error}",
             source.display()
         ))
     })?;
-    let package = package_for(metadata, source)?;
     let source_root = common_ancestor(&[root.clone(), source.to_path_buf()])?;
     let (configurations, cargo_home) = cargo_configurations(&root)?;
     let CopyPaths {
