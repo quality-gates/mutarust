@@ -182,11 +182,11 @@ impl SourceFilter {
             disabled_functions,
             disabled_lines,
             cfg_ranges: if filters.skip_with_cfg {
-                conditional_source_ranges(text)
+                normalize_ranges(conditional_source_ranges(text))
             } else {
                 Vec::new()
             },
-            test_ranges: test_source_ranges(text),
+            test_ranges: normalize_ranges(test_source_ranges(text)),
             skip_source: filters.skip_without_test && !source_has_unit_tests(text),
         })
     }
@@ -224,18 +224,44 @@ impl SourceFilter {
     }
 
     fn in_conditional_source(&self, range: &Range<usize>) -> bool {
-        self.cfg_ranges.iter().any(|cfg| ranges_overlap(cfg, range))
+        range_overlaps_any(&self.cfg_ranges, range)
     }
 
     fn in_test_source(&self, range: &Range<usize>) -> bool {
-        self.test_ranges
-            .iter()
-            .any(|test| ranges_overlap(test, range))
+        range_overlaps_any(&self.test_ranges, range)
     }
 }
 
-fn ranges_overlap(left: &Range<usize>, right: &Range<usize>) -> bool {
-    left.start < right.end && right.start < left.end
+fn normalize_ranges(mut ranges: Vec<Range<usize>>) -> Vec<Range<usize>> {
+    if ranges.len() <= 1 {
+        return ranges;
+    }
+    ranges.sort_by_key(|range| (range.start, range.end));
+    let mut merged = Vec::with_capacity(ranges.len());
+    for range in ranges {
+        if range.is_empty() {
+            continue;
+        }
+        if let Some(last) = merged.last_mut() {
+            let last: &mut Range<usize> = last;
+            if range.start <= last.end {
+                last.end = last.end.max(range.end);
+                continue;
+            }
+        }
+        merged.push(range);
+    }
+    merged
+}
+
+fn range_overlaps_any(ranges: &[Range<usize>], target: &Range<usize>) -> bool {
+    if target.is_empty() {
+        return false;
+    }
+    let index = ranges.partition_point(|range| range.end <= target.start);
+    ranges
+        .get(index)
+        .is_some_and(|range| range.start < target.end)
 }
 
 fn source_has_unit_tests(text: &str) -> bool {
@@ -735,5 +761,22 @@ mod tests {
             filter.allows_mutation("value/other", &range),
             "an unselected known mutator must stay enabled"
         );
+    }
+
+    #[test]
+    fn range_overlaps_any_uses_binary_search_over_normalized_ranges() {
+        let raw = vec![30..40, 10..20, 15..25, 50..60];
+        let normalized = super::normalize_ranges(raw);
+        assert_eq!(normalized, vec![10..25, 30..40, 50..60]);
+
+        assert!(!super::range_overlaps_any(&normalized, &(0..10)));
+        assert!(super::range_overlaps_any(&normalized, &(0..11)));
+        assert!(super::range_overlaps_any(&normalized, &(12..18)));
+        assert!(super::range_overlaps_any(&normalized, &(24..35)));
+        assert!(!super::range_overlaps_any(&normalized, &(25..30)));
+        assert!(!super::range_overlaps_any(&normalized, &(40..50)));
+        assert!(super::range_overlaps_any(&normalized, &(45..55)));
+        assert!(!super::range_overlaps_any(&normalized, &(60..70)));
+        assert!(!super::range_overlaps_any(&normalized, &(15..15)));
     }
 }
