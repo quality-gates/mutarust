@@ -1644,11 +1644,13 @@ fn mutation_plan(
         if source_filter.skips_source() {
             continue;
         }
+        let lines: Vec<&str> = text.split_inclusive('\n').collect();
         workspaces.push(workspace.clone());
         let scope = CandidateScope {
             workspace: &workspace,
             source: &source,
             text: &text,
+            lines: &lines,
             filter: &source_filter,
             changed_lines,
         };
@@ -2364,6 +2366,7 @@ struct CandidateScope<'a> {
     workspace: &'a Workspace,
     source: &'a Path,
     text: &'a str,
+    lines: &'a [&'a str],
     filter: &'a SourceFilter,
     changed_lines: Option<&'a ChangedLines>,
 }
@@ -2427,6 +2430,7 @@ fn add_mutator_candidates(
             name,
             &mutation,
             scope.text,
+            scope.lines,
         )
         .map_err(run_error)?;
         if scope
