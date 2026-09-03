@@ -732,11 +732,37 @@ fn collect_per_test_coverage(
 ) -> Result<PerTestCoverageMap, RunError> {
     let mut coverage = PerTestCoverageMap::default();
     for workspace in coverage_workspaces(workspaces, execution.recursive) {
-        for test in list_cargo_tests(workspace, timeout, execution)? {
-            stop_if_interrupted()?;
-            let profile = collect_llvm_profile(workspace, timeout, execution, Some(&test))?;
-            coverage.add(profile, &test);
+        let tests = list_cargo_tests(workspace, timeout, execution)?;
+        if tests.is_empty() {
+            continue;
         }
+        let temporary = TemporaryWorkspace::create()?;
+        let result = (|| {
+            let copied_workspace = copy_workspace(workspace, temporary.path())?;
+            let copied_manifest = copied_path(workspace, temporary.path(), &workspace.manifest)?;
+            let profile_path = temporary.path().join("coverage.lcov");
+            for test in &tests {
+                stop_if_interrupted()?;
+                run_llvm_cov_command(
+                    &copied_workspace,
+                    &copied_manifest,
+                    temporary.path(),
+                    &profile_path,
+                    timeout,
+                    execution,
+                    Some(test),
+                )?;
+                let profile = read_restored_profile(
+                    &profile_path,
+                    &copied_workspace,
+                    temporary.path(),
+                    &workspace.layout_root,
+                )?;
+                coverage.add(profile, test);
+            }
+            Ok(())
+        })();
+        temporary.finish(result, false)?;
     }
     Ok(coverage)
 }
@@ -776,13 +802,25 @@ fn collect_llvm_profile(
             execution,
             test,
         )?;
-        parse_lcov(&profile, &copied_workspace)
-            .and_then(|profile| {
-                profile.restore_workspace_paths(temporary.path(), &workspace.layout_root)
-            })
-            .map_err(run_error)
+        read_restored_profile(
+            &profile,
+            &copied_workspace,
+            temporary.path(),
+            &workspace.layout_root,
+        )
     })();
     temporary.finish(result, false)
+}
+
+fn read_restored_profile(
+    profile_path: &Path,
+    copied_workspace: &Path,
+    temporary: &Path,
+    layout_root: &Path,
+) -> Result<crate::coverage::CoverageProfile, RunError> {
+    parse_lcov(profile_path, copied_workspace)
+        .and_then(|profile| profile.restore_workspace_paths(temporary, layout_root))
+        .map_err(run_error)
 }
 
 fn run_llvm_cov_command(
