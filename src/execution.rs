@@ -3791,15 +3791,24 @@ fn clone_profile_subdirectory(
     name: &str,
     crate_prefixes: &[String],
 ) -> Result<(), RunError> {
-    fs::create_dir(to)
-        .map_err(|error| run_error(format!("could not create {}: {error}", to.display())))?;
     match name {
-        "deps" => clone_deps_directory(from, to, crate_prefixes),
+        "deps" => {
+            fs::create_dir(to).map_err(|error| {
+                run_error(format!("could not create {}: {error}", to.display()))
+            })?;
+            clone_deps_directory(from, to, crate_prefixes)
+        }
         ".fingerprint" | "build" | "incremental" => {
+            fs::create_dir(to).map_err(|error| {
+                run_error(format!("could not create {}: {error}", to.display()))
+            })?;
             clone_named_subdirectories(from, to, crate_prefixes)
         }
         _ => {
             if is_crate_target_entry(name, crate_prefixes) {
+                fs::create_dir(to).map_err(|error| {
+                    run_error(format!("could not create {}: {error}", to.display()))
+                })?;
                 copy_tree(from, to)
             } else {
                 link_or_copy(from, to)
@@ -3869,8 +3878,11 @@ fn link_or_copy(from: &Path, to: &Path) -> Result<(), RunError> {
     let metadata = fs::symlink_metadata(from)
         .map_err(|error| run_error(format!("could not inspect {}: {error}", from.display())))?;
     if metadata.is_dir() {
-        fs::create_dir(to)
-            .map_err(|error| run_error(format!("could not create {}: {error}", to.display())))?;
+        if !to.exists() {
+            fs::create_dir(to).map_err(|error| {
+                run_error(format!("could not create {}: {error}", to.display()))
+            })?;
+        }
         copy_tree(from, to)
     } else {
         fs::copy(from, to)
