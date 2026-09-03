@@ -2,6 +2,19 @@
 
 This file records important user changes.
 
+## 0.1.4 — 2026-09-03
+
+A compatible fix release. The public library interface does not change.
+
+### Fixed
+
+- Process management replaces fixed sleep duration loops with adaptive backoff poll intervals.
+- Mutation candidate test and configuration overlap checks use binary search over sorted line ranges.
+- Mutation evidence diff generation avoids full-file line allocations.
+- Source candidate module discovery caches parsed ASTs to avoid multi-pass re-parsing.
+- Per-test coverage collection reuses a single build directory across individual test runs.
+- Parallel mutation workers share dependency build artifacts read-only with symbolic links instead of duplicating the full target directory.
+
 ## 0.1.3 — 2026-08-27
 
 A compatible fix release. The public library interface does not change.
