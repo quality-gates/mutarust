@@ -1393,6 +1393,25 @@ mod tests {
         );
     }
 
+    #[test]
+    fn wait_for_process_detects_exit_status() {
+        #[cfg(windows)]
+        let mut command = {
+            let mut cmd = std::process::Command::new("cmd");
+            cmd.args(["/C", "exit 0"]);
+            cmd
+        };
+        #[cfg(not(windows))]
+        let mut command = std::process::Command::new("true");
+        let mut child = super::ProcessChild::new(command.spawn().expect("command must spawn"));
+        let outcome = super::wait_for_process(&mut child, Duration::from_secs(5))
+            .expect("wait_for_process must succeed");
+        assert!(matches!(
+            outcome,
+            super::ProcessOutcome::Exited(status) if status.success()
+        ));
+    }
+
     fn test_result(state: MutationState) -> MutationResult {
         MutationResult {
             source: PathBuf::from("src/lib.rs"),
@@ -3026,6 +3045,8 @@ fn wait_for_process(
     timeout: Duration,
 ) -> Result<ProcessOutcome, RunError> {
     let started = Instant::now();
+    let mut interval = Duration::from_millis(5);
+    let max_interval = Duration::from_millis(100);
     loop {
         if let Some(status) = child.try_wait()? {
             return Ok(ProcessOutcome::Exited(status));
@@ -3034,11 +3055,14 @@ fn wait_for_process(
             child.stop_and_reap()?;
             return Err(run_error("mutation run interrupted"));
         }
-        if started.elapsed() >= timeout {
+        let elapsed = started.elapsed();
+        if elapsed >= timeout {
             child.stop_and_reap()?;
             return Ok(ProcessOutcome::TimedOut);
         }
-        thread::sleep(Duration::from_millis(10));
+        let remaining = timeout - elapsed;
+        thread::sleep(interval.min(remaining));
+        interval = (interval * 2).min(max_interval);
     }
 }
 
