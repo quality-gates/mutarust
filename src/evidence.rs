@@ -42,6 +42,7 @@ pub(crate) fn mutation_evidence(
     mutator: &str,
     mutation: &Mutation,
     text: &str,
+    source_lines: &[&str],
 ) -> Result<MutationEvidence, String> {
     let source = source
         .strip_prefix(source_root)
@@ -53,7 +54,28 @@ pub(crate) fn mutation_evidence(
             )
         })?;
     let source_name = portable_path(&source);
-    let changes = changed_lines(text, mutation);
+    let mutant = mutation.apply(text);
+    let after_lines: Vec<&str> = match &mutant {
+        Some(m) => m.split_inclusive('\n').collect(),
+        None => Vec::new(),
+    };
+    let changes = if mutant.is_some() {
+        let prefix = shared_prefix(source_lines, &after_lines);
+        let suffix = shared_suffix(&source_lines[prefix..], &after_lines[prefix..]);
+        let before = &source_lines[prefix..source_lines.len() - suffix];
+        let after = &after_lines[prefix..after_lines.len() - suffix];
+        ChangedLines {
+            before,
+            after,
+            first_line: prefix + 1,
+        }
+    } else {
+        ChangedLines {
+            before: &[],
+            after: &[],
+            first_line: 1,
+        }
+    };
     let stable_id = stable_mutant_id(&source_name, mutator, &changes);
     let blacklist_checksum = blacklist_checksum(&changes);
     let diff = unified_diff(&source_name, &changes);
@@ -66,36 +88,13 @@ pub(crate) fn mutation_evidence(
     })
 }
 
-struct ChangedLines {
-    before: Vec<String>,
-    after: Vec<String>,
+struct ChangedLines<'a> {
+    before: &'a [&'a str],
+    after: &'a [&'a str],
     first_line: usize,
 }
 
-fn changed_lines(source: &str, mutation: &Mutation) -> ChangedLines {
-    let Some(mutant) = mutation.apply(source) else {
-        return ChangedLines {
-            before: Vec::new(),
-            after: Vec::new(),
-            first_line: 1,
-        };
-    };
-    let before = lines(source);
-    let after = lines(&mutant);
-    let prefix = shared_prefix(&before, &after);
-    let suffix = shared_suffix(&before[prefix..], &after[prefix..]);
-    ChangedLines {
-        before: before[prefix..before.len() - suffix].to_vec(),
-        after: after[prefix..after.len() - suffix].to_vec(),
-        first_line: prefix + 1,
-    }
-}
-
-fn lines(source: &str) -> Vec<String> {
-    source.split_inclusive('\n').map(str::to_owned).collect()
-}
-
-fn shared_prefix(before: &[String], after: &[String]) -> usize {
+fn shared_prefix(before: &[&str], after: &[&str]) -> usize {
     before
         .iter()
         .zip(after)
@@ -103,7 +102,7 @@ fn shared_prefix(before: &[String], after: &[String]) -> usize {
         .count()
 }
 
-fn shared_suffix(before: &[String], after: &[String]) -> usize {
+fn shared_suffix(before: &[&str], after: &[&str]) -> usize {
     before
         .iter()
         .rev()
@@ -112,23 +111,23 @@ fn shared_suffix(before: &[String], after: &[String]) -> usize {
         .count()
 }
 
-fn stable_mutant_id(source: &str, mutator: &str, changes: &ChangedLines) -> StableMutantId {
-    let before = source_lines(&changes.before);
-    let after = source_lines(&changes.after);
+fn stable_mutant_id(source: &str, mutator: &str, changes: &ChangedLines<'_>) -> StableMutantId {
+    let before = source_lines(changes.before);
+    let after = source_lines(changes.after);
     StableMutantId(format!(
         "{:x}",
         md5::compute(format!("{source}\0{mutator}\0{before}\0{after}"))
     ))
 }
 
-fn blacklist_checksum(changes: &ChangedLines) -> MutationChecksum {
+fn blacklist_checksum(changes: &ChangedLines<'_>) -> MutationChecksum {
     let mut content = String::new();
-    append_checksum_lines(&mut content, '-', &changes.before);
-    append_checksum_lines(&mut content, '+', &changes.after);
+    append_checksum_lines(&mut content, '-', changes.before);
+    append_checksum_lines(&mut content, '+', changes.after);
     MutationChecksum::from_changed_lines(content)
 }
 
-fn append_checksum_lines(content: &mut String, marker: char, lines: &[String]) {
+fn append_checksum_lines(content: &mut String, marker: char, lines: &[&str]) {
     for line in lines {
         content.push(marker);
         content.push_str(line.trim_end_matches('\n'));
@@ -136,7 +135,7 @@ fn append_checksum_lines(content: &mut String, marker: char, lines: &[String]) {
     }
 }
 
-fn source_lines(lines: &[String]) -> String {
+fn source_lines(lines: &[&str]) -> String {
     let mut content = String::new();
     for line in lines {
         content.push_str(line.trim_end_matches('\n'));
@@ -145,7 +144,7 @@ fn source_lines(lines: &[String]) -> String {
     content
 }
 
-fn unified_diff(source: &str, changes: &ChangedLines) -> String {
+fn unified_diff(source: &str, changes: &ChangedLines<'_>) -> String {
     let mut diff = format!(
         "--- {source}\n+++ {source}\n@@ -{},{} +{},{} @@\n",
         changes.first_line,
@@ -153,12 +152,12 @@ fn unified_diff(source: &str, changes: &ChangedLines) -> String {
         changes.first_line,
         changes.after.len()
     );
-    append_diff_lines(&mut diff, '-', &changes.before);
-    append_diff_lines(&mut diff, '+', &changes.after);
+    append_diff_lines(&mut diff, '-', changes.before);
+    append_diff_lines(&mut diff, '+', changes.after);
     diff
 }
 
-fn append_diff_lines(diff: &mut String, marker: char, lines: &[String]) {
+fn append_diff_lines(diff: &mut String, marker: char, lines: &[&str]) {
     for line in lines {
         diff.push(marker);
         diff.push_str(line);
@@ -178,13 +177,24 @@ mod tests {
 
     use crate::Mutation;
 
-    use super::{StableMutantId, mutation_evidence};
+    use super::{MutationEvidence, StableMutantId, mutation_evidence};
+
+    fn evidence_for_text(
+        source_root: &Path,
+        source: &Path,
+        mutator: &str,
+        mutation: &Mutation,
+        text: &str,
+    ) -> Result<MutationEvidence, String> {
+        let lines: Vec<&str> = text.split_inclusive('\n').collect();
+        mutation_evidence(source_root, source, mutator, mutation, text, &lines)
+    }
 
     #[test]
     fn evidence_uses_the_mutago_stable_id_rule() {
         let source = "pub fn unchecked() -> bool { true }\n";
         let mutation = Mutation::new(29..33, "false");
-        let evidence = mutation_evidence(
+        let evidence = evidence_for_text(
             Path::new("workspace"),
             Path::new("workspace/checked/src/lib.rs"),
             "conditional/bool-literal",
@@ -217,7 +227,7 @@ mod tests {
         let source = "fn first() {}\npub fn unchecked() -> bool { true }\nfn last() {}\n";
         let start = source.find("true").expect("fixture must contain true");
         let mutation = Mutation::new(start..start + 4, "false");
-        let evidence = mutation_evidence(
+        let evidence = evidence_for_text(
             Path::new("workspace"),
             Path::new("workspace/checked/src/lib.rs"),
             "conditional/bool-literal",
