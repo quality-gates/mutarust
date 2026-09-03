@@ -110,9 +110,14 @@ impl SourceFilters {
     }
 
     /// Builds the source-local rules for one Rust source file.
-    pub(crate) fn for_source(&self, source: &Path, text: &str) -> Result<SourceFilter, String> {
+    pub(crate) fn for_source(
+        &self,
+        source: &Path,
+        text: &str,
+        parsed: Option<&syn::File>,
+    ) -> Result<SourceFilter, String> {
         let _ = self.touch_content_policies();
-        SourceFilter::new(self, source, text)
+        build_source_filter(self, source, text, parsed)
     }
 }
 
@@ -136,61 +141,45 @@ pub(crate) struct SourceFilter {
     skip_source: bool,
 }
 
-impl SourceFilter {
-    fn new(filters: &SourceFilters, source: &Path, text: &str) -> Result<Self, String> {
-        let line_index = LineIndex::new(text);
-        let function_matcher = FunctionMatcher::new(filters, collect_functions(text, source)?);
-        let mut disabled_functions = FunctionDisables::default();
-        let ignored_lines = matching_lines(text, &filters.ignored_source_lines);
-        let mut disabled_lines = BTreeMap::new();
-        for comment in line_comments(text, &line_index) {
-            let Some(annotation) = Annotation::parse(&comment, source, &filters.known_mutators)?
-            else {
-                continue;
-            };
-            match annotation {
-                Annotation::Function(selection) => {
-                    let range = function_matcher.range_after(comment.line).ok_or_else(|| {
-                        annotation_error(
-                            source,
-                            comment.line,
-                            "function annotation must be directly before a function",
-                        )
-                    })?;
-                    disabled_functions.add(range, selection);
-                }
-                Annotation::NextLine(selection) => {
-                    disabled_lines
-                        .entry(comment.line + 1)
-                        .or_insert_with(Vec::new)
-                        .push(selection);
-                }
-                Annotation::RegularExpression(pattern, selection) => {
-                    for line in matching_lines(text, &[pattern]) {
-                        disabled_lines
-                            .entry(line)
-                            .or_insert_with(Vec::new)
-                            .push(selection.clone());
-                    }
-                }
-            }
+fn build_source_filter(
+    filters: &SourceFilters,
+    source: &Path,
+    text: &str,
+    parsed: Option<&syn::File>,
+) -> Result<SourceFilter, String> {
+    let line_index = LineIndex::new(text);
+    let functions = match parsed {
+        Some(syntax) => collect_functions(syntax),
+        None => {
+            let syntax = syn::parse_file(text).map_err(|error| {
+                format!(
+                    "could not parse source filters for {}: {error}",
+                    source.display()
+                )
+            })?;
+            collect_functions(&syntax)
         }
-        Ok(Self {
-            line_index,
-            ignored_lines,
-            function_matcher,
-            disabled_functions,
-            disabled_lines,
-            cfg_ranges: if filters.skip_with_cfg {
-                normalize_ranges(conditional_source_ranges(text))
-            } else {
-                Vec::new()
-            },
-            test_ranges: normalize_ranges(test_source_ranges(text)),
-            skip_source: filters.skip_without_test && !source_has_unit_tests(text),
-        })
-    }
+    };
+    let function_matcher = FunctionMatcher::new(filters, functions);
+    let (disabled_functions, disabled_lines) =
+        collect_annotations(text, &line_index, source, filters, &function_matcher)?;
+    Ok(SourceFilter {
+        line_index,
+        ignored_lines: matching_lines(text, &filters.ignored_source_lines),
+        function_matcher,
+        disabled_functions,
+        disabled_lines,
+        cfg_ranges: if filters.skip_with_cfg {
+            normalize_ranges(conditional_source_ranges(text, parsed))
+        } else {
+            Vec::new()
+        },
+        test_ranges: normalize_ranges(test_source_ranges(text, parsed)),
+        skip_source: filters.skip_without_test && !source_has_unit_tests(parsed),
+    })
+}
 
+impl SourceFilter {
     /// Returns whether skip-without-test excludes this whole source file.
     pub(crate) fn skips_source(&self) -> bool {
         self.skip_source
@@ -232,6 +221,51 @@ impl SourceFilter {
     }
 }
 
+type FilterDisables = (FunctionDisables, BTreeMap<usize, Vec<MutatorSelection>>);
+
+fn collect_annotations(
+    text: &str,
+    line_index: &LineIndex,
+    source: &Path,
+    filters: &SourceFilters,
+    function_matcher: &FunctionMatcher,
+) -> Result<FilterDisables, String> {
+    let mut disabled_functions = FunctionDisables::default();
+    let mut disabled_lines = BTreeMap::new();
+    for comment in line_comments(text, line_index) {
+        let Some(annotation) = Annotation::parse(&comment, source, &filters.known_mutators)? else {
+            continue;
+        };
+        match annotation {
+            Annotation::Function(selection) => {
+                let range = function_matcher.range_after(comment.line).ok_or_else(|| {
+                    annotation_error(
+                        source,
+                        comment.line,
+                        "function annotation must be directly before a function",
+                    )
+                })?;
+                disabled_functions.add(range, selection);
+            }
+            Annotation::NextLine(selection) => {
+                disabled_lines
+                    .entry(comment.line + 1)
+                    .or_insert_with(Vec::new)
+                    .push(selection);
+            }
+            Annotation::RegularExpression(pattern, selection) => {
+                for line in matching_lines(text, &[pattern]) {
+                    disabled_lines
+                        .entry(line)
+                        .or_insert_with(Vec::new)
+                        .push(selection.clone());
+                }
+            }
+        }
+    }
+    Ok((disabled_functions, disabled_lines))
+}
+
 fn normalize_ranges(mut ranges: Vec<Range<usize>>) -> Vec<Range<usize>> {
     if ranges.len() <= 1 {
         return ranges;
@@ -264,8 +298,8 @@ fn range_overlaps_any(ranges: &[Range<usize>], target: &Range<usize>) -> bool {
         .is_some_and(|range| range.start < target.end)
 }
 
-fn source_has_unit_tests(text: &str) -> bool {
-    let Ok(file) = syn::parse_file(text) else {
+fn source_has_unit_tests(file: Option<&syn::File>) -> bool {
+    let Some(file) = file else {
         return false;
     };
     file.items.iter().any(item_has_cfg_test)
@@ -282,8 +316,8 @@ fn item_has_cfg_test(item: &syn::Item) -> bool {
         }
 }
 
-fn conditional_source_ranges(text: &str) -> Vec<Range<usize>> {
-    let Ok(file) = syn::parse_file(text) else {
+fn conditional_source_ranges(text: &str, file: Option<&syn::File>) -> Vec<Range<usize>> {
+    let Some(file) = file else {
         return Vec::new();
     };
     let mut ranges = Vec::new();
@@ -295,8 +329,8 @@ fn conditional_source_ranges(text: &str) -> Vec<Range<usize>> {
     ranges
 }
 
-fn test_source_ranges(text: &str) -> Vec<Range<usize>> {
-    let Ok(file) = syn::parse_file(text) else {
+fn test_source_ranges(text: &str, file: Option<&syn::File>) -> Vec<Range<usize>> {
+    let Some(file) = file else {
         return Vec::new();
     };
     let mut ranges = Vec::new();
@@ -501,16 +535,10 @@ struct Function {
     matches: bool,
 }
 
-fn collect_functions(text: &str, source: &Path) -> Result<Vec<Function>, String> {
-    let syntax = syn::parse_file(text).map_err(|error| {
-        format!(
-            "could not parse source filters for {}: {error}",
-            source.display()
-        )
-    })?;
+fn collect_functions(syntax: &syn::File) -> Vec<Function> {
     let mut collector = FunctionCollector::default();
-    collector.visit_file(&syntax);
-    Ok(collector.functions)
+    collector.visit_file(syntax);
+    collector.functions
 }
 
 #[derive(Default)]
@@ -748,7 +776,7 @@ mod tests {
         let text =
             "// mutator-disable-next-line conditional/bool-literal\nconst VALUE: bool = true;\n";
         let filter = filters
-            .for_source(Path::new("selection.rs"), text)
+            .for_source(Path::new("selection.rs"), text, None)
             .expect("selected annotation must parse");
         let start = text.find("true").expect("fixture must contain true");
         let range = start..start + "true".len();

@@ -1640,7 +1640,10 @@ fn mutation_plan(
         }
         let text = fs::read_to_string(&source)
             .map_err(|error| run_error(format!("could not read {}: {error}", source.display())))?;
-        let source_filter = filters.for_source(&source, &text).map_err(run_error)?;
+        let parsed = syn::parse_file(&text).ok();
+        let source_filter = filters
+            .for_source(&source, &text, parsed.as_ref())
+            .map_err(run_error)?;
         if source_filter.skips_source() {
             continue;
         }
@@ -1652,6 +1655,7 @@ fn mutation_plan(
             text: &text,
             lines: &lines,
             filter: &source_filter,
+            parsed: parsed.as_ref(),
             changed_lines,
         };
         add_source_candidates(&mut candidates, registry, &scope, blacklist)?;
@@ -2368,6 +2372,7 @@ struct CandidateScope<'a> {
     text: &'a str,
     lines: &'a [&'a str],
     filter: &'a SourceFilter,
+    parsed: Option<&'a syn::File>,
     changed_lines: Option<&'a ChangedLines>,
 }
 
@@ -2377,7 +2382,7 @@ fn add_source_candidates(
     scope: &CandidateScope<'_>,
     blacklist: &mut Blacklist,
 ) -> Result<(), RunError> {
-    let Ok(file) = syn::parse_file(scope.text) else {
+    let Some(file) = scope.parsed else {
         return Ok(());
     };
     for name in registry.names() {
@@ -2389,7 +2394,7 @@ fn add_source_candidates(
             name,
             mutator,
             registry.guarantees_valid_syntax(name),
-            &file,
+            file,
             scope,
             blacklist,
         )?;

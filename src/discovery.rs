@@ -1,12 +1,33 @@
 use cargo_metadata::{Metadata, MetadataCommand, Package, TargetKind};
-use std::collections::BTreeSet;
+use std::cell::RefCell;
+use std::collections::{BTreeSet, HashMap};
 use std::env;
 use std::error::Error;
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::rc::Rc;
 use syn::{Expr, Item, ItemMacro, ItemMod, Lit, Meta};
+
+thread_local! {
+    static AST_CACHE: RefCell<HashMap<PathBuf, Option<Rc<syn::File>>>> = RefCell::new(HashMap::new());
+}
+
+fn parse_file_cached(path: &Path) -> Option<Rc<syn::File>> {
+    AST_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some(entry) = cache.get(path) {
+            return entry.clone();
+        }
+        let parsed = fs::read_to_string(path)
+            .ok()
+            .and_then(|text| syn::parse_file(&text).ok())
+            .map(Rc::new);
+        cache.insert(path.to_path_buf(), parsed.clone());
+        parsed
+    })
+}
 
 /// An error that prevents Rust source discovery.
 #[derive(Debug)]
@@ -365,10 +386,7 @@ fn collect_inactive_source_tree(
     configurations: &BTreeSet<String>,
     sources: &mut BTreeSet<PathBuf>,
 ) {
-    let Ok(text) = fs::read_to_string(source) else {
-        return;
-    };
-    let Ok(syntax) = syn::parse_file(&text) else {
+    let Some(syntax) = parse_file_cached(source) else {
         return;
     };
 
@@ -521,10 +539,7 @@ fn collect_source_tree(source: &Path, directory: &Path, sources: &mut BTreeSet<P
     if !sources.insert(source.to_path_buf()) {
         return;
     }
-    let Ok(text) = fs::read_to_string(source) else {
-        return;
-    };
-    let Ok(syntax) = syn::parse_file(&text) else {
+    let Some(syntax) = parse_file_cached(source) else {
         return;
     };
 
@@ -620,10 +635,7 @@ fn collect_production_source_tree(
     if !sources.insert(source.to_path_buf()) {
         return;
     }
-    let Ok(text) = fs::read_to_string(source) else {
-        return;
-    };
-    let Ok(syntax) = syn::parse_file(&text) else {
+    let Some(syntax) = parse_file_cached(source) else {
         return;
     };
 
@@ -756,10 +768,7 @@ fn test_only_source_tree(source: &Path) -> BTreeSet<PathBuf> {
 }
 
 fn collect_test_only_source_tree(source: &Path, directory: &Path, sources: &mut BTreeSet<PathBuf>) {
-    let Ok(text) = fs::read_to_string(source) else {
-        return;
-    };
-    let Ok(syntax) = syn::parse_file(&text) else {
+    let Some(syntax) = parse_file_cached(source) else {
         return;
     };
 
