@@ -1329,6 +1329,7 @@ fn selected_mutation_plan(
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::path::PathBuf;
     use std::time::Duration;
 
@@ -1450,6 +1451,80 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn is_crate_target_entry_distinguishes_crate_and_dependency_artifacts() {
+        let prefixes = vec![
+            "mutarust".to_string(),
+            "libmutarust".to_string(),
+            "install_smoke".to_string(),
+        ];
+        assert!(super::is_crate_target_entry(
+            "mutarust-c78832d192c04bb5",
+            &prefixes
+        ));
+        assert!(super::is_crate_target_entry(
+            "libmutarust-c78832d192c04bb5.rlib",
+            &prefixes
+        ));
+        assert!(super::is_crate_target_entry(
+            "mutarust-c78832d192c04bb5.d",
+            &prefixes
+        ));
+        assert!(super::is_crate_target_entry(
+            "install_smoke-328d3868fd379d88",
+            &prefixes
+        ));
+        assert!(!super::is_crate_target_entry("syn-2.0.119", &prefixes));
+        assert!(!super::is_crate_target_entry(
+            "libserde-1.0.229.rlib",
+            &prefixes
+        ));
+        assert!(!super::is_crate_target_entry("quote-1.0.47", &prefixes));
+    }
+
+    #[test]
+    fn clone_target_profile_symlinks_dependencies_and_copies_crate_artifacts() {
+        let template =
+            super::TemporaryWorkspace::create().expect("template workspace must be created");
+        let target_debug = template.path().join("target").join("debug");
+        let deps = target_debug.join("deps");
+        let fingerprint = target_debug.join(".fingerprint");
+        fs::create_dir_all(&deps).expect("deps dir must exist");
+        fs::create_dir_all(&fingerprint).expect("fingerprint dir must exist");
+
+        fs::write(deps.join("libsyn-123.rlib"), b"syn-data").expect("write syn");
+        fs::write(deps.join("libmutarust-456.rlib"), b"mutarust-data").expect("write mutarust");
+        fs::create_dir(fingerprint.join("syn-123")).expect("syn fingerprint dir");
+        fs::create_dir(fingerprint.join("mutarust-456")).expect("mutarust fingerprint dir");
+
+        let dest =
+            super::TemporaryWorkspace::create().expect("destination workspace must be created");
+        let dest_debug = dest.path().join("target").join("debug");
+        fs::create_dir_all(&dest_debug).expect("dest debug dir must exist");
+
+        let prefixes = vec!["mutarust".to_string(), "libmutarust".to_string()];
+        super::clone_target_profile(&target_debug, &dest_debug, &prefixes)
+            .expect("clone profile must succeed");
+
+        let syn_meta = fs::symlink_metadata(dest_debug.join("deps").join("libsyn-123.rlib"))
+            .expect("syn symlink metadata");
+        assert!(syn_meta.file_type().is_symlink());
+
+        let muta_meta = fs::symlink_metadata(dest_debug.join("deps").join("libmutarust-456.rlib"))
+            .expect("mutarust copy metadata");
+        assert!(muta_meta.file_type().is_file());
+
+        let syn_fp_meta = fs::symlink_metadata(dest_debug.join(".fingerprint").join("syn-123"))
+            .expect("syn fp metadata");
+        assert!(syn_fp_meta.file_type().is_symlink());
+
+        let muta_fp_meta =
+            fs::symlink_metadata(dest_debug.join(".fingerprint").join("mutarust-456"))
+                .expect("mutarust fp metadata");
+        assert!(muta_fp_meta.file_type().is_dir());
+        assert!(!muta_fp_meta.file_type().is_symlink());
+    }
+
     fn test_result(state: MutationState) -> MutationResult {
         MutationResult {
             source: PathBuf::from("src/lib.rs"),
@@ -1531,6 +1606,11 @@ fn test_clean_layout(
             }
         }
     }
+    let mut crate_prefixes = BTreeSet::new();
+    for w in workspaces {
+        crate_prefixes.extend(w.crate_prefixes.iter().cloned());
+    }
+    let crate_prefixes: Vec<String> = crate_prefixes.into_iter().collect();
     Ok((
         longest,
         WorkerScratch {
@@ -1538,6 +1618,7 @@ fn test_clean_layout(
             layout_root: workspace.layout_root.clone(),
             copied_workspace,
             dirty: None,
+            crate_prefixes,
         },
     ))
 }
@@ -1781,6 +1862,7 @@ fn workspace_from_metadata(
     let mut layout_paths = copy_paths.clone();
     layout_paths.extend(configurations.iter().cloned());
     let layout_root = common_ancestor(&layout_paths)?;
+    let crate_prefixes = target_artifact_prefixes(metadata, &manifests, &package);
     Ok(Workspace {
         root,
         source_root,
@@ -1792,7 +1874,37 @@ fn workspace_from_metadata(
         cargo_home,
         excluded_copy_roots,
         manifests,
+        crate_prefixes,
     })
+}
+
+fn target_artifact_prefixes(
+    metadata: &Metadata,
+    manifests: &[PathBuf],
+    package: &CargoPackage,
+) -> Vec<String> {
+    let mut names = BTreeSet::new();
+    names.insert(package.name.clone());
+    for pkg in &metadata.packages {
+        if manifests
+            .iter()
+            .any(|m| m == pkg.manifest_path.as_std_path())
+        {
+            names.insert(pkg.name.to_string());
+            for target in &pkg.targets {
+                names.insert(target.name.clone());
+            }
+        }
+    }
+    let mut prefixes = BTreeSet::new();
+    for name in names {
+        let normalized = name.replace('-', "_");
+        prefixes.insert(format!("lib{name}"));
+        prefixes.insert(format!("lib{normalized}"));
+        prefixes.insert(normalized);
+        prefixes.insert(name);
+    }
+    prefixes.into_iter().collect()
 }
 
 fn excluded_copy_roots(
@@ -3556,6 +3668,242 @@ fn replace_bytes(input: &[u8], from: &[u8], to: &[u8]) -> Option<Vec<u8>> {
     Some(output)
 }
 
+fn clone_tree_with_shared_dependencies(
+    source: &Path,
+    destination: &Path,
+    crate_prefixes: &[String],
+) -> Result<(), RunError> {
+    for entry in fs::read_dir(source)
+        .map_err(|error| run_error(format!("could not read {}: {error}", source.display())))?
+    {
+        stop_if_interrupted()?;
+        let entry =
+            entry.map_err(|error| run_error(format!("could not read workspace entry: {error}")))?;
+        let from = entry.path();
+        let to = destination.join(entry.file_name());
+        let file_type = fs::symlink_metadata(&from)
+            .map_err(|error| run_error(format!("could not inspect {}: {error}", from.display())))?
+            .file_type();
+        if file_type.is_symlink() {
+            copy_symbolic_link(&from, &to)?;
+            continue;
+        }
+        if file_type.is_dir() {
+            fs::create_dir(&to).map_err(|error| {
+                run_error(format!("could not create {}: {error}", to.display()))
+            })?;
+            if entry.file_name() == "target" {
+                clone_target_directory(&from, &to, crate_prefixes)?;
+            } else {
+                clone_tree_with_shared_dependencies(&from, &to, crate_prefixes)?;
+            }
+            continue;
+        }
+        if file_type.is_file() {
+            fs::copy(&from, &to).map_err(|error| {
+                run_error(format!(
+                    "could not copy {} to {}: {error}",
+                    from.display(),
+                    to.display()
+                ))
+            })?;
+            continue;
+        }
+        return Err(run_error(format!(
+            "could not copy unsupported workspace entry: {}",
+            from.display()
+        )));
+    }
+    Ok(())
+}
+
+fn clone_target_directory(
+    source: &Path,
+    destination: &Path,
+    crate_prefixes: &[String],
+) -> Result<(), RunError> {
+    for entry in fs::read_dir(source)
+        .map_err(|error| run_error(format!("could not read {}: {error}", source.display())))?
+    {
+        stop_if_interrupted()?;
+        let entry =
+            entry.map_err(|error| run_error(format!("could not read target entry: {error}")))?;
+        let from = entry.path();
+        let to = destination.join(entry.file_name());
+        let file_type = fs::symlink_metadata(&from)
+            .map_err(|error| run_error(format!("could not inspect {}: {error}", from.display())))?
+            .file_type();
+        if file_type.is_dir() {
+            fs::create_dir(&to).map_err(|error| {
+                run_error(format!("could not create {}: {error}", to.display()))
+            })?;
+            clone_target_profile(&from, &to, crate_prefixes)?;
+            continue;
+        }
+        if file_type.is_file() || file_type.is_symlink() {
+            link_or_copy(&from, &to)?;
+        }
+    }
+    Ok(())
+}
+
+fn clone_target_profile(
+    source: &Path,
+    destination: &Path,
+    crate_prefixes: &[String],
+) -> Result<(), RunError> {
+    for entry in fs::read_dir(source)
+        .map_err(|error| run_error(format!("could not read {}: {error}", source.display())))?
+    {
+        stop_if_interrupted()?;
+        let entry = entry
+            .map_err(|error| run_error(format!("could not read target profile entry: {error}")))?;
+        let from = entry.path();
+        let to = destination.join(entry.file_name());
+        let file_name = entry.file_name();
+        let name = file_name.to_string_lossy();
+        let file_type = fs::symlink_metadata(&from)
+            .map_err(|error| run_error(format!("could not inspect {}: {error}", from.display())))?
+            .file_type();
+
+        if file_type.is_dir() {
+            clone_profile_subdirectory(&from, &to, &name, crate_prefixes)?;
+            continue;
+        }
+        if is_crate_target_entry(&name, crate_prefixes) {
+            fs::copy(&from, &to).map_err(|error| {
+                run_error(format!(
+                    "could not copy {} to {}: {error}",
+                    from.display(),
+                    to.display()
+                ))
+            })?;
+        } else {
+            link_or_copy(&from, &to)?;
+        }
+    }
+    Ok(())
+}
+
+fn clone_profile_subdirectory(
+    from: &Path,
+    to: &Path,
+    name: &str,
+    crate_prefixes: &[String],
+) -> Result<(), RunError> {
+    match name {
+        "deps" => {
+            fs::create_dir(to).map_err(|error| {
+                run_error(format!("could not create {}: {error}", to.display()))
+            })?;
+            clone_deps_directory(from, to, crate_prefixes)
+        }
+        ".fingerprint" | "build" | "incremental" => {
+            fs::create_dir(to).map_err(|error| {
+                run_error(format!("could not create {}: {error}", to.display()))
+            })?;
+            clone_named_subdirectories(from, to, crate_prefixes)
+        }
+        _ => {
+            if is_crate_target_entry(name, crate_prefixes) {
+                fs::create_dir(to).map_err(|error| {
+                    run_error(format!("could not create {}: {error}", to.display()))
+                })?;
+                copy_tree(from, to)
+            } else {
+                link_or_copy(from, to)
+            }
+        }
+    }
+}
+
+fn clone_deps_directory(
+    source: &Path,
+    destination: &Path,
+    crate_prefixes: &[String],
+) -> Result<(), RunError> {
+    for entry in fs::read_dir(source)
+        .map_err(|error| run_error(format!("could not read {}: {error}", source.display())))?
+    {
+        stop_if_interrupted()?;
+        let entry =
+            entry.map_err(|error| run_error(format!("could not read deps entry: {error}")))?;
+        let from = entry.path();
+        let to = destination.join(entry.file_name());
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if is_crate_target_entry(&name, crate_prefixes) {
+            fs::copy(&from, &to).map_err(|error| {
+                run_error(format!(
+                    "could not copy {} to {}: {error}",
+                    from.display(),
+                    to.display()
+                ))
+            })?;
+        } else {
+            link_or_copy(&from, &to)?;
+        }
+    }
+    Ok(())
+}
+
+fn clone_named_subdirectories(
+    source: &Path,
+    destination: &Path,
+    crate_prefixes: &[String],
+) -> Result<(), RunError> {
+    for entry in fs::read_dir(source)
+        .map_err(|error| run_error(format!("could not read {}: {error}", source.display())))?
+    {
+        stop_if_interrupted()?;
+        let entry = entry.map_err(|error| run_error(format!("could not read entry: {error}")))?;
+        let from = entry.path();
+        let to = destination.join(entry.file_name());
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if is_crate_target_entry(&name, crate_prefixes) {
+            fs::create_dir(&to).map_err(|error| {
+                run_error(format!("could not create {}: {error}", to.display()))
+            })?;
+            copy_tree(&from, &to)?;
+        } else {
+            link_or_copy(&from, &to)?;
+        }
+    }
+    Ok(())
+}
+
+fn link_or_copy(from: &Path, to: &Path) -> Result<(), RunError> {
+    if create_symbolic_link(from, to).is_ok() {
+        return Ok(());
+    }
+    let metadata = fs::symlink_metadata(from)
+        .map_err(|error| run_error(format!("could not inspect {}: {error}", from.display())))?;
+    if metadata.is_dir() {
+        if !to.exists() {
+            fs::create_dir(to).map_err(|error| {
+                run_error(format!("could not create {}: {error}", to.display()))
+            })?;
+        }
+        copy_tree(from, to)
+    } else {
+        fs::copy(from, to)
+            .map(|_| ())
+            .map_err(|error| run_error(format!("could not copy {}: {error}", from.display())))
+    }
+}
+
+fn is_crate_target_entry(name: &str, prefixes: &[String]) -> bool {
+    prefixes.iter().any(|prefix| {
+        if let Some(rest) = name.strip_prefix(prefix) {
+            rest.is_empty()
+                || rest.starts_with('-')
+                || rest.starts_with('.')
+                || rest.starts_with('_')
+        } else {
+            false
+        }
+    })
+}
+
 /// Copies every file and directory under `source` into an existing `destination`.
 ///
 /// Used to seed a private worker scratch from a warm clean-suite template,
@@ -3757,12 +4105,14 @@ impl WarmBuilds {
                     .strip_prefix(template.temporary.path())
                     .map_err(|_| run_error("clean suite workspace path left the temporary root"))?
                     .to_path_buf(),
+                template.crate_prefixes.clone(),
             )
         };
         Ok(Some(WorkerScratch::clone_from_template(
             &template.0,
             template.1,
             &template.2,
+            &template.3,
         )?))
     }
 }
@@ -3782,6 +4132,7 @@ struct WorkerScratch {
     layout_root: PathBuf,
     copied_workspace: PathBuf,
     dirty: Option<DirtySource>,
+    crate_prefixes: Vec<String>,
 }
 
 struct DirtySource {
@@ -3798,6 +4149,7 @@ impl WorkerScratch {
             layout_root: workspace.layout_root.clone(),
             copied_workspace,
             dirty: None,
+            crate_prefixes: workspace.crate_prefixes.clone(),
         })
     }
 
@@ -3805,9 +4157,10 @@ impl WorkerScratch {
         template_root: &Path,
         layout_root: PathBuf,
         workspace_relative: &Path,
+        crate_prefixes: &[String],
     ) -> Result<Self, RunError> {
         let temporary = TemporaryWorkspace::create()?;
-        copy_tree(template_root, temporary.path())?;
+        clone_tree_with_shared_dependencies(template_root, temporary.path(), crate_prefixes)?;
         // Manifests, Cargo config, and target fingerprints embed absolute paths
         // from the clean-suite template. Point them at this private copy.
         remap_path_prefix_in_tree(temporary.path(), template_root, temporary.path())?;
@@ -3817,6 +4170,7 @@ impl WorkerScratch {
             layout_root,
             copied_workspace,
             dirty: None,
+            crate_prefixes: crate_prefixes.to_vec(),
         })
     }
 
@@ -3911,6 +4265,7 @@ struct Workspace {
     cargo_home: Option<PathBuf>,
     excluded_copy_roots: Vec<PathBuf>,
     manifests: Vec<PathBuf>,
+    crate_prefixes: Vec<String>,
 }
 
 struct TemporaryWorkspace {
