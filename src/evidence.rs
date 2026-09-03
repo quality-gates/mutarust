@@ -137,10 +137,12 @@ fn append_checksum_lines(content: &mut String, marker: char, lines: &[String]) {
 }
 
 fn source_lines(lines: &[String]) -> String {
-    lines
-        .iter()
-        .map(|line| format!("{}\n", line.trim_end_matches('\n')))
-        .collect()
+    let mut content = String::new();
+    for line in lines {
+        content.push_str(line.trim_end_matches('\n'));
+        content.push('\n');
+    }
+    content
 }
 
 fn unified_diff(source: &str, changes: &ChangedLines) -> String {
