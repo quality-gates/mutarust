@@ -1,5 +1,8 @@
 Only report information in ASD-STE100 Simplified Technical English grounded in correct domain language from CONTEXT.md.  
 
+Do all development work, debugging, etc. in a Docker container with capped resources.
+Always clean up build target cruft after work is done.
+
 Strongly recommend running `mutarust` inside a capped Docker container (`--cpus=1 --memory=512m --network=none`) so wall-time and resource claims stay comparable and host CPUs/RAM cannot inflate results; build a Linux binary in the image (a host macOS binary will not run).
 
 ## Agent skills
@@ -46,3 +49,5 @@ Non-obvious notes:
 - The `--coverage` and `--per-test` options need `cargo-llvm-cov` and the
   `llvm-tools-preview` component. These are not installed by default. See
   `docs/cli.md`.
+- Do all development work, debugging, etc. in a Docker container with capped resources (for example: `docker run --rm -it --cpus=2 --memory=2g -v "$PWD":/workspace mutarust-dev`).
+- Always clean up build target cruft after work is done (run `cargo clean` or delete the `target/` directory).
