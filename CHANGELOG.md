@@ -2,6 +2,15 @@
 
 This file records important user changes.
 
+## 0.1.5 — 2026-09-06
+
+A compatible release. The public library interface does not change.
+
+### Added
+
+- Production `Dockerfile` and development `dev.Dockerfile` for container execution.
+- `.dockerignore` to exclude build artifacts, git repository data, and worktrees.
+
 ## 0.1.4 — 2026-09-03
 
 A compatible fix release. The public library interface does not change.
