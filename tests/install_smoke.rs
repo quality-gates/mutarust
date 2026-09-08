@@ -6554,6 +6554,34 @@ fn installed_command_succeeds_when_git_diff_has_no_mutable_lines() {
 }
 
 #[test]
+fn installed_command_succeeds_when_git_diff_contains_quoted_file_paths() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = git_mutation_fixture(&root, "quoted-paths", "main");
+    let source = write_git_source(
+        &fixture,
+        "src/lib.rs",
+        "pub fn first() -> bool { let value = true; value }\npub fn second() -> bool { let value = true; value }\n",
+    );
+    commit_all(&fixture, "base");
+    run_git(&fixture, &["switch", "-c", "feature"]);
+    write_git_source(
+        &fixture,
+        "src/lib.rs",
+        "pub fn first() -> bool { let value = false; value }\npub fn second() -> bool { let value = true; value }\n",
+    );
+    fs::write(
+        fixture.join("docs with\ttab.txt"),
+        "Documentation with special tab path.\n",
+    )
+    .expect("Git fixture file with tab in name must be written");
+    commit_all(&fixture, "quoted path docs and first function change");
+
+    let output = git_dry_run(&install, &fixture, Some("main"), &source);
+    assert_dry_run_total(&output, 1);
+}
+
+#[test]
 fn installed_command_rejects_invalid_git_scope() {
     let root = smoke_root();
     let install = install_command(&root);
