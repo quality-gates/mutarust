@@ -557,7 +557,7 @@ diff --git a/src/with space.rs b/src/with space.rs
     #[test]
     fn changed_lines_load_uses_target_repository_over_process_directory() {
         let root = isolated_git_repo("target-root", "main");
-        let changed = ChangedLines::load(Some("main"), &[root.clone()])
+        let changed = ChangedLines::load(Some("main"), std::slice::from_ref(&root))
             .expect("must load changed lines from the target repository");
         assert_eq!(
             changed.root,
