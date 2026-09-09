@@ -67,8 +67,9 @@ fn installed_command_prints_help() {
         "help must identify the command purpose"
     );
     assert!(
-        String::from_utf8_lossy(&output.stdout)
-            .contains("--git-diff-base REF  Set Git base; default origin/HEAD, then master"),
+        String::from_utf8_lossy(&output.stdout).contains(
+            "--git-diff-base REF  Set Git base; default origin/HEAD, then the current branch"
+        ),
         "help must document the Git default and fallback"
     );
 
@@ -6383,7 +6384,7 @@ fn installed_command_selects_git_merge_base_and_uncommitted_changes() {
 }
 
 #[test]
-fn installed_command_uses_git_remote_default_and_master_fallback() {
+fn installed_command_uses_git_remote_default_and_local_branch_fallback() {
     let root = smoke_root();
     let install = install_command(&root);
     let remote = root.join("remote.git");
@@ -6428,6 +6429,21 @@ fn installed_command_uses_git_remote_default_and_master_fallback() {
         "pub fn value() -> bool { let value = false; value }\n",
     );
     assert_dry_run_total(&git_dry_run(&install, &fallback, None, &fallback_source), 1);
+
+    let main_only = git_mutation_fixture(&root, "main-only", "main");
+    let main_source = write_git_source(
+        &main_only,
+        "src/lib.rs",
+        "pub fn value() -> bool { let value = true; value }\n",
+    );
+    commit_all(&main_only, "base");
+    run_git(&main_only, &["switch", "-c", "feature"]);
+    write_git_source(
+        &main_only,
+        "src/lib.rs",
+        "pub fn value() -> bool { let value = false; value }\n",
+    );
+    assert_dry_run_total(&git_dry_run(&install, &main_only, None, &main_source), 1);
 }
 
 #[test]

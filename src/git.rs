@@ -101,21 +101,34 @@ fn default_base(root: &Path) -> Result<String, String> {
         ],
     )?;
     if output.status.success() {
-        let reference = String::from_utf8(output.stdout)
-            .map_err(|error| format!("could not read Git remote default branch: {error}"))?;
-        let reference = reference.trim();
-        if !reference.is_empty() {
-            return Ok(reference.to_owned());
-        }
-        return Err("could not read Git remote default branch".to_owned());
+        return git_name(output.stdout, "could not read Git remote default branch");
     }
     if output.status.code() == Some(1) {
-        Ok("master".to_owned())
+        current_branch(root)
     } else {
         Err(git_failure(
             "could not find Git remote default branch",
             &output,
         ))
+    }
+}
+
+fn current_branch(root: &Path) -> Result<String, String> {
+    let output = run_git(root, &["rev-parse", "--abbrev-ref", "HEAD"])?;
+    if output.status.success() {
+        git_name(output.stdout, "could not read Git current branch")
+    } else {
+        Err(git_failure("could not find Git current branch", &output))
+    }
+}
+
+fn git_name(stdout: Vec<u8>, error: &str) -> Result<String, String> {
+    let reference = String::from_utf8(stdout).map_err(|cause| format!("{error}: {cause}"))?;
+    let reference = reference.trim();
+    if reference.is_empty() {
+        Err(error.to_owned())
+    } else {
+        Ok(reference.to_owned())
     }
 }
 
@@ -483,5 +496,76 @@ diff --git a/src/with space.rs b/src/with space.rs
         assert_eq!(changed[Path::new("src/with space.rs")].len(), 1);
         assert_eq!(changed[Path::new("src/with space.rs")][0].first, 5);
         assert_eq!(changed[Path::new("src/with space.rs")][0].last, 7);
+    }
+
+    #[test]
+    fn default_base_resolves_when_origin_head_is_absent_and_branch_is_not_master() {
+        let root = isolated_git_repo("main-only", "main");
+        let base = default_base(&root).expect("must resolve a Git diff base");
+        assert_eq!(base, "main");
+        verify_base(&root, &base).expect("must verify the resolved Git diff base");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn default_base_uses_master_when_origin_head_is_absent() {
+        let root = isolated_git_repo("master-only", "master");
+        let base = default_base(&root).expect("must resolve a Git diff base");
+        assert_eq!(base, "master");
+        verify_base(&root, &base).expect("must verify master");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn default_base_uses_origin_head_when_present() {
+        let (root, origin) = isolated_git_repo_with_origin("with-origin", "main");
+        git(&root, &["switch", "-c", "feature"]);
+        let base = default_base(&root).expect("must resolve origin HEAD");
+        assert_eq!(base, "origin/main");
+        verify_base(&root, &base).expect("must verify origin HEAD");
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&origin);
+    }
+
+    fn isolated_git_repo(label: &str, branch: &str) -> PathBuf {
+        let root =
+            std::env::temp_dir().join(format!("mutarust-git-{label}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).expect("git fixture directory must be created");
+        git(&root, &["init", "--initial-branch", branch]);
+        git(&root, &["config", "user.email", "mutarust@example.invalid"]);
+        git(&root, &["config", "user.name", "Mutarust Test"]);
+        fs::write(root.join("file.txt"), "base\n").expect("git fixture file must be written");
+        git(&root, &["add", "."]);
+        git(&root, &["commit", "--message", "base"]);
+        root
+    }
+
+    fn isolated_git_repo_with_origin(label: &str, branch: &str) -> (PathBuf, PathBuf) {
+        let root = isolated_git_repo(label, branch);
+        let origin = std::env::temp_dir().join(format!(
+            "mutarust-git-{label}-origin-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&origin);
+        let origin_text = origin.to_str().expect("origin path must be UTF-8");
+        git(&root, &["clone", "--bare", ".", origin_text]);
+        git(&root, &["remote", "add", "origin", origin_text]);
+        git(&root, &["fetch", "origin"]);
+        git(&root, &["remote", "set-head", "origin", branch]);
+        (root, origin)
+    }
+
+    fn git(directory: &Path, arguments: &[&str]) {
+        let output = Command::new("git")
+            .args(arguments)
+            .current_dir(directory)
+            .output()
+            .expect("Git command must start");
+        assert!(
+            output.status.success(),
+            "Git command failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 }
