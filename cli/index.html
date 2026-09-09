@@ -1089,8 +1089,9 @@ untracked file and a pure rename have no Git changed-line scope. It does not
 select deleted lines.</p>
 <p>Use <code>--git-diff-base REF</code> to set the base ref. This option requires
 <code>--git-diff-lines</code>. Without this option, Mutarust uses the default branch from
-<code>origin/HEAD</code>. If Git has no <code>origin/HEAD</code>, Mutarust uses <code>master</code>. Mutarust
-stops with an error if it cannot find the Git repository, resolve the base ref,
+<code>origin/HEAD</code>. If Git has no <code>origin/HEAD</code>, Mutarust uses the current
+branch. Mutarust stops with an error if it cannot find the Git repository,
+resolve the base ref,
 or read the Git comparison. It does not use a wider source scope after a Git
 error. Each selected source must be inside that Git repository.</p>
 <p>If the current branch and the base branch have a merge base, Mutarust compares
