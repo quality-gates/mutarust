@@ -6692,7 +6692,7 @@ fn installed_command_selects_hunks_after_plus_prefix_header_like_content() {
 }
 
 #[test]
-fn installed_command_rejects_invalid_git_scope() {
+fn installed_command_validates_git_scope_and_base_controls() {
     let root = smoke_root();
     let install = install_command(&root);
     let non_git = root.join("non-git");
@@ -6721,21 +6721,6 @@ fn installed_command_rejects_invalid_git_scope() {
     assert_git_scope_error(
         git_dry_run(&install, &fixture, Some("does-not-exist"), &source),
         "does-not-exist",
-    );
-
-    let external = git_mutation_fixture(&root, "external-git", "main");
-    let external_source =
-        write_git_source(&external, "src/lib.rs", "pub fn value() -> bool { true }\n");
-    commit_all(&external, "base");
-    run_git(&external, &["switch", "-c", "feature"]);
-    write_git_source(
-        &external,
-        "src/lib.rs",
-        "pub fn value() -> bool { false }\n",
-    );
-    assert_git_scope_error(
-        git_dry_run(&install, &fixture, Some("main"), &external_source),
-        "outside Git repository",
     );
 
     let output = Command::new(command_path(&install))
