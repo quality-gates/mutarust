@@ -1476,6 +1476,69 @@ fn installed_command_filters_mutator_and_source_candidates() {
         "the three annotation forms must remove marked candidates only in their file"
     );
 
+    let documented = fixture.join("checked").join("src").join("documented.rs");
+    fs::write(
+        &documented,
+        "/// Adds two values.\n// mutator-disable-func arithmetic/base\npub fn add(left: i32, right: i32) -> i32 { let value = true; let _ = left + right; value }\n",
+    )
+    .expect("documented function annotation fixture must be written");
+    let documented_arithmetic = Command::new(command_path(&install))
+        .args(["--enable", "arithmetic/base", "--dry-run"])
+        .arg(&documented)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start with a documented function annotation");
+    assert!(
+        documented_arithmetic.status.success(),
+        "a function annotation after a doc comment must not stop the run: {}",
+        String::from_utf8_lossy(&documented_arithmetic.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&documented_arithmetic.stdout)
+            .contains("Total: 0 mutation(s) would be generated"),
+        "the function annotation must disable arithmetic/base: {}",
+        String::from_utf8_lossy(&documented_arithmetic.stdout)
+    );
+    let documented_bool = Command::new(command_path(&install))
+        .args(["--enable", "conditional/bool-literal", "--dry-run"])
+        .arg(&documented)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start with other mutators on a documented function");
+    assert!(
+        documented_bool.status.success(),
+        "other mutators on a documented function must succeed: {}",
+        String::from_utf8_lossy(&documented_bool.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&documented_bool.stdout)
+            .contains("Total: 1 mutation(s) would be generated"),
+        "other mutators must still produce mutants: {}",
+        String::from_utf8_lossy(&documented_bool.stdout)
+    );
+    fs::write(
+        &documented,
+        "// mutator-disable-func arithmetic/base\n/// Adds two values.\npub fn add(left: i32, right: i32) -> i32 { left + right }\n",
+    )
+    .expect("annotation above doc comment fixture must be written");
+    let above_doc = Command::new(command_path(&install))
+        .args(["--enable", "arithmetic/base", "--dry-run"])
+        .arg(&documented)
+        .current_dir(&fixture)
+        .output()
+        .expect("installed mutarust must start with an annotation above a doc comment");
+    assert!(
+        above_doc.status.success(),
+        "a function annotation above a doc comment must succeed: {}",
+        String::from_utf8_lossy(&above_doc.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&above_doc.stdout)
+            .contains("Total: 0 mutation(s) would be generated"),
+        "a function annotation above a doc comment must disable the mutator: {}",
+        String::from_utf8_lossy(&above_doc.stdout)
+    );
+
     fs::write(
         &annotations,
         "// mutator-disable-next-line unknown/mutator\npub fn invalid_annotation() -> bool { true }\n",

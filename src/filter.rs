@@ -449,9 +449,10 @@ impl FunctionMatcher {
     }
 
     fn range_after(&self, line: usize) -> Option<Range<usize>> {
+        let target = line + 1;
         self.functions
             .iter()
-            .find(|function| function.annotation_line == line + 1)
+            .find(|function| function.annotation_line == target || function.name_line == target)
             .map(|function| function.body.clone())
     }
 
@@ -531,6 +532,7 @@ impl LineIndex {
 struct Function {
     name: String,
     annotation_line: usize,
+    name_line: usize,
     body: Range<usize>,
     matches: bool,
 }
@@ -559,6 +561,7 @@ impl FunctionCollector {
             self.functions.push(Function {
                 name,
                 annotation_line: function_annotation_line(attributes, name_span),
+                name_line: name_span.start().line,
                 body,
                 matches: false,
             });
@@ -763,7 +766,80 @@ fn annotation_error(source: &Path, line: usize, message: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::SourceFilters;
+    use std::ops::Range;
     use std::path::Path;
+
+    fn known_mutators() -> [String; 2] {
+        [
+            "arithmetic/base".to_owned(),
+            "conditional/bool-literal".to_owned(),
+        ]
+    }
+
+    fn plus_range(text: &str) -> Range<usize> {
+        let start = text.find('+').expect("fixture must contain plus");
+        start..start + 1
+    }
+
+    #[test]
+    fn function_annotation_between_doc_comment_and_fn_does_not_stop_the_run() {
+        let filters = SourceFilters::new(&[], &[], None, &known_mutators())
+            .expect("source filters must accept known mutators");
+        let text = concat!(
+            "/// Adds two values.\n",
+            "// mutator-disable-func arithmetic/base\n",
+            "pub fn add(left: i32, right: i32) -> i32 { left + right }\n",
+        );
+        let filter = filters
+            .for_source(Path::new("doc.rs"), text, None)
+            .expect("function annotation after a doc comment must not stop the run");
+        let range = plus_range(text);
+        assert!(
+            !filter.allows_mutation("arithmetic/base", &range),
+            "the function annotation must disable arithmetic/base"
+        );
+        assert!(
+            filter.allows_mutation("conditional/bool-literal", &range),
+            "other mutators must stay enabled"
+        );
+    }
+
+    #[test]
+    fn function_annotation_above_doc_comment_still_disables_the_mutator() {
+        let filters = SourceFilters::new(&[], &[], None, &known_mutators())
+            .expect("source filters must accept known mutators");
+        let text = concat!(
+            "// mutator-disable-func arithmetic/base\n",
+            "/// Adds two values.\n",
+            "pub fn add(left: i32, right: i32) -> i32 { left + right }\n",
+        );
+        let filter = filters
+            .for_source(Path::new("doc.rs"), text, None)
+            .expect("function annotation above a doc comment must parse");
+        assert!(
+            !filter.allows_mutation("arithmetic/base", &plus_range(text)),
+            "the function annotation above a doc comment must disable arithmetic/base"
+        );
+    }
+
+    #[test]
+    fn function_annotation_not_next_to_a_function_still_fails() {
+        let filters = SourceFilters::new(&[], &[], None, &known_mutators())
+            .expect("source filters must accept known mutators");
+        let text = concat!(
+            "// mutator-disable-func arithmetic/base\n",
+            "\n",
+            "pub fn add(left: i32, right: i32) -> i32 { left + right }\n",
+        );
+        let error = filters
+            .for_source(Path::new("doc.rs"), text, None)
+            .err()
+            .expect("a function annotation that is not next to a function must fail");
+        assert!(
+            error.contains("function annotation must be directly before a function"),
+            "the diagnostic must keep the existing placement error: {error}"
+        );
+    }
 
     #[test]
     fn selected_annotation_keeps_another_known_mutator() {
