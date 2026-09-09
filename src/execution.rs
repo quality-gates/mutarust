@@ -2572,21 +2572,20 @@ fn add_mutator_candidates(
     };
     for mutation in mutations {
         let (range, replacement) = mutation.identity();
+        // A mutant whose applied text equals the source text is no mutation.
+        if scope.text.get(range.clone()) == Some(replacement) {
+            continue;
+        }
         if !scope.filter.allows_mutation(name, &range) {
             continue;
         }
-        let Some(changed_source) = mutation.apply(scope.text) else {
-            continue;
-        };
-        // An empty replacement in an empty range is the stable identity probe
-        // that custom mutators rely on; any other edit that leaves the source
-        // unchanged would only report an escaped phantom mutant.
-        let is_identity_probe = range.is_empty() && replacement.is_empty();
-        if !is_identity_probe && changed_source == scope.text {
-            continue;
-        }
-        if !syntax_is_guaranteed && syn::parse_file(&changed_source).is_err() {
-            continue;
+        if !syntax_is_guaranteed {
+            let Some(changed_source) = mutation.apply(scope.text) else {
+                continue;
+            };
+            if syn::parse_file(&changed_source).is_err() {
+                continue;
+            }
         }
         let evidence = mutation_evidence(
             &scope.workspace.source_root,

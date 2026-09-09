@@ -80,8 +80,10 @@ only when a concrete local function parameter proves the option type. It marks
 other candidates `Skipped` because the custom command selects its own compiler.
 
 `expression/remove` changes a direct left or right operand of `&&` or `||`. It
-replaces an `&&` operand with `true` and an `||` operand with `false`. It does
-not change bitwise operators.
+replaces an `&&` operand with `true` and an `||` operand with `false`. Mutarust
+does not plan a mutant when an `&&` operand is already `true` or an `||`
+operand is already `false`, because the mutant text is the same as the source
+text. It does not change bitwise operators.
 
 `expression/error-guard` changes a zero-argument method call used as a direct
 `if` condition. It replaces `is_err()` and `is_none()` with `false`. It

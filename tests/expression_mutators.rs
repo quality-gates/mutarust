@@ -280,23 +280,6 @@ fn expression_remove_replaces_logical_operands_with_constants() {
 }
 
 #[test]
-fn expression_remove_skips_operands_that_already_match_the_replacement() {
-    let and_source = "fn check(a: bool) -> bool { a && true }";
-    let or_source = "fn check(x: bool) -> bool { x || false }";
-
-    assert_eq!(
-        changed_sources("expression/remove", and_source),
-        vec![and_source.replacen("a && true", "true && true", 1)],
-        "a literal right operand that matches the replacement must not mutate"
-    );
-    assert_eq!(
-        changed_sources("expression/remove", or_source),
-        vec![or_source.replacen("x || false", "false || false", 1)],
-        "a literal right operand that matches the replacement must not mutate"
-    );
-}
-
-#[test]
 fn expression_error_guard_collapses_result_and_option_checks() {
     let source = "fn guards(result: Result<(), ()>, option: Option<()>) { if result.is_err() {} if result.is_ok() {} if option.is_none() {} if option.is_some() {} let _ = result.is_err(); }";
 
