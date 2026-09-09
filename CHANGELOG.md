@@ -2,6 +2,21 @@
 
 This file records important user changes.
 
+## 0.1.6 — 2026-09-09
+
+A compatible fix release. The public library interface does not change.
+
+### Fixed
+
+- `expression/remove` no longer plans a mutant whose applied text equals the
+  source, such as replacing the `true` in `a && true` or the `false` in
+  `x || false`. Phantom mutants no longer count as escaped with an empty diff,
+  and mutants on different operands keep distinct stable mutant IDs.
+- `// mutator-disable-func` on the line before `fn` works after a doc comment.
+- `--git-diff-lines` resolves the Git repository from the target path.
+- `--git-diff-lines` uses the current branch when `origin/HEAD` is missing.
+- Git diff hunk bodies that start with plus prefixes parse as source content.
+
 ## 0.1.5 — 2026-09-07
 
 A compatible release. The public library interface does not change.
