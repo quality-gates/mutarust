@@ -6617,10 +6617,7 @@ fn installed_command_selects_git_lines_from_outside_the_repository() {
 
     // Issue #139: the process working directory sits outside the Git
     // repository that contains the target. Selection must still work.
-    let outside = std::env::temp_dir().join(format!(
-        "mutarust-outside-cwd-{}",
-        std::process::id()
-    ));
+    let outside = std::env::temp_dir().join(format!("mutarust-outside-cwd-{}", std::process::id()));
     fs::create_dir_all(&outside).expect("outside working directory must be created");
     let output = Command::new(command_path(&install))
         .args(["--git-diff-lines", "--git-diff-base", "main", "--no-exec"])
