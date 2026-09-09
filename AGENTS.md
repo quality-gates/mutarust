@@ -50,4 +50,4 @@ Non-obvious notes:
   `llvm-tools-preview` component. These are not installed by default. See
   `docs/cli.md`.
 - Do all development work, debugging, etc. in a Docker container with capped resources (for example: `docker run --rm -it --cpus=2 --memory=2g -v "$PWD":/workspace mutarust-dev`).
-- Always clean up build target cruft after work is done (run `cargo clean` or delete the `target/` directory). Mutation runs rebuild the crate once per mutant, so the target directory can grow by tens of GB in one run: end any script that launches a mutation run with `cargo clean`, and run `docker volume rm mutarust-cargo-cache` when the run used the container's cargo cache volume.
+- Mutarust uses one isolated target directory per worker and removes those mutation areas by default. Keep that default: `--do-not-remove-tmp-folder` can retain tens of GB. Use fewer `--workers` when disk space is limited, then remove any retained areas that Mutarust reports.
