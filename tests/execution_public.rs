@@ -90,6 +90,69 @@ fn invalid_diff_fuzz_corpus_does_not_become_mutation_results() {
     );
 }
 
+struct NoOpEdit;
+
+impl mutarust::Mutator for NoOpEdit {
+    fn name(&self) -> &str {
+        "custom/no-op-edit"
+    }
+
+    fn mutations(&self, source: &str) -> Vec<mutarust::Mutation> {
+        let offset = source.find('1').expect("fixture source must contain 1");
+        vec![mutarust::Mutation::new(offset..offset + 1, "1")]
+    }
+}
+
+#[test]
+fn no_op_edits_do_not_become_mutation_results() {
+    let _run_guard = public_run_guard();
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system time must follow the Unix epoch")
+        .as_nanos();
+    let root = FixtureRoot(std::env::temp_dir().join(format!(
+        "mutarust-no-op-edit-{}-{unique}",
+        std::process::id()
+    )));
+    let source = root.0.join("src").join("lib.rs");
+    std::fs::create_dir_all(source.parent().expect("source must have a parent"))
+        .expect("fixture source directory must be created");
+    std::fs::write(
+        root.0.join("Cargo.toml"),
+        "[package]\nname = \"no-op-edit-fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .expect("fixture manifest must be written");
+    std::fs::write(&source, "pub fn café() -> i32 { 1 }\n")
+        .expect("fixture source must be written");
+
+    let registry = mutarust::RegistryBuilder::new()
+        .register(NoOpEdit)
+        .expect("custom mutator must register")
+        .build();
+    let names = registry.names().map(str::to_owned).collect::<Vec<_>>();
+    let filters = mutarust::SourceFilters::new(&[], &[], None, &names)
+        .expect("source filters must accept the custom mutator");
+    let controls = mutarust::ExecutionControls {
+        dry_run: true,
+        ..mutarust::ExecutionControls::default()
+    };
+    let run = mutarust::run_mutation_tests_with_controls(
+        &[source.to_string_lossy().into_owned()],
+        &registry,
+        std::time::Duration::from_secs(1),
+        None,
+        &filters,
+        &mutarust::TestExecution::cargo(),
+        &controls,
+    )
+    .expect("no-op edits must not fail the run");
+
+    assert!(
+        run.results().is_empty(),
+        "an edit that leaves the source unchanged must not become a result"
+    );
+}
+
 #[cfg(any(unix, windows))]
 static HOST_INTERRUPT_SEEN: AtomicBool = AtomicBool::new(false);
 

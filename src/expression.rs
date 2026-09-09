@@ -191,6 +191,13 @@ impl<'ast> Visit<'ast> for RemoveTermVisitor<'_> {
 impl RemoveTermVisitor<'_> {
     fn replace_operand(&mut self, expression: &Expr, replacement: &str) {
         if let Some(range) = span_range(self.source, expression.span()) {
+            if self
+                .source
+                .get(range.clone())
+                .is_some_and(|operand| operand.trim() == replacement)
+            {
+                return;
+            }
             self.mutations.push(Mutation::new(range, replacement));
         }
     }

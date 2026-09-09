@@ -2,6 +2,17 @@
 
 This file records important user changes.
 
+## Unreleased
+
+A compatible fix release. The public library interface does not change.
+
+### Fixed
+
+- `expression/remove` no longer plans a mutant whose applied text equals the
+  source, such as replacing the `true` in `a && true` or the `false` in
+  `x || false`. Phantom mutants no longer count as escaped with an empty diff,
+  and mutants on different operands keep distinct stable mutant IDs.
+
 ## 0.1.5 — 2026-09-07
 
 A compatible release. The public library interface does not change.
