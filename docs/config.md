@@ -109,7 +109,8 @@ fn generated_value() -> bool { true }
 
 An empty mutator list, or `*`, means all mutators. Mutarust checks annotation
 mutator names against the full built-in list. A function annotation must be on
-the line before its function. A regular-expression annotation uses the first
+the line before its function. The line before a doc comment or other attribute
+of that function is also valid. A regular-expression annotation uses the first
 space to separate its expression from its optional mutator list. Use an
 expression without spaces. Invalid annotations return exit value 3 with the
 source path and line.
