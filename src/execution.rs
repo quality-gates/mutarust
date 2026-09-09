@@ -2571,7 +2571,11 @@ fn add_mutator_candidates(
         mutator.mutations(scope.text)
     };
     for mutation in mutations {
-        let (range, _) = mutation.identity();
+        let (range, replacement) = mutation.identity();
+        // A mutant whose applied text equals the source text is no mutation.
+        if scope.text.get(range.clone()) == Some(replacement) {
+            continue;
+        }
         if !scope.filter.allows_mutation(name, &range) {
             continue;
         }

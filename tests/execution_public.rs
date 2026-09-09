@@ -32,6 +32,18 @@ impl mutarust::Mutator for InvalidEdit {
     }
 }
 
+struct NoOpReplacement;
+
+impl mutarust::Mutator for NoOpReplacement {
+    fn name(&self) -> &str {
+        "custom/no-op-replacement"
+    }
+
+    fn mutations(&self, _source: &str) -> Vec<mutarust::Mutation> {
+        vec![mutarust::Mutation::new(0..0, "")]
+    }
+}
+
 struct FixtureRoot(std::path::PathBuf);
 
 impl Drop for FixtureRoot {
@@ -173,6 +185,140 @@ fn worker_limit_requires_a_positive_value() {
     assert!(mutarust::WorkerLimit::new(0).is_none());
     let workers = mutarust::WorkerLimit::new(2).expect("two workers must be valid");
     assert_eq!(workers.get(), 2);
+}
+
+#[test]
+fn expression_remove_does_not_plan_a_no_op_mutant_for_tautological_operands() {
+    let _run_guard = public_run_guard();
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system time must follow the Unix epoch")
+        .as_nanos();
+    let root = FixtureRoot(std::env::temp_dir().join(format!(
+        "mutarust-no-op-remove-{}-{unique}",
+        std::process::id()
+    )));
+    let source = root.0.join("src").join("lib.rs");
+    std::fs::create_dir_all(source.parent().expect("source must have a parent"))
+        .expect("fixture source directory must be created");
+    std::fs::write(
+        root.0.join("Cargo.toml"),
+        "[package]\nname = \"no-op-remove-fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .expect("fixture manifest must be written");
+    std::fs::write(
+        &source,
+        "pub fn check(a: bool) -> bool {\n    a && true\n}\n\npub fn other(x: bool) -> bool {\n    x || false\n}\n",
+    )
+    .expect("fixture source must be written");
+
+    let mut registry = mutarust::Registry::builtins();
+    registry.retain(|name| name == "expression/remove");
+    let execution = mutarust::TestExecution::custom("false", false, false, false)
+        .expect("custom command must parse");
+    let filters = mutarust::SourceFilters::new(&[], &[], None, &[])
+        .expect("empty source filters must be valid");
+    let controls = mutarust::ExecutionControls::default();
+    let run = mutarust::run_mutation_tests_with_controls(
+        &[source.to_string_lossy().into_owned()],
+        &registry,
+        std::time::Duration::from_secs(1),
+        None,
+        &filters,
+        &execution,
+        &controls,
+    )
+    .expect("the run must complete");
+    let results = run.results();
+
+    let useful = [
+        "    true && true\n",   // left operand of a && true
+        "    false || false\n", // left operand of x || false
+    ];
+    for expected in useful {
+        assert!(
+            results.iter().any(|result| result.diff.contains(expected)),
+            "the useful operand mutant must stay planned: {expected}"
+        );
+    }
+    let phantoms: Vec<_> = results
+        .iter()
+        .filter(|result| {
+            !result.diff.lines().any(|line| {
+                (line.starts_with('-') && !line.starts_with("---"))
+                    || (line.starts_with('+') && !line.starts_with("+++"))
+            })
+        })
+        .collect();
+    assert!(
+        phantoms.is_empty(),
+        "a mutant whose applied text equals the source text must not be planned: {:?}",
+        phantoms
+            .iter()
+            .map(|result| result.diff.as_str())
+            .collect::<Vec<_>>()
+    );
+    let ids: std::collections::BTreeSet<&str> = results
+        .iter()
+        .map(|result| result.stable_id.as_str())
+        .collect();
+    assert_eq!(
+        ids.len(),
+        results.len(),
+        "each planned mutant must keep a distinct stable mutant ID"
+    );
+}
+
+#[test]
+fn custom_mutator_no_op_replacements_are_not_planned() {
+    let _run_guard = public_run_guard();
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system time must follow the Unix epoch")
+        .as_nanos();
+    let root = FixtureRoot(std::env::temp_dir().join(format!(
+        "mutarust-custom-no-op-{}-{unique}",
+        std::process::id()
+    )));
+    let source = root.0.join("src").join("lib.rs");
+    std::fs::create_dir_all(source.parent().expect("source must have a parent"))
+        .expect("fixture source directory must be created");
+    std::fs::write(
+        root.0.join("Cargo.toml"),
+        "[package]\nname = \"custom-no-op-fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .expect("fixture manifest must be written");
+    std::fs::write(
+        &source,
+        "pub fn check(a: bool) -> bool {\n    a && true\n}\n",
+    )
+    .expect("fixture source must be written");
+
+    let registry = mutarust::RegistryBuilder::new()
+        .register(NoOpReplacement)
+        .expect("custom mutator must register")
+        .build();
+    let names = registry.names().map(str::to_owned).collect::<Vec<_>>();
+    let execution = mutarust::TestExecution::custom("false", false, false, false)
+        .expect("custom command must parse");
+    let filters = mutarust::SourceFilters::new(&[], &[], None, &names)
+        .expect("source filters must accept the custom mutator");
+    let controls = mutarust::ExecutionControls::default();
+    let run = mutarust::run_mutation_tests_with_controls(
+        &[source.to_string_lossy().into_owned()],
+        &registry,
+        std::time::Duration::from_secs(1),
+        None,
+        &filters,
+        &execution,
+        &controls,
+    )
+    .expect("the run must complete");
+
+    assert!(
+        run.results().is_empty(),
+        "a mutant whose applied text equals the source text must not be planned"
+    );
 }
 
 #[cfg(windows)]
