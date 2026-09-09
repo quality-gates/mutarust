@@ -191,8 +191,9 @@ select deleted lines.
 
 Use `--git-diff-base REF` to set the base ref. This option requires
 `--git-diff-lines`. Without this option, Mutarust uses the default branch from
-`origin/HEAD`. If Git has no `origin/HEAD`, Mutarust uses `master`. Mutarust
-stops with an error if it cannot find the Git repository, resolve the base ref,
+`origin/HEAD`. If Git has no `origin/HEAD`, Mutarust uses the current
+branch. Mutarust stops with an error if it cannot find the Git repository,
+resolve the base ref,
 or read the Git comparison. It does not use a wider source scope after a Git
 error. Each selected source must be inside that Git repository.
 

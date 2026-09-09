@@ -84,7 +84,7 @@ fn print_help() -> io::Result<()> {
     )?;
     writeln!(
         stdout,
-        "      --coverage        Collect LLVM line coverage before mutation\n      --per-test        Run mapped tests for each covered mutant\n      --git-diff-lines  Mutate Git changed lines only\n      --git-diff-base REF  Set Git base; default origin/HEAD, then master\n      --html-output     Write mutarust-report.html\n      --ignore-msi-with-no-mutations  Pass score gates when no mutant exists"
+        "      --coverage        Collect LLVM line coverage before mutation\n      --per-test        Run mapped tests for each covered mutant\n      --git-diff-lines  Mutate Git changed lines only\n      --git-diff-base REF  Set Git base; default origin/HEAD, then the current branch\n      --html-output     Write mutarust-report.html\n      --ignore-msi-with-no-mutations  Pass score gates when no mutant exists"
     )
 }
 

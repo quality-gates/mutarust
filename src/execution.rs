@@ -384,7 +384,7 @@ fn state_letter(state: MutationState) -> char {
 pub struct GitDiffControls {
     /// Limits mutations to changed production lines.
     pub enabled: bool,
-    /// Sets the Git base ref. The default is `origin/HEAD`, then `master`.
+    /// Sets the Git base ref. The default is `origin/HEAD`, then the current branch.
     pub base: Option<String>,
 }
 
