@@ -559,7 +559,10 @@ diff --git a/src/with space.rs b/src/with space.rs
         let root = isolated_git_repo("target-root", "main");
         let changed = ChangedLines::load(Some("main"), &[root.clone()])
             .expect("must load changed lines from the target repository");
-        assert_eq!(changed.root, root);
+        assert_eq!(
+            changed.root,
+            fs::canonicalize(&root).expect("target repository must resolve")
+        );
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -573,7 +576,10 @@ diff --git a/src/with space.rs b/src/with space.rs
         let seeds = vec![outside.clone(), root.clone()];
         let changed = ChangedLines::load(Some("main"), &seeds)
             .expect("must load changed lines from the first seeded repository");
-        assert_eq!(changed.root, root);
+        assert_eq!(
+            changed.root,
+            fs::canonicalize(&root).expect("seed repository must resolve")
+        );
         let _ = fs::remove_dir_all(&root);
         let _ = fs::remove_dir_all(&outside);
     }
