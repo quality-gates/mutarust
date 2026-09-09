@@ -59,6 +59,32 @@ pub fn find_rust_sources(targets: &[String]) -> Result<Vec<PathBuf>, SourceError
     Ok(files.into_iter().collect())
 }
 
+/// Resolves the target values to absolute seed directories.
+///
+/// A path target yields the directory that holds its Rust sources: the
+/// target directory itself, or the parent for a file. A package name and a
+/// missing path yield no seed. The returned directories keep the target
+/// order and contain no duplicates.
+pub(crate) fn target_seed_directories(targets: &[String]) -> Vec<PathBuf> {
+    let mut seeds = Vec::<PathBuf>::new();
+    for target in default_targets(targets) {
+        let Ok(path) = fs::canonicalize(PathBuf::from(&target.value)) else {
+            continue;
+        };
+        let seed = if path.is_dir() {
+            path
+        } else if let Some(parent) = path.parent() {
+            parent.to_path_buf()
+        } else {
+            continue;
+        };
+        if !seeds.contains(&seed) {
+            seeds.push(seed);
+        }
+    }
+    seeds
+}
+
 fn default_targets(targets: &[String]) -> Vec<Target> {
     if targets.is_empty() {
         vec![Target::recursive(".".into())]
@@ -2354,5 +2380,45 @@ impl Target {
             value: if value.is_empty() { ".".into() } else { value },
             recursive: true,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn target_seed_directories_resolve_paths_and_skip_the_rest() {
+        let base = std::env::temp_dir().join(format!("mutarust-seeds-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(base.join("src")).expect("seed fixture directory must be created");
+        let file = base.join("src/lib.rs");
+        fs::write(&file, "").expect("seed fixture file must be written");
+
+        let seeds = target_seed_directories(&[
+            file.to_str().expect("seed file path must be UTF-8").into(),
+            base.join("src")
+                .to_str()
+                .expect("seed path must be UTF-8")
+                .into(),
+            base.join("missing")
+                .to_str()
+                .expect("seed path must be UTF-8")
+                .into(),
+            "no-such-package-seeds".into(),
+        ]);
+        let base = fs::canonicalize(&base).expect("seed fixture must resolve");
+        assert_eq!(seeds, vec![base.join("src")]);
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn target_seed_directories_default_to_the_working_directory() {
+        let seeds = target_seed_directories(&[]);
+        assert_eq!(
+            seeds,
+            vec![fs::canonicalize(".").expect("cwd must resolve")]
+        );
     }
 }

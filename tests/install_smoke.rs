@@ -6598,6 +6598,53 @@ fn installed_command_succeeds_when_git_diff_contains_quoted_file_paths() {
 }
 
 #[test]
+fn installed_command_selects_git_lines_from_outside_the_repository() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = git_mutation_fixture(&root, "outside-cwd", "main");
+    let source = write_git_source(
+        &fixture,
+        "src/lib.rs",
+        "pub fn first() -> bool { let value = true; value }\npub fn second() -> bool { let value = true; value }\n",
+    );
+    commit_all(&fixture, "base");
+    run_git(&fixture, &["switch", "-c", "feature"]);
+    write_git_source(
+        &fixture,
+        "src/lib.rs",
+        "pub fn first() -> bool { let value = false; value }\npub fn second() -> bool { let value = true; value }\n",
+    );
+
+    // Issue #139: the process working directory sits outside the Git
+    // repository that contains the target. Selection must still work.
+    let outside = std::env::temp_dir().join(format!(
+        "mutarust-outside-cwd-{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&outside).expect("outside working directory must be created");
+    let output = Command::new(command_path(&install))
+        .args(["--git-diff-lines", "--git-diff-base", "main", "--no-exec"])
+        .arg(&source)
+        .current_dir(&outside)
+        .env("TMPDIR", &outside)
+        .env("TEMP", &outside)
+        .env("TMP", &outside)
+        .output()
+        .expect("installed mutarust must start from an outside working directory");
+    assert!(
+        output.status.success(),
+        "changed-line selection must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("Generated: 1"),
+        "changed-line selection must generate one mutant: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let _ = fs::remove_dir_all(&outside);
+}
+
+#[test]
 fn installed_command_selects_changed_lines_that_start_with_plus_prefix() {
     let root = smoke_root();
     let install = install_command(&root);

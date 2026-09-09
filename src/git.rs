@@ -16,8 +16,8 @@ struct LineRange {
 }
 
 impl ChangedLines {
-    pub(crate) fn load(base: Option<&str>) -> Result<Self, String> {
-        let root = repository_root()?;
+    pub(crate) fn load(base: Option<&str>, seeds: &[PathBuf]) -> Result<Self, String> {
+        let root = repository_root(seeds)?;
         let base = match base {
             Some(base) => base.to_owned(),
             None => default_base(&root)?,
@@ -76,13 +76,40 @@ impl LineRange {
     }
 }
 
-fn repository_root() -> Result<PathBuf, String> {
+/// Finds the Git work tree that contains the targets.
+///
+/// Each seed directory holds one target. Git runs in the first seed that
+/// discovers a repository, so selection uses the repository that contains
+/// the target rather than the process working directory. With no seed, Git
+/// runs in the process working directory.
+fn repository_root(seeds: &[PathBuf]) -> Result<PathBuf, String> {
+    if seeds.is_empty() {
+        return repository_root_at(Path::new("."));
+    }
+    let mut failure = None;
+    for seed in seeds {
+        match repository_root_at(seed) {
+            Ok(root) => return Ok(root),
+            Err(error) => failure = Some(error),
+        }
+    }
+    Err(failure.expect("seed list must not be empty"))
+}
+
+fn repository_root_at(seed: &Path) -> Result<PathBuf, String> {
     let output = Command::new("git")
         .args(["rev-parse", "--show-toplevel"])
+        .current_dir(seed)
         .output()
         .map_err(|error| format!("could not run Git: {error}"))?;
     if !output.status.success() {
-        return Err(git_failure("could not find a Git repository", &output));
+        return Err(git_failure(
+            &format!(
+                "could not find a Git repository containing {}",
+                seed.display()
+            ),
+            &output,
+        ));
     }
     let root = String::from_utf8(output.stdout)
         .map_err(|error| format!("could not read Git repository path: {error}"))?;
@@ -525,6 +552,45 @@ diff --git a/src/with space.rs b/src/with space.rs
         verify_base(&root, &base).expect("must verify origin HEAD");
         let _ = fs::remove_dir_all(&root);
         let _ = fs::remove_dir_all(&origin);
+    }
+
+    #[test]
+    fn changed_lines_load_uses_target_repository_over_process_directory() {
+        let root = isolated_git_repo("target-root", "main");
+        let changed = ChangedLines::load(Some("main"), &[root.clone()])
+            .expect("must load changed lines from the target repository");
+        assert_eq!(changed.root, root);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn changed_lines_load_skips_seed_without_a_repository() {
+        let outside =
+            std::env::temp_dir().join(format!("mutarust-git-outside-seed-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&outside);
+        fs::create_dir_all(&outside).expect("outside seed directory must be created");
+        let root = isolated_git_repo("second-seed", "main");
+        let seeds = vec![outside.clone(), root.clone()];
+        let changed = ChangedLines::load(Some("main"), &seeds)
+            .expect("must load changed lines from the first seeded repository");
+        assert_eq!(changed.root, root);
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&outside);
+    }
+
+    #[test]
+    fn changed_lines_load_reports_target_outside_any_git_repository() {
+        let seed =
+            std::env::temp_dir().join(format!("mutarust-git-no-repo-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&seed);
+        fs::create_dir_all(&seed).expect("repository-free seed directory must be created");
+        let seeds = vec![seed.clone()];
+        let Err(error) = ChangedLines::load(Some("main"), &seeds) else {
+            panic!("a target outside a Git repository must fail");
+        };
+        assert!(error.contains("could not find a Git repository"), "{error}");
+        assert!(error.contains(&seed.display().to_string()), "{error}");
+        let _ = fs::remove_dir_all(&seed);
     }
 
     fn isolated_git_repo(label: &str, branch: &str) -> PathBuf {
