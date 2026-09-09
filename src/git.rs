@@ -167,14 +167,36 @@ fn git_failure(prefix: &str, output: &Output) -> String {
 fn parse_changed_lines(text: &str) -> Result<BTreeMap<PathBuf, Vec<LineRange>>, String> {
     let mut files = BTreeMap::<PathBuf, Vec<LineRange>>::new();
     let mut source = None;
+    let mut in_hunk = false;
+    let mut pending_header = false;
     for line in text.lines() {
+        if line.starts_with("diff --git ") {
+            in_hunk = false;
+            pending_header = false;
+            continue;
+        }
+        if line.starts_with("--- ") {
+            // Git prints the header pair `--- ` / `+++ ` before the first
+            // hunk of each file. A hunk body line that starts with `--`
+            // also prints as `--- `, so only trust it outside a hunk.
+            if !in_hunk {
+                pending_header = true;
+            }
+            continue;
+        }
         if let Some(header) = line.strip_prefix("+++ ") {
-            source = parse_source_path(header)?;
+            // A hunk body line that starts with `++` also prints as
+            // `+++ `, so only trust the header after its `--- ` pair.
+            if pending_header {
+                source = parse_source_path(header)?;
+            }
+            pending_header = false;
             continue;
         }
         if !line.starts_with("@@ ") {
             continue;
         }
+        in_hunk = true;
         let Some(path) = source.as_ref() else {
             continue;
         };
@@ -383,18 +405,69 @@ mod tests {
     }
 
     #[test]
+    fn parse_changed_lines_with_plus_prefix_content_lines() {
+        let diff = "\
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -10,1 +10,1 @@
+-++ bonus points
++++ extra points
+@@ -20,1 +21,1 @@
++++ b/src/other.rs
++plain added line
+";
+        let changed = parse_changed_lines(diff).expect("diff must parse");
+        assert_eq!(changed.len(), 1);
+        let ranges = &changed[Path::new("src/lib.rs")];
+        assert_eq!(ranges.len(), 2);
+        assert_eq!(ranges[0].first, 10);
+        assert_eq!(ranges[0].last, 10);
+        assert_eq!(ranges[1].first, 21);
+        assert_eq!(ranges[1].last, 21);
+        assert!(!changed.contains_key(Path::new("extra points")));
+        assert!(!changed.contains_key(Path::new("src/other.rs")));
+    }
+
+    #[test]
+    fn parse_changed_lines_with_plus_prefix_content_before_next_header() {
+        let diff = "\
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,1 +1,1 @@
+-++ bonus points
++++ extra points
+diff --git a/src/other.rs b/src/other.rs
+--- a/src/other.rs
++++ b/src/other.rs
+@@ -3,1 +3,1 @@
++changed
+";
+        let changed = parse_changed_lines(diff).expect("diff must parse");
+        assert_eq!(changed.len(), 2);
+        assert_eq!(changed[Path::new("src/lib.rs")][0].first, 1);
+        assert_eq!(changed[Path::new("src/lib.rs")][0].last, 1);
+        assert_eq!(changed[Path::new("src/other.rs")][0].first, 3);
+        assert_eq!(changed[Path::new("src/other.rs")][0].last, 3);
+    }
+
+    #[test]
     fn parse_changed_lines_with_mixed_quoted_and_unquoted_diff() {
         let diff = "\
+diff --git a/non_rust with\ttab.txt b/non_rust with\ttab.txt
 --- /dev/null
 +++ \"b/non_rust with\\ttab.txt\"
 @@ -0,0 +1,2 @@
 +one
 +two
+diff --git a/src/lib.rs b/src/lib.rs
 --- a/src/lib.rs
 +++ b/src/lib.rs
 @@ -10,1 +10,1 @@
 -old
 +new
+diff --git a/src/with space.rs b/src/with space.rs
 --- /dev/null
 +++ \"b/src/with space.rs\"
 @@ -0,0 +5,3 @@

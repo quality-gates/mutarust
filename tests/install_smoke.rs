@@ -6582,6 +6582,56 @@ fn installed_command_succeeds_when_git_diff_contains_quoted_file_paths() {
 }
 
 #[test]
+fn installed_command_selects_changed_lines_that_start_with_plus_prefix() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = git_mutation_fixture(&root, "plus-prefix-lines", "main");
+    let source = write_git_source(
+        &fixture,
+        "src/lib.rs",
+        "pub fn value() -> bool { let value = true; value }\npub fn msg() -> &'static str {\n    \"score:\n++ bonus points\nend\"\n}\n",
+    );
+    commit_all(&fixture, "base");
+    run_git(&fixture, &["switch", "-c", "feature"]);
+    write_git_source(
+        &fixture,
+        "src/lib.rs",
+        "pub fn value() -> bool { let value = false; value }\npub fn msg() -> &'static str {\n    \"score:\n++ extra points\nend\"\n}\n",
+    );
+
+    // The added source line `++ extra points` prints as `+++ extra points`
+    // in the diff. Git prints that shape for file headers too, so the run
+    // must read the hunk body, not a header, and keep selecting the change.
+    let output = git_dry_run(&install, &fixture, Some("main"), &source);
+    assert_dry_run_total(&output, 1);
+}
+
+#[test]
+fn installed_command_selects_hunks_after_plus_prefix_header_like_content() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = git_mutation_fixture(&root, "plus-prefix-header-like", "main");
+    let source = write_git_source(
+        &fixture,
+        "src/lib.rs",
+        "pub fn msg() -> &'static str {\n    \"list:\n++ b/src/other.rs\nend\"\n}\npub fn value() -> bool { let value = true; value }\n",
+    );
+    commit_all(&fixture, "base");
+    run_git(&fixture, &["switch", "-c", "feature"]);
+    write_git_source(
+        &fixture,
+        "src/lib.rs",
+        "pub fn msg() -> &'static str {\n    \"list:\n++ b/src/changed.rs\nend\"\n}\npub fn value() -> bool { let value = false; value }\n",
+    );
+
+    // The added source line `++ b/src/changed.rs` prints as
+    // `+++ b/src/changed.rs`. That shape names a file header, so the run
+    // must keep the later hunk on src/lib.rs and mutate the bool change.
+    let output = git_dry_run(&install, &fixture, Some("main"), &source);
+    assert_dry_run_total(&output, 1);
+}
+
+#[test]
 fn installed_command_rejects_invalid_git_scope() {
     let root = smoke_root();
     let install = install_command(&root);
