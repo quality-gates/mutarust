@@ -18,6 +18,7 @@ use std::sync::atomic::AtomicBool;
 
 use crate::blacklist::Blacklist;
 use crate::coverage::{CoverageMap, PerTestCoverageMap, TestIdentity, TestTarget, parse_lcov};
+use crate::discovery::target_seed_directories;
 use crate::evidence::{MutationEvidence, StableMutantId, mutation_evidence};
 use crate::filter::{SourceFilter, SourceFilters};
 use crate::git::ChangedLines;
@@ -587,7 +588,10 @@ pub fn run_mutation_tests_with_controls(
     let changed_lines = controls
         .git_diff
         .enabled
-        .then(|| ChangedLines::load(controls.git_diff.base.as_deref()))
+        .then(|| {
+            let seeds = target_seed_directories(targets);
+            ChangedLines::load(controls.git_diff.base.as_deref(), &seeds)
+        })
         .transpose()
         .map_err(run_error)?;
     let mut blacklist = Blacklist::load(&controls.blacklist_files).map_err(run_error)?;
