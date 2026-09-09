@@ -833,8 +833,10 @@ that a local item shadows. A replacement that Cargo cannot type-check is
 only when a concrete local function parameter proves the option type. It marks
 other candidates <code>Skipped</code> because the custom command selects its own compiler.</p>
 <p><code>expression/remove</code> changes a direct left or right operand of <code>&amp;&amp;</code> or <code>||</code>. It
-replaces an <code>&amp;&amp;</code> operand with <code>true</code> and an <code>||</code> operand with <code>false</code>. It does
-not change bitwise operators.</p>
+replaces an <code>&amp;&amp;</code> operand with <code>true</code> and an <code>||</code> operand with <code>false</code>. Mutarust
+does not plan a mutant when an <code>&amp;&amp;</code> operand is already <code>true</code> or an <code>||</code>
+operand is already <code>false</code>, because the mutant text is the same as the source
+text. It does not change bitwise operators.</p>
 <p><code>expression/error-guard</code> changes a zero-argument method call used as a direct
 <code>if</code> condition. It replaces <code>is_err()</code> and <code>is_none()</code> with <code>false</code>. It
 replaces <code>is_ok()</code> and <code>is_some()</code> with <code>true</code>. It does not change these calls
