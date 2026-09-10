@@ -170,10 +170,11 @@ successfully before normal output and score gates.
 
 Use `--blacklist FILE` one or more times to read accepted mutation checksums.
 Each non-empty file line is one 32-character lower-case hexadecimal checksum.
-Mutarust does not run a matching mutant. The checksum uses only the changed
-source lines, not the source path, mutator name, or line number. A checksum
-therefore remains valid after unrelated source edits. Baseline, blacklist, and
-one-mutant options are command options. They are not YAML policy fields.
+Mutarust does not run a matching mutant. The checksum uses the changed source
+lines. When repeated evidence needs a location-specific identity, the checksum
+also uses the replaced byte range. A checksum for unique evidence remains valid
+after unrelated source edits. Baseline, blacklist, and one-mutant options are
+command options. They are not YAML policy fields.
 
 Use `--match REGEXP` to limit mutations to functions with matching names. Use
 `--config FILE` with `exclude_dirs` and `ignore_source_lines` to limit source
