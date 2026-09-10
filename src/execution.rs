@@ -3382,6 +3382,7 @@ fn copy_workspace(workspace: &Workspace, destination: &Path) -> Result<PathBuf, 
         }
     }
     copy_cargo_configurations(workspace, destination)?;
+    link_cargo_home_stores(workspace, destination)?;
     rewrite_cargo_configurations(workspace, destination)?;
     rewrite_cargo_manifests(workspace, destination)?;
     copied_path(workspace, destination, &workspace.root)
@@ -3505,6 +3506,46 @@ fn copy_cargo_configurations(workspace: &Workspace, destination: &Path) -> Resul
         })?;
     }
     Ok(())
+}
+
+fn link_cargo_home_stores(workspace: &Workspace, destination: &Path) -> Result<(), RunError> {
+    let Some(cargo_home) = &workspace.cargo_home else {
+        return Ok(());
+    };
+    let copied_home = copied_path(workspace, destination, cargo_home)?;
+    fs::create_dir_all(&copied_home).map_err(|error| {
+        run_error(format!(
+            "could not create the isolated Cargo home {}: {error}",
+            copied_home.display()
+        ))
+    })?;
+    for name in ["registry", "git", "credentials.toml", ".package-cache"] {
+        let source = cargo_home.join(name);
+        let link = copied_home.join(name);
+        if link.symlink_metadata().is_ok() {
+            continue;
+        }
+        if name != ".package-cache" && !source.exists() {
+            continue;
+        }
+        share_cargo_home_store(&source, &link)?;
+    }
+    Ok(())
+}
+
+fn share_cargo_home_store(source: &Path, link: &Path) -> Result<(), RunError> {
+    let linked = create_symbolic_link(source, link);
+    #[cfg(windows)]
+    let linked = linked.or_else(|error| match error.kind() {
+        io::ErrorKind::PermissionDenied => Ok(()),
+        _ => Err(error),
+    });
+    linked.map_err(|error| {
+        run_error(format!(
+            "could not share the Cargo home store {}: {error}",
+            source.display()
+        ))
+    })
 }
 
 fn rewrite_cargo_configurations(workspace: &Workspace, destination: &Path) -> Result<(), RunError> {
