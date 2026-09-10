@@ -4071,6 +4071,106 @@ fn installed_command_review_isolates_cargo_home_configuration() {
 
 #[cfg(unix)]
 #[test]
+fn installed_command_reuses_cargo_home_registry_cache_with_configuration() {
+    use std::os::unix::fs::symlink;
+
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_cargo_home_cache_fixture(&root);
+    let source = fixture.join("src").join("lib.rs");
+    let manifest = fixture.join("Cargo.toml");
+    let source_before = fs::read(&source).expect("fixture source must be readable");
+    let manifest_before = fs::read(&manifest).expect("fixture manifest must be readable");
+    let lockfile_before =
+        fs::read(fixture.join("Cargo.lock")).expect("fixture lockfile must be readable");
+    let warm_cargo_home = env::var_os("CARGO_HOME")
+        .map(PathBuf::from)
+        .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".cargo")))
+        .map(|path| fs::canonicalize(path).expect("warm Cargo home must be readable"))
+        .expect("warm Cargo home must be configured");
+    let cargo_home = root.join("cargo-home-with-cache");
+    fs::create_dir_all(&cargo_home).expect("Cargo home must be created");
+    symlink(
+        warm_cargo_home.join("registry"),
+        cargo_home.join("registry"),
+    )
+    .expect("Cargo registry cache must be linked");
+
+    let run = |configuration: Option<&str>, description: &str| {
+        let configuration_path = cargo_home.join("config.toml");
+        match configuration {
+            Some(configuration) => fs::write(&configuration_path, configuration)
+                .expect("Cargo home configuration must be written"),
+            None => {
+                let _ = fs::remove_file(&configuration_path);
+            }
+        }
+
+        let output = Command::new(command_path(&install))
+            .args([
+                "--enable",
+                "conditional/bool-literal",
+                "--workers",
+                "1",
+                "--silent",
+            ])
+            .arg(&source)
+            .current_dir(&fixture)
+            .env("CARGO_HOME", &cargo_home)
+            .env("CARGO_NET_OFFLINE", "true")
+            .output()
+            .expect("installed mutarust must start");
+
+        assert!(
+            output.status.success(),
+            "{description}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("Killed: 1"), "{description}: {stdout}");
+        assert!(stdout.contains("Escaped: 0"), "{description}: {stdout}");
+        assert!(stdout.contains("Errored: 0"), "{description}: {stdout}");
+        assert!(stdout.contains("Total: 1"), "{description}: {stdout}");
+    };
+
+    let fetch_status = Command::new(env!("CARGO"))
+        .args(["fetch", "--manifest-path"])
+        .arg(&manifest)
+        .args(["--locked", "--offline"])
+        .env("CARGO_HOME", &warm_cargo_home)
+        .status()
+        .expect("Cargo fetch must start");
+    assert!(fetch_status.success(), "Cargo fetch must succeed");
+
+    run(None, "warm Cargo registry cache without home configuration");
+    run(
+        Some("[term]\nquiet = true\n"),
+        "warm Cargo registry cache with home configuration",
+    );
+
+    assert_eq!(
+        fs::read(&source).expect("fixture source must remain readable"),
+        source_before,
+        "mutation testing must not change fixture source"
+    );
+    assert_eq!(
+        fs::read(&manifest).expect("fixture manifest must remain readable"),
+        manifest_before,
+        "mutation testing must not change fixture manifest"
+    );
+    assert_eq!(
+        fs::read(fixture.join("Cargo.lock")).expect("fixture lockfile must remain readable"),
+        lockfile_before,
+        "mutation testing must not change fixture lockfile"
+    );
+    assert!(
+        !fixture.join("target").exists(),
+        "mutation testing must not create a source target directory"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn installed_command_review_isolates_cargo_configuration_patch_paths() {
     use std::os::unix::fs::PermissionsExt;
 
@@ -7026,6 +7126,35 @@ fn write_mutation_fixture(root: &Path) -> PathBuf {
         "#[test]\nfn is_unrelated_and_failing() {\n    assert!(false);\n}\n",
     )
     .expect("other mutation fixture test must be written");
+    fixture
+}
+
+fn write_cargo_home_cache_fixture(root: &Path) -> PathBuf {
+    let fixture = root.join("cargo-home-cache-fixture");
+    fs::create_dir_all(fixture.join("src"))
+        .expect("Cargo home cache fixture source directory must be created");
+    fs::create_dir_all(fixture.join("tests"))
+        .expect("Cargo home cache fixture test directory must be created");
+    fs::write(
+        fixture.join("Cargo.toml"),
+        "[package]\nname = \"cargo-home-cache-fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[dependencies]\nmd5 = \"0.8.1\"\n",
+    )
+    .expect("Cargo home cache fixture manifest must be written");
+    fs::write(
+        fixture.join("Cargo.lock"),
+        "# This file is automatically @generated by Cargo.\nversion = 4\n\n[[package]]\nname = \"cargo-home-cache-fixture\"\nversion = \"0.1.0\"\ndependencies = [\n \"md5\",\n]\n\n[[package]]\nname = \"md5\"\nversion = \"0.8.1\"\nsource = \"registry+https://github.com/rust-lang/crates.io-index\"\nchecksum = \"7ebb8d8732c6a6df3d8f032a82911cfc747e00efb95cc46e8d0acd5b5b88570c\"\n",
+    )
+    .expect("Cargo home cache fixture lockfile must be written");
+    fs::write(
+        fixture.join("src").join("lib.rs"),
+        "pub fn checked() -> bool {\n    let value = true;\n    let _ = md5::compute(b\"warm cache\");\n    value\n}\n",
+    )
+    .expect("Cargo home cache fixture source must be written");
+    fs::write(
+        fixture.join("tests").join("checked.rs"),
+        "#[test]\nfn detects_checked_value() {\n    assert!(cargo_home_cache_fixture::checked());\n}\n",
+    )
+    .expect("Cargo home cache fixture test must be written");
     fixture
 }
 
