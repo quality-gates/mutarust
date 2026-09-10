@@ -1533,6 +1533,54 @@ mod tests {
         assert!(!muta_fp_meta.file_type().is_symlink());
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn cargo_home_stores_are_reused_in_isolated_home() {
+        let original = super::TemporaryWorkspace::create().expect("original workspace");
+        let cargo_home = original.path().join("cargo-home");
+        let root = original.path().join("workspace");
+        fs::create_dir_all(&cargo_home).expect("Cargo home must exist");
+        fs::create_dir_all(&root).expect("workspace root must exist");
+        fs::create_dir(cargo_home.join("registry")).expect("registry store must exist");
+        fs::create_dir(cargo_home.join("git")).expect("Git store must exist");
+        fs::write(cargo_home.join("credentials.toml"), "credentials")
+            .expect("credentials must exist");
+
+        let destination =
+            super::TemporaryWorkspace::create().expect("destination workspace must exist");
+        let workspace = super::Workspace {
+            root: root.clone(),
+            source_root: root.clone(),
+            manifest: root.join("Cargo.toml"),
+            package_name: "fixture".to_owned(),
+            layout_root: original.path().to_path_buf(),
+            copy_paths: Vec::new(),
+            configurations: Vec::new(),
+            cargo_home: Some(cargo_home.clone()),
+            excluded_copy_roots: Vec::new(),
+            manifests: Vec::new(),
+            crate_prefixes: Vec::new(),
+        };
+
+        super::reuse_cargo_home_stores(&workspace, destination.path())
+            .expect("Cargo home stores must be reused");
+
+        let copied_home = destination.path().join("cargo-home");
+        for store in super::CARGO_HOME_STORES {
+            let copied = copied_home.join(store);
+            assert!(
+                fs::symlink_metadata(&copied)
+                    .expect("reused Cargo home entry must exist")
+                    .file_type()
+                    .is_symlink()
+            );
+            assert_eq!(
+                fs::read_link(copied).expect("reused Cargo home entry must be readable"),
+                cargo_home.join(store)
+            );
+        }
+    }
+
     fn test_result(state: MutationState) -> MutationResult {
         MutationResult {
             source: PathBuf::from("src/lib.rs"),
@@ -3327,6 +3375,7 @@ fn copy_workspace(workspace: &Workspace, destination: &Path) -> Result<PathBuf, 
         }
     }
     copy_cargo_configurations(workspace, destination)?;
+    reuse_cargo_home_stores(workspace, destination)?;
     rewrite_cargo_configurations(workspace, destination)?;
     rewrite_cargo_manifests(workspace, destination)?;
     copied_path(workspace, destination, &workspace.root)
@@ -3450,6 +3499,50 @@ fn copy_cargo_configurations(workspace: &Workspace, destination: &Path) -> Resul
         })?;
     }
     Ok(())
+}
+
+const CARGO_HOME_STORES: [&str; 3] = ["registry", "git", "credentials.toml"];
+
+fn reuse_cargo_home_stores(workspace: &Workspace, destination: &Path) -> Result<(), RunError> {
+    let Some(cargo_home) = &workspace.cargo_home else {
+        return Ok(());
+    };
+    let copied_home = copied_path(workspace, destination, cargo_home)?;
+    fs::create_dir_all(&copied_home).map_err(|error| {
+        run_error(format!(
+            "could not create isolated Cargo home {}: {error}",
+            copied_home.display()
+        ))
+    })?;
+
+    for store in CARGO_HOME_STORES {
+        let original = cargo_home.join(store);
+        if !path_entry_exists(&original)? {
+            continue;
+        }
+        let copied = copied_home.join(store);
+        if path_entry_exists(&copied)? {
+            continue;
+        }
+        create_symbolic_link(&original, &copied).map_err(|error| {
+            run_error(format!(
+                "could not reuse Cargo home entry {}: {error}",
+                original.display()
+            ))
+        })?;
+    }
+    Ok(())
+}
+
+fn path_entry_exists(path: &Path) -> Result<bool, RunError> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(run_error(format!(
+            "could not inspect {}: {error}",
+            path.display()
+        ))),
+    }
 }
 
 fn rewrite_cargo_configurations(workspace: &Workspace, destination: &Path) -> Result<(), RunError> {
