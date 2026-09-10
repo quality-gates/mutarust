@@ -203,7 +203,9 @@ mod tests {
 
     use crate::Mutation;
 
-    use super::{MutationEvidence, StableMutantId, mutation_evidence};
+    use super::{
+        MutationEvidence, StableMutantId, append_location, mutation_evidence, mutation_line,
+    };
 
     fn evidence_for_text(
         source_root: &Path,
@@ -322,6 +324,17 @@ mod tests {
             first.blacklist_checksum.as_str(),
             second.blacklist_checksum.as_str()
         );
+    }
+
+    #[test]
+    fn evidence_helpers_preserve_invalid_line_defaults_and_location_identity() {
+        let source = "fn checked() {}\n";
+        let invalid = Mutation::new(source.len() + 1..source.len() + 1, "");
+        assert_eq!(mutation_line(source, &invalid), 1);
+
+        let mut content = String::from("diff");
+        append_location(&mut content, Some(&(4..12)));
+        assert_eq!(content, "diff\u{0}4:12");
     }
 
     #[test]
