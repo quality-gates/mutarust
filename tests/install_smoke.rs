@@ -4100,6 +4100,73 @@ fn installed_command_review_isolates_cargo_home_configuration() {
 
 #[cfg(unix)]
 #[test]
+fn installed_command_review_shares_the_cargo_home_registry_cache_and_credentials() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_mutation_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    let metadata = Command::new(env!("CARGO"))
+        .args(["metadata", "--format-version", "1", "--no-deps"])
+        .current_dir(&fixture)
+        .output()
+        .expect("Cargo metadata must start");
+    assert!(metadata.status.success(), "Cargo metadata must succeed");
+    let metadata_path = root.join("cargo-cache-metadata.json");
+    fs::write(&metadata_path, metadata.stdout).expect("Cargo metadata must be recorded");
+    let cargo_home = root.join("cargo-cache-home");
+    fs::create_dir_all(cargo_home.join("registry").join("cache"))
+        .expect("registry cache directory must be created");
+    fs::create_dir_all(cargo_home.join("git").join("db"))
+        .expect("git cache directory must be created");
+    fs::write(
+        cargo_home
+            .join("registry")
+            .join("cache")
+            .join("warm-sentinel"),
+        b"cache",
+    )
+    .expect("warm registry sentinel must be written");
+    fs::write(
+        cargo_home.join("git").join("db").join("warm-sentinel"),
+        b"git",
+    )
+    .expect("warm git sentinel must be written");
+    fs::write(cargo_home.join("credentials.toml"), b"token = \"warm\"")
+        .expect("Cargo home credentials must be written");
+    fs::write(cargo_home.join("cache-sentinel"), b"cache")
+        .expect("Cargo home cache sentinel must be written");
+    fs::write(cargo_home.join("config.toml"), "[net]\n")
+        .expect("Cargo home configuration must be written");
+    let fake_cargo = root.join("cargo-cache-share-check");
+    fs::write(
+        &fake_cargo,
+        "#!/bin/sh\nif [ \"$1\" = \"metadata\" ]; then\n  cat \"$MUTARUST_METADATA\"\n  exit 0\nfi\nif [ \"$CARGO_HOME\" = \"$MUTARUST_ORIGINAL_CARGO_HOME\" ]; then\n  echo 'Cargo used the original Cargo home' >&2\n  exit 93\nfi\nif [ ! -e \"$CARGO_HOME/registry/cache/warm-sentinel\" ]; then\n  echo 'the registry cache did not follow the isolated Cargo home' >&2\n  exit 99\nfi\nif [ ! -e \"$CARGO_HOME/git/db/warm-sentinel\" ]; then\n  echo 'the git checkout cache did not follow the isolated Cargo home' >&2\n  exit 98\nfi\nif ! grep -F -q 'token = \"warm\"' \"$CARGO_HOME/credentials.toml\"; then\n  echo 'Cargo credentials did not follow the isolated Cargo home' >&2\n  exit 96\nfi\nif [ -e \"$CARGO_HOME/cache-sentinel\" ]; then\n  echo 'unrelated Cargo home data entered the isolated workspace' >&2\n  exit 97\nfi\nexit 0\n",
+    )
+    .expect("Cargo cache share check must be written");
+    fs::set_permissions(&fake_cargo, fs::Permissions::from_mode(0o755))
+        .expect("Cargo cache share check must be executable");
+
+    let output = Command::new(command_path(&install))
+        .arg(&source)
+        .current_dir(&fixture)
+        .env("CARGO", &fake_cargo)
+        .env("CARGO_HOME", &cargo_home)
+        .env("MUTARUST_ORIGINAL_CARGO_HOME", &cargo_home)
+        .env("MUTARUST_METADATA", &metadata_path)
+        .output()
+        .expect("installed mutarust must start");
+
+    assert!(
+        output.status.success(),
+        "the registry cache and credentials must follow the isolated Cargo home: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn installed_command_review_isolates_cargo_configuration_patch_paths() {
     use std::os::unix::fs::PermissionsExt;
 
