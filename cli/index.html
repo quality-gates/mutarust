@@ -1128,7 +1128,10 @@ error message.</p>
 <p>Use <code>--timeout-coefficient FACTOR</code> for an adaptive Cargo timeout. Mutarust
 runs the clean tests first, finds the longest clean test duration, multiplies
 it by the positive factor, rounds up to a whole second, and uses at least one
-second. This option cannot be used with <code>--timeout</code>, <code>--exec</code>, or <code>--no-exec</code>.</p>
+second. The factor also sizes the clean suite run and LLVM coverage
+collection: before Mutarust knows the clean duration, each uses the factor
+times the fixed timeout. This option cannot be used with <code>--timeout</code>,
+<code>--exec</code>, or <code>--no-exec</code>.</p>
 <p>Use <code>--test-flags FLAGS</code> to add shell-quoted Cargo test arguments to every
 Cargo compile and test command. For example,
 <code>--test-flags "--package my-package --features slow"</code> limits testing to one
