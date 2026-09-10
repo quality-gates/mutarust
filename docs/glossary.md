@@ -54,7 +54,8 @@ A set of accepted mutation checksums.
 
 ## Stable mutant ID
 
-An ID from a source name, mutator name, and mutation diff.
+An ID from a source name, mutator name, and mutation diff. Repeated evidence
+uses the replaced byte range to distinguish each mutant.
 
 ## Source candidate
 

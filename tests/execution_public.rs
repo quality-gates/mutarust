@@ -270,6 +270,166 @@ fn expression_remove_does_not_plan_a_no_op_mutant_for_tautological_operands() {
 }
 
 #[test]
+fn adjacent_equal_statement_removals_keep_distinct_stable_ids() {
+    let _run_guard = public_run_guard();
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system time must follow the Unix epoch")
+        .as_nanos();
+    let root = FixtureRoot(std::env::temp_dir().join(format!(
+        "mutarust-adjacent-equal-statements-{}-{unique}",
+        std::process::id()
+    )));
+    let source = root.0.join("src").join("lib.rs");
+    std::fs::create_dir_all(source.parent().expect("source must have a parent"))
+        .expect("fixture source directory must be created");
+    std::fs::write(
+        root.0.join("Cargo.toml"),
+        "[package]\nname = \"adjacent-equal-statements\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .expect("fixture manifest must be written");
+    std::fs::write(
+        &source,
+        "pub fn check() {\n    println!(\"same\");\n    println!(\"same\");\n}\n",
+    )
+    .expect("fixture source must be written");
+
+    let mut registry = mutarust::Registry::builtins();
+    registry.retain(|name| name == "statement/remove");
+    let names = registry.names().map(str::to_owned).collect::<Vec<_>>();
+    let filters = mutarust::SourceFilters::new(&[], &[], None, &names)
+        .expect("source filters must accept the statement mutator");
+    let controls = mutarust::ExecutionControls {
+        dry_run: true,
+        ..mutarust::ExecutionControls::default()
+    };
+    let run = mutarust::run_mutation_tests_with_controls(
+        &[source.to_string_lossy().into_owned()],
+        &registry,
+        std::time::Duration::from_secs(1),
+        None,
+        &filters,
+        &mutarust::TestExecution::cargo(),
+        &controls,
+    )
+    .expect("the dry run must complete");
+
+    assert_eq!(
+        run.results().len(),
+        2,
+        "both statement removals must be planned"
+    );
+    let ids: std::collections::BTreeSet<&str> = run
+        .results()
+        .iter()
+        .map(|result| result.stable_id.as_str())
+        .collect();
+    assert_eq!(
+        ids.len(),
+        2,
+        "adjacent equal statements must have distinct stable IDs: {:?}",
+        run.results()
+            .iter()
+            .map(|result| (result.stable_id.as_str(), result.line))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        run.results()
+            .iter()
+            .map(|result| result.line)
+            .collect::<Vec<_>>(),
+        vec![2, 3],
+        "each mutation must retain its source line"
+    );
+
+    let first_id = run
+        .results()
+        .iter()
+        .find(|result| result.line == 2)
+        .expect("the first statement mutant must exist")
+        .stable_id
+        .clone();
+    let second_id = run
+        .results()
+        .iter()
+        .find(|result| result.line == 3)
+        .expect("the second statement mutant must exist")
+        .stable_id
+        .clone();
+    let execution = mutarust::TestExecution::custom("false", false, false, false)
+        .expect("the escaping test command must parse");
+    for id in [&first_id, &second_id] {
+        let selected = mutarust::run_mutation_tests_with_controls(
+            &[source.to_string_lossy().into_owned()],
+            &registry,
+            std::time::Duration::from_secs(1),
+            Some(id.as_str()),
+            &filters,
+            &execution,
+            &mutarust::ExecutionControls::default(),
+        )
+        .expect("a distinct stable ID must select one mutant");
+        assert_eq!(selected.results().len(), 1);
+        assert_eq!(selected.results()[0].stable_id, id.as_str());
+        assert_eq!(
+            selected.results()[0].state,
+            mutarust::MutationState::Escaped
+        );
+    }
+
+    let blacklist = root.0.join("blacklist.txt");
+    std::fs::write(
+        &blacklist,
+        format!("{:x}\n", md5::compute("-    println!(\"same\");\n+    \n")),
+    )
+    .expect("blacklist must be written");
+    let mut blacklist_controls = controls.clone();
+    blacklist_controls.blacklist_files.push(blacklist);
+    let unblacklisted = mutarust::run_mutation_tests_with_controls(
+        &[source.to_string_lossy().into_owned()],
+        &registry,
+        std::time::Duration::from_secs(1),
+        None,
+        &filters,
+        &mutarust::TestExecution::cargo(),
+        &blacklist_controls,
+    )
+    .expect("the blacklist run must complete");
+    assert_eq!(
+        unblacklisted.results().len(),
+        1,
+        "the first blacklist checksum must apply to one mutant: {:?}",
+        unblacklisted
+            .results()
+            .iter()
+            .map(|result| (&result.stable_id, &result.diff))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(unblacklisted.results()[0].stable_id, second_id);
+
+    let baseline_path = root.0.join("baseline.json");
+    std::fs::write(
+        &baseline_path,
+        format!(
+            "{{\"version\":1,\"mutants\":[{{\"id\":\"{first_id}\",\"file\":\"src/lib.rs\",\"mutator\":\"statement/remove\",\"line\":2}}]}}\n"
+        ),
+    )
+    .expect("baseline must be written");
+    let baseline = mutarust::Baseline::load(&baseline_path).expect("baseline must load");
+    let escaped = mutarust::run_mutation_tests_with_controls(
+        &[source.to_string_lossy().into_owned()],
+        &registry,
+        std::time::Duration::from_secs(1),
+        None,
+        &filters,
+        &execution,
+        &mutarust::ExecutionControls::default(),
+    )
+    .expect("the escaped run must complete");
+    assert_eq!(baseline.new_escaped_count(&escaped), 1);
+}
+
+#[test]
 fn custom_mutator_no_op_replacements_are_not_planned() {
     let _run_guard = public_run_guard();
     let unique = std::time::SystemTime::now()

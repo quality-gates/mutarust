@@ -4,6 +4,7 @@ use std::fmt;
 use std::fs;
 use std::io::{self, Write};
 use std::num::NonZeroUsize;
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -2570,13 +2571,11 @@ fn add_mutator_candidates(
     } else {
         mutator.mutations(scope.text)
     };
+    let mut seen_stable_ids = BTreeSet::new();
     for mutation in mutations {
         let (range, replacement) = mutation.identity();
         // A mutant whose applied text equals the source text is no mutation.
         if scope.text.get(range.clone()) == Some(replacement) {
-            continue;
-        }
-        if !scope.filter.allows_mutation(name, &range) {
             continue;
         }
         if !syntax_is_guaranteed {
@@ -2587,15 +2586,17 @@ fn add_mutator_candidates(
                 continue;
             }
         }
-        let evidence = mutation_evidence(
-            &scope.workspace.source_root,
-            scope.source,
-            name,
-            &mutation,
-            scope.text,
-            scope.lines,
-        )
-        .map_err(run_error)?;
+        let base_evidence = mutation_evidence_at(scope, name, &mutation, None)?;
+        // Keep the established ID for unique evidence. Add the source range
+        // when repeated evidence needs a location-specific identity.
+        let location = (!seen_stable_ids.insert(base_evidence.stable_id.as_str().to_owned()))
+            .then_some(range.clone());
+        if !scope.filter.allows_mutation(name, &range) {
+            continue;
+        }
+        let evidence = location.as_ref().map_or(Ok(base_evidence), |location| {
+            mutation_evidence_at(scope, name, &mutation, Some(location))
+        })?;
         if scope
             .changed_lines
             .is_some_and(|lines| !lines.includes(scope.source, evidence.line))
@@ -2615,6 +2616,24 @@ fn add_mutator_candidates(
         });
     }
     Ok(())
+}
+
+fn mutation_evidence_at(
+    scope: &CandidateScope<'_>,
+    name: &str,
+    mutation: &Mutation,
+    location: Option<&Range<usize>>,
+) -> Result<MutationEvidence, RunError> {
+    mutation_evidence(
+        &scope.workspace.source_root,
+        scope.source,
+        name,
+        mutation,
+        scope.text,
+        scope.lines,
+        location,
+    )
+    .map_err(run_error)
 }
 
 fn test_candidate(

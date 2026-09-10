@@ -1,3 +1,4 @@
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 
 use crate::Mutation;
@@ -43,6 +44,7 @@ pub(crate) fn mutation_evidence(
     mutation: &Mutation,
     text: &str,
     source_lines: &[&str],
+    location: Option<&Range<usize>>,
 ) -> Result<MutationEvidence, String> {
     let source = source
         .strip_prefix(source_root)
@@ -67,7 +69,7 @@ pub(crate) fn mutation_evidence(
         ChangedLines {
             before,
             after,
-            first_line: prefix + 1,
+            first_line: mutation_line(text, mutation),
         }
     } else {
         ChangedLines {
@@ -76,8 +78,8 @@ pub(crate) fn mutation_evidence(
             first_line: 1,
         }
     };
-    let stable_id = stable_mutant_id(&source_name, mutator, &changes);
-    let blacklist_checksum = blacklist_checksum(&changes);
+    let stable_id = stable_mutant_id(&source_name, mutator, &changes, location);
+    let blacklist_checksum = blacklist_checksum(&changes, location);
     let diff = unified_diff(&source_name, &changes);
     Ok(MutationEvidence {
         source,
@@ -111,20 +113,44 @@ fn shared_suffix(before: &[&str], after: &[&str]) -> usize {
         .count()
 }
 
-fn stable_mutant_id(source: &str, mutator: &str, changes: &ChangedLines<'_>) -> StableMutantId {
-    let before = source_lines(changes.before);
-    let after = source_lines(changes.after);
-    StableMutantId(format!(
-        "{:x}",
-        md5::compute(format!("{source}\0{mutator}\0{before}\0{after}"))
-    ))
+fn mutation_line(source: &str, mutation: &Mutation) -> usize {
+    let (range, _) = mutation.identity();
+    source.get(..range.start).map_or(1, |prefix| {
+        prefix.bytes().filter(|byte| *byte == b'\n').count() + 1
+    })
 }
 
-fn blacklist_checksum(changes: &ChangedLines<'_>) -> MutationChecksum {
+fn stable_mutant_id(
+    source: &str,
+    mutator: &str,
+    changes: &ChangedLines<'_>,
+    location: Option<&Range<usize>>,
+) -> StableMutantId {
+    let before = source_lines(changes.before);
+    let after = source_lines(changes.after);
+    let mut content = format!("{source}\0{mutator}\0{before}\0{after}");
+    append_location(&mut content, location);
+    StableMutantId(format!("{:x}", md5::compute(content)))
+}
+
+fn blacklist_checksum(
+    changes: &ChangedLines<'_>,
+    location: Option<&Range<usize>>,
+) -> MutationChecksum {
     let mut content = String::new();
     append_checksum_lines(&mut content, '-', changes.before);
     append_checksum_lines(&mut content, '+', changes.after);
+    append_location(&mut content, location);
     MutationChecksum::from_changed_lines(content)
+}
+
+fn append_location(content: &mut String, location: Option<&Range<usize>>) {
+    if let Some(location) = location {
+        content.push('\0');
+        content.push_str(&location.start.to_string());
+        content.push(':');
+        content.push_str(&location.end.to_string());
+    }
 }
 
 fn append_checksum_lines(content: &mut String, marker: char, lines: &[&str]) {
@@ -177,7 +203,9 @@ mod tests {
 
     use crate::Mutation;
 
-    use super::{MutationEvidence, StableMutantId, mutation_evidence};
+    use super::{
+        MutationEvidence, StableMutantId, append_location, mutation_evidence, mutation_line,
+    };
 
     fn evidence_for_text(
         source_root: &Path,
@@ -187,7 +215,7 @@ mod tests {
         text: &str,
     ) -> Result<MutationEvidence, String> {
         let lines: Vec<&str> = text.split_inclusive('\n').collect();
-        mutation_evidence(source_root, source, mutator, mutation, text, &lines)
+        mutation_evidence(source_root, source, mutator, mutation, text, &lines, None)
     }
 
     #[test]
@@ -250,6 +278,63 @@ mod tests {
                 )
             )
         );
+    }
+
+    #[test]
+    fn evidence_keeps_the_mutation_start_line_when_equal_lines_shift_the_diff() {
+        let source = "fn duplicated() {\n    counter();\n    counter();\n}\n";
+        let first_start = source
+            .find("    counter();")
+            .expect("first statement must exist");
+        let first_end = first_start + "    counter();\n".len();
+        let second_start = source[first_end..]
+            .find("    counter();")
+            .expect("second statement must exist")
+            + first_end;
+        let second_end = second_start + "    counter();\n".len();
+        let first_mutation = Mutation::new(first_start..first_end, "");
+        let second_mutation = Mutation::new(second_start..second_end, "");
+        let second_range = second_mutation.identity().0;
+        let lines: Vec<&str> = source.split_inclusive('\n').collect();
+        let first = mutation_evidence(
+            Path::new("workspace"),
+            Path::new("workspace/checked/src/lib.rs"),
+            "statement/remove",
+            &first_mutation,
+            source,
+            &lines,
+            None,
+        )
+        .expect("first mutation evidence must be generated");
+        let second = mutation_evidence(
+            Path::new("workspace"),
+            Path::new("workspace/checked/src/lib.rs"),
+            "statement/remove",
+            &second_mutation,
+            source,
+            &lines,
+            Some(&second_range),
+        )
+        .expect("second mutation evidence must be generated");
+
+        assert_eq!(first.line, 2);
+        assert_eq!(second.line, 3);
+        assert_ne!(first.stable_id.as_str(), second.stable_id.as_str());
+        assert_ne!(
+            first.blacklist_checksum.as_str(),
+            second.blacklist_checksum.as_str()
+        );
+    }
+
+    #[test]
+    fn evidence_helpers_preserve_invalid_line_defaults_and_location_identity() {
+        let source = "fn checked() {}\n";
+        let invalid = Mutation::new(source.len() + 1..source.len() + 1, "");
+        assert_eq!(mutation_line(source, &invalid), 1);
+
+        let mut content = String::from("diff");
+        append_location(&mut content, Some(&(4..12)));
+        assert_eq!(content, "diff\u{0}4:12");
     }
 
     #[test]
