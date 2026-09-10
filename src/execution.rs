@@ -619,12 +619,15 @@ pub fn run_mutation_tests_with_controls(
             has_coverage: false,
         });
     }
-    let coverage = collect_coverage(&plan.workspaces, timeout, execution, controls)?;
+    // A coefficient also budgets every Cargo run before the clean duration is
+    // known: coverage collection and the clean suite itself.
+    let early_budget = adaptive_timeout(timeout, controls.timeout_coefficient, timeout);
+    let coverage = collect_coverage(&plan.workspaces, early_budget, execution, controls)?;
     apply_coverage_selection(&mut plan.candidates, &coverage);
     let (timeout, warm) = if controls.no_exec || !execution.uses_cargo() {
         (timeout, WarmBuilds::default())
     } else {
-        let clean = test_clean_workspaces(&plan.workspaces, timeout, execution)?;
+        let clean = test_clean_workspaces(&plan.workspaces, early_budget, execution)?;
         (
             adaptive_timeout(timeout, controls.timeout_coefficient, clean.duration),
             clean.warm,

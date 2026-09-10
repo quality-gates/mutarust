@@ -52,6 +52,177 @@ impl Drop for FixtureRoot {
     }
 }
 
+struct SlowReplacement;
+
+impl mutarust::Mutator for SlowReplacement {
+    fn name(&self) -> &str {
+        "custom/slow-replacement"
+    }
+
+    fn mutations(&self, source: &str) -> Vec<mutarust::Mutation> {
+        match source.find("false") {
+            Some(offset) => vec![mutarust::Mutation::new(
+                offset..offset + "false".len(),
+                "true",
+            )],
+            None => Vec::new(),
+        }
+    }
+}
+
+fn unique_temporary_root(tag: &str) -> FixtureRoot {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system time must follow the Unix epoch")
+        .as_nanos();
+    FixtureRoot(
+        std::env::temp_dir().join(format!("mutarust-{tag}-{}-{unique}", std::process::id())),
+    )
+}
+
+fn write_single_file_crate(root: &FixtureRoot, package: &str, source: &str) -> std::path::PathBuf {
+    let source_path = root.0.join("src").join("lib.rs");
+    std::fs::create_dir_all(source_path.parent().expect("source must have a parent"))
+        .expect("fixture source directory must be created");
+    std::fs::write(
+        root.0.join("Cargo.toml"),
+        format!("[package]\nname = \"{package}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n"),
+    )
+    .expect("fixture manifest must be written");
+    std::fs::write(&source_path, source).expect("fixture source must be written");
+    source_path
+}
+
+#[test]
+fn timeout_coefficient_extends_the_clean_suite_budget() {
+    let _run_guard = public_run_guard();
+    let root = unique_temporary_root("slow-suite");
+    let source = write_single_file_crate(
+        &root,
+        "slow-suite-fixture",
+        "pub fn answer() -> bool {\n    false\n}\n",
+    );
+    std::fs::create_dir_all(root.0.join("tests")).expect("fixture tests directory must be created");
+    std::fs::write(
+        root.0.join("tests").join("suite.rs"),
+        "#[test]\nfn detects_answer_change() {\n    std::thread::sleep(std::time::Duration::from_secs(4));\n    assert!(!slow_suite_fixture::answer());\n}\n",
+    )
+    .expect("fixture test must be written");
+
+    let registry = mutarust::RegistryBuilder::new()
+        .register(SlowReplacement)
+        .expect("custom mutator must register")
+        .build();
+    let names = registry.names().map(str::to_owned).collect::<Vec<_>>();
+    let filters = mutarust::SourceFilters::new(&[], &[], None, &names)
+        .expect("source filters must accept the custom mutator");
+    let controls = mutarust::ExecutionControls {
+        timeout_coefficient: Some(8.0),
+        ..mutarust::ExecutionControls::default()
+    };
+    let run = mutarust::run_mutation_tests_with_controls(
+        &[source.to_string_lossy().into_owned()],
+        &registry,
+        std::time::Duration::from_secs(2),
+        None,
+        &filters,
+        &mutarust::TestExecution::cargo(),
+        &controls,
+    )
+    .expect("the clean suite must finish inside the coefficient budget");
+
+    assert_eq!(run.results().len(), 1);
+    assert_eq!(
+        run.results()[0].state,
+        mutarust::MutationState::Killed,
+        "the mutant must be killed by the adaptive timeout, not the base timeout: {:?}",
+        run.results()[0].diff
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn timeout_coefficient_extends_the_coverage_budget() {
+    use std::os::unix::fs::PermissionsExt;
+
+    const COVERAGE_ENV: &str = "MUTARUST_SLOW_COVERAGE_SOURCE";
+    if let Some(source) = std::env::var_os(COVERAGE_ENV) {
+        let _run_guard = public_run_guard();
+        let mut registry = mutarust::Registry::builtins();
+        registry.retain(|name| name == "conditional/bool-literal");
+        let names = registry.names().map(str::to_owned).collect::<Vec<_>>();
+        let filters = mutarust::SourceFilters::new(&[], &[], None, &names)
+            .expect("source filters must accept the boolean literal mutator");
+        let controls = mutarust::ExecutionControls {
+            timeout_coefficient: Some(4.0),
+            coverage: mutarust::CoverageControls {
+                enabled: true,
+                per_test: false,
+            },
+            ..mutarust::ExecutionControls::default()
+        };
+        let run = mutarust::run_mutation_tests_with_controls(
+            &[source.to_string_lossy().into_owned()],
+            &registry,
+            std::time::Duration::from_secs(2),
+            None,
+            &filters,
+            &mutarust::TestExecution::cargo(),
+            &controls,
+        )
+        .expect("coverage and the clean suite must finish inside the coefficient budget");
+
+        assert!(
+            run.has_coverage(),
+            "the coverage command must collect a profile inside the coefficient budget"
+        );
+        let killed = run
+            .results()
+            .iter()
+            .all(|result| result.state == mutarust::MutationState::Killed);
+        assert!(
+            killed,
+            "mutant runs must finish inside the adaptive timeout: {:?}",
+            run.results()
+                .iter()
+                .map(|result| (&result.state, &result.diff))
+                .collect::<Vec<_>>()
+        );
+        return;
+    }
+
+    let _run_guard = public_run_guard();
+    let root = unique_temporary_root("slow-coverage");
+    let source = write_single_file_crate(
+        &root,
+        "slow-coverage-fixture",
+        "pub fn detected() -> bool {\n    let value = false;\n    value\n}\n",
+    );
+    let fake_cargo = root.0.join("slow-coverage-cargo");
+    std::fs::write(
+        &fake_cargo,
+        "#!/bin/sh\nif [ \"$1\" = \"metadata\" ]; then\n  exec \"$MUTARUST_REAL_CARGO\" \"$@\"\nfi\nif [ \"$1\" = \"llvm-cov\" ]; then\n  output=\n  while [ \"$#\" -gt 0 ]; do\n    if [ \"$1\" = \"--output-path\" ]; then\n      output=$2\n      break\n    fi\n    shift\n  done\n  sleep 3\n  printf 'SF:%s\\nDA:1,1\\nDA:2,1\\nend_of_record\\n' \"$MUTARUST_SLOW_COVERAGE_SOURCE\" > \"$output\"\n  exit 0\nfi\nif grep -q 'let value = false;' src/lib.rs 2>/dev/null; then\n  sleep 3\n  exit 0\nfi\nexit 1\n",
+    )
+    .expect("slow coverage Cargo command must be written");
+    std::fs::set_permissions(&fake_cargo, std::fs::Permissions::from_mode(0o755))
+        .expect("slow coverage Cargo command must be executable");
+
+    let output =
+        std::process::Command::new(std::env::current_exe().expect("test command must resolve"))
+            .args(["--exact", "timeout_coefficient_extends_the_coverage_budget"])
+            .env("CARGO", &fake_cargo)
+            .env("MUTARUST_REAL_CARGO", env!("CARGO"))
+            .env(COVERAGE_ENV, &source)
+            .output()
+            .expect("the coverage child run must start");
+    assert!(
+        output.status.success(),
+        "coverage and the clean suite must finish inside the coefficient budget: {}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 #[test]
 fn invalid_diff_fuzz_corpus_does_not_become_mutation_results() {
     let _run_guard = public_run_guard();

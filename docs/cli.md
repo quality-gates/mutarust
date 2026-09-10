@@ -238,7 +238,10 @@ error message.
 Use `--timeout-coefficient FACTOR` for an adaptive Cargo timeout. Mutarust
 runs the clean tests first, finds the longest clean test duration, multiplies
 it by the positive factor, rounds up to a whole second, and uses at least one
-second. This option cannot be used with `--timeout`, `--exec`, or `--no-exec`.
+second. The factor also sizes the clean suite run and LLVM coverage
+collection: before Mutarust knows the clean duration, each uses the factor
+times the fixed timeout. This option cannot be used with `--timeout`,
+`--exec`, or `--no-exec`.
 
 Use `--test-flags FLAGS` to add shell-quoted Cargo test arguments to every
 Cargo compile and test command. For example,
