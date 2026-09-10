@@ -3665,6 +3665,35 @@ fn installed_command_locks_skipped_killed_and_escaped_mutant_states() {
     );
 }
 
+/// Locks the classification for a mutant whose test binary dies at run time.
+///
+/// The mutating `arithmetic/base` mutants make the test binary recurse until
+/// it aborts with a stack overflow. That is a killed mutant, not a skipped
+/// compile failure: Cargo built the mutant, ran its test binary, and the run
+/// failed. The run also holds mutants that really do not build, such as
+/// removed `else` branches, and those stay skipped.
+#[test]
+fn installed_command_kills_a_mutant_whose_test_binary_crashes() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let crashed = run_state_lock_package(
+        &root,
+        &install,
+        "state-crash",
+        "pub fn count(n: u32) -> u32 { if n == 0 { 0 } else { count(n - 1) + 1 } }\n",
+        "use state_crash::count;\n\n#[test]\nfn counts() {\n    assert_eq!(count(3), 3);\n}\n",
+    );
+    assert_eq!(
+        crashed.matches("killed src/lib.rs arithmetic/base").count(),
+        2,
+        "the crashing mutants must be killed: {crashed}"
+    );
+    assert!(
+        !crashed.contains("skipped src/lib.rs arithmetic/base"),
+        "a crashed test binary must not be reported as a compile failure: {crashed}"
+    );
+}
+
 fn run_state_lock_package(
     root: &Path,
     install: &Path,

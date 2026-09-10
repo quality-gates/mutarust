@@ -1343,7 +1343,7 @@ mod tests {
 
     use super::{
         DisplayFilter, MutationResult, MutationRun, MutationState, adaptive_timeout,
-        cargo_build_jobs,
+        cargo_build_jobs, cargo_failure_is_compile,
     };
 
     #[test]
@@ -1543,6 +1543,54 @@ mod tests {
             state,
             error: None,
         }
+    }
+
+    #[test]
+    fn classifies_a_crashed_test_run_as_a_run_time_failure() {
+        // Captured from a `cargo test` run whose test binary aborted with a
+        // stack overflow before libtest printed its summary.
+        let stack_overflow = "\
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.83s
+     Running unittests src/lib.rs (target/debug/deps/counter-322173e80bbcfea2)
+
+running 1 test
+test tests::counts ...
+thread 'tests::counts' has overflowed its stack
+fatal runtime error: stack overflow
+error: test failed, to rerun pass `--lib`
+
+Caused by:
+  process didn't exit successfully: \
+             `target/debug/deps/counter-322173e80bbcfea2` (signal: 6, SIGABRT: process abort signal)";
+        assert!(
+            !cargo_failure_is_compile(stack_overflow),
+            "a crashed test binary ran the mutant, so it is not a compile failure"
+        );
+
+        // Captured from a `cargo test` run whose test binary failed one
+        // assertion and printed the normal failure summary.
+        let assertion_failure = "\
+running 1 test
+test joins ... FAILED
+
+failures:
+    joins
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `--test detect`";
+        assert!(!cargo_failure_is_compile(assertion_failure));
+
+        // Captured from a `cargo test` run that could not build the mutant.
+        let compile_failure = "\
+error[E0308]: mismatched types
+ --> src/lib.rs:1:46
+  |
+1 | pub fn joined() -> String { \"a\".to_owned() + \"b\".to_owned() }
+  |                                              ^^^^^^^^^^^^^^ expected `&str`, found `String`
+  |
+error: could not compile `checked` (lib) due to 1 previous error";
+        assert!(cargo_failure_is_compile(compile_failure));
     }
 }
 
@@ -2924,12 +2972,19 @@ fn run_mutant_cargo_tests(
 
 /// True when Cargo failed while building the mutant rather than running tests.
 fn cargo_failure_is_compile(detail: &str) -> bool {
-    detail.contains("could not compile")
-        || detail.contains("Couldn't compile the test")
-        || (detail.contains("error")
-            && !detail.contains("test result:")
-            && !detail.contains("FAILED")
-            && !detail.contains("failures:"))
+    if detail.contains("could not compile") || detail.contains("Couldn't compile the test") {
+        return true;
+    }
+    // A test binary that dies from a crash, such as a stack overflow or an
+    // abort, never prints the libtest summary, but Cargo still reports the
+    // failed run, so that output marks a run-time failure.
+    if detail.contains("error: test failed") {
+        return false;
+    }
+    detail.contains("error")
+        && !detail.contains("test result:")
+        && !detail.contains("FAILED")
+        && !detail.contains("failures:")
 }
 
 fn run_selected_cargo_tests(
