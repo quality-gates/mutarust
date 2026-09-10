@@ -2,6 +2,17 @@
 
 This file records important user changes.
 
+## 0.1.7 — 2026-09-10
+
+A compatible fix release. The public library interface does not change.
+
+### Fixed
+
+- Isolating `CARGO_HOME` keeps the registry cache, git checkouts, and credentials.
+- A test binary that crashes marks a mutant as killed instead of skipped.
+- The clean suite and coverage collection timeouts scale with `--timeout-coefficient`.
+- Repeated mutation evidence adds location data to maintain distinct stable mutant IDs.
+
 ## 0.1.6 — 2026-09-09
 
 A compatible fix release. The public library interface does not change.
