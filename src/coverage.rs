@@ -77,11 +77,14 @@ impl CoverageProfile {
         temporary: &Path,
         layout_root: &Path,
     ) -> Result<Self, String> {
+        // Profile sources are canonical, so compare them with canonical prefixes.
+        let temporary = canonical_prefix(temporary);
+        let canonical_layout_root = canonical_prefix(layout_root);
         let mut lines: BTreeMap<PathBuf, BTreeSet<usize>> = BTreeMap::new();
         for (source, covered) in self.lines {
-            let original = if let Ok(relative) = source.strip_prefix(temporary) {
+            let original = if let Ok(relative) = source.strip_prefix(&temporary) {
                 layout_root.join(relative)
-            } else if source.starts_with(layout_root) {
+            } else if source.starts_with(&canonical_layout_root) {
                 source
             } else {
                 continue;
@@ -97,6 +100,10 @@ impl CoverageProfile {
         self.lines = lines;
         Ok(self)
     }
+}
+
+fn canonical_prefix(path: &Path) -> PathBuf {
+    fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 /// Parses the LCOV data that `cargo llvm-cov --lcov` writes.
@@ -327,6 +334,39 @@ mod tests {
         let mut coverage = CoverageMap::default();
         coverage.add(profile);
         assert!(!coverage.covers(&source, 1));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restore_maps_sources_through_a_symlinked_temporary_prefix() {
+        let root = temporary_root("symlinked-temporary");
+        let real = root.join("real");
+        let link = root.join("link");
+        let workspace = root.join("workspace");
+        for directory in [real.join("copy/src"), workspace.join("src")] {
+            fs::create_dir_all(directory).unwrap();
+        }
+        fs::write(real.join("copy/src/lib.rs"), "one\n").unwrap();
+        fs::write(real.join("copy/src/gone.rs"), "one\n").unwrap();
+        fs::write(workspace.join("src/lib.rs"), "one\n").unwrap();
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let temporary = link.join("copy");
+
+        let profile = parse_lcov_text("SF:src/lib.rs\nDA:1,1\nend_of_record\n", &temporary)
+            .unwrap()
+            .restore_workspace_paths(&temporary, &workspace)
+            .unwrap();
+        let mut coverage = CoverageMap::default();
+        coverage.add(profile);
+        let source = fs::canonicalize(workspace.join("src/lib.rs")).unwrap();
+        assert!(coverage.covers(&source, 1));
+
+        let missing = parse_lcov_text("SF:src/gone.rs\nDA:1,1\nend_of_record\n", &temporary)
+            .unwrap()
+            .restore_workspace_paths(&temporary, &workspace);
+        assert!(missing.is_err());
+
         let _ = fs::remove_dir_all(root);
     }
 }
