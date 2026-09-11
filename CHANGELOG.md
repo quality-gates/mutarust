@@ -2,6 +2,16 @@
 
 This file records important user changes.
 
+## 0.1.8 — 2026-09-11
+
+A compatible fix release. The public library interface does not change.
+
+### Fixed
+
+- Coverage sources from a symlinked temporary path map back to the source workspace.
+- Clean suites and mutation workers isolate Cargo workspaces that share a layout root.
+- Mutation workers reset workspace files between mutants while retaining Cargo build artifacts.
+
 ## 0.1.7 — 2026-09-10
 
 A compatible fix release. The public library interface does not change.
