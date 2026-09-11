@@ -1533,6 +1533,27 @@ mod tests {
         assert!(!muta_fp_meta.file_type().is_symlink());
     }
 
+    #[test]
+    fn remove_non_target_entries_keeps_the_cargo_target_directory() {
+        let temporary =
+            super::TemporaryWorkspace::create().expect("temporary workspace must be created");
+        let target = temporary.path().join("target");
+        fs::create_dir_all(&target).expect("target directory must be created");
+        fs::write(target.join("cache"), b"build artifact")
+            .expect("target artifact must be written");
+        fs::write(temporary.path().join("created-by-test"), b"test output")
+            .expect("test output must be written");
+
+        super::remove_non_target_entries(temporary.path())
+            .expect("workspace entries must be removed");
+
+        assert_eq!(
+            fs::read(target.join("cache")).expect("target artifact must remain"),
+            b"build artifact"
+        );
+        assert!(!temporary.path().join("created-by-test").exists());
+    }
+
     fn test_result(state: MutationState) -> MutationResult {
         MutationResult {
             source: PathBuf::from("src/lib.rs"),
@@ -1667,17 +1688,16 @@ fn test_clean_layout(
         crate_prefixes.extend(w.crate_prefixes.iter().cloned());
     }
     let crate_prefixes: Vec<String> = crate_prefixes.into_iter().collect();
-    Ok((
-        longest,
-        WorkerScratch {
-            temporary,
-            workspace_root: workspace.root.clone(),
-            layout_root: workspace.layout_root.clone(),
-            copied_workspace,
-            dirty: None,
-            crate_prefixes,
-        },
-    ))
+    let mut scratch = WorkerScratch {
+        temporary,
+        workspace_root: workspace.root.clone(),
+        layout_root: workspace.layout_root.clone(),
+        copied_workspace,
+        dirty: None,
+        crate_prefixes,
+    };
+    scratch.reset_for_next_mutant(workspace)?;
+    Ok((longest, scratch))
 }
 
 #[cfg(unix)]
@@ -2837,14 +2857,21 @@ fn test_candidate_with_scratch(
     area.write_mutant(candidate)?;
     let temporary = area.temporary.path().to_path_buf();
     let copied_workspace = area.copied_workspace.clone();
-    run_mutant_cargo_tests(
+    let result = run_mutant_cargo_tests(
         &temporary,
         &copied_workspace,
         &candidate.workspace,
         &candidate.test_selection,
         timeout,
         execution,
-    )
+    );
+    match area.reset_for_next_mutant(&candidate.workspace) {
+        Ok(()) => result,
+        Err(reset) => match result {
+            Ok(_) => Err(reset),
+            Err(operation) => Err(run_error(format!("{operation}; {reset}"))),
+        },
+    }
 }
 
 fn prepare_worker_scratch<'a>(
@@ -4309,6 +4336,19 @@ impl WorkerScratch {
         })
     }
 
+    /// Restores workspace files before the next mutant runs.
+    ///
+    /// The temporary target directory stays in place so Cargo can reuse its
+    /// build artifacts. Other temporary entries are copied again from the
+    /// original workspace so test side effects do not reach the next mutant.
+    fn reset_for_next_mutant(&mut self, workspace: &Workspace) -> Result<(), RunError> {
+        let temporary = self.temporary.path().to_path_buf();
+        remove_non_target_entries(&temporary)?;
+        self.copied_workspace = copy_workspace(workspace, &temporary)?;
+        self.dirty = None;
+        Ok(())
+    }
+
     fn restore_dirty(&mut self) -> Result<(), RunError> {
         let Some(dirty) = self.dirty.take() else {
             return Ok(());
@@ -4355,6 +4395,36 @@ impl WorkerScratch {
         fs::write(&path, mutant)
             .map_err(|error| run_error(format!("could not write {}: {error}", path.display())))
     }
+}
+
+fn remove_non_target_entries(temporary: &Path) -> Result<(), RunError> {
+    for entry in fs::read_dir(temporary)
+        .map_err(|error| run_error(format!("could not read {}: {error}", temporary.display())))?
+    {
+        stop_if_interrupted()?;
+        let entry = entry.map_err(|error| {
+            run_error(format!("could not read temporary workspace entry: {error}"))
+        })?;
+        if entry.file_name() == "target" {
+            continue;
+        }
+        let path = entry.path();
+        let file_type = fs::symlink_metadata(&path)
+            .map_err(|error| run_error(format!("could not inspect {}: {error}", path.display())))?
+            .file_type();
+        let result = if file_type.is_dir() {
+            fs::remove_dir_all(&path)
+        } else {
+            fs::remove_file(&path)
+        };
+        result.map_err(|error| {
+            run_error(format!(
+                "could not remove temporary workspace entry {}: {error}",
+                path.display()
+            ))
+        })?;
+    }
+    Ok(())
 }
 
 struct MutationPlan {

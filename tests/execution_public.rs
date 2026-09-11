@@ -70,6 +70,30 @@ impl mutarust::Mutator for SlowReplacement {
     }
 }
 
+struct WorkspaceSideEffect;
+
+impl mutarust::Mutator for WorkspaceSideEffect {
+    fn name(&self) -> &str {
+        "custom/workspace-side-effect"
+    }
+
+    fn mutations(&self, source: &str) -> Vec<mutarust::Mutation> {
+        let Some(first) = source.find("false") else {
+            return Vec::new();
+        };
+        let second = source[first + "false".len()..]
+            .find("false")
+            .map(|offset| first + "false".len() + offset);
+        let Some(second) = second else {
+            return Vec::new();
+        };
+        [first, second]
+            .into_iter()
+            .map(|offset| mutarust::Mutation::new(offset..offset + "false".len(), "true"))
+            .collect()
+    }
+}
+
 fn unique_temporary_root(tag: &str) -> FixtureRoot {
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -908,4 +932,71 @@ fn two_workspaces_sharing_layout_root_complete_clean_suite_and_run_mutants_in_pa
         has_crate_b,
         "mutants must run and be killed for crate_b in parallel"
     );
+}
+
+#[test]
+fn cargo_worker_scratch_removes_test_files_between_mutants() {
+    let _run_guard = public_run_guard();
+    let root = unique_temporary_root("worker-side-effect");
+    let source = write_single_file_crate(
+        &root,
+        "workspace-side-effect",
+        "pub fn create_marker() -> bool {\n    false\n}\n\npub fn unused_value() -> bool {\n    false\n}\n",
+    );
+    std::fs::create_dir_all(root.0.join("tests")).expect("fixture tests directory must be created");
+    std::fs::write(
+        root.0.join("tests").join("suite.rs"),
+        "#[test]\nfn workspace_starts_clean() {\n    let marker = std::path::Path::new(env!(\"CARGO_MANIFEST_DIR\"))\n        .join(\"mutarust-side-effect.txt\");\n    if workspace_side_effect::create_marker() {\n        std::fs::write(&marker, \"created\").expect(\"marker must be written\");\n    }\n    assert!(!marker.exists(), \"a previous mutant left a workspace file\");\n}\n",
+    )
+    .expect("fixture test must be written");
+
+    let registry = mutarust::RegistryBuilder::new()
+        .register(WorkspaceSideEffect)
+        .expect("custom mutator must register")
+        .build();
+    let names = registry.names().map(str::to_owned).collect::<Vec<_>>();
+    let filters = mutarust::SourceFilters::new(&[], &[], None, &names)
+        .expect("source filters must accept the custom mutator");
+    let execution = mutarust::TestExecution::cargo();
+    let run = |workers| {
+        let controls = mutarust::ExecutionControls {
+            workers: mutarust::WorkerLimit::new(workers).expect("worker count must be valid"),
+            ..Default::default()
+        };
+        mutarust::run_mutation_tests_with_controls(
+            &[source.to_string_lossy().into_owned()],
+            &registry,
+            std::time::Duration::from_secs(30),
+            None,
+            &filters,
+            &execution,
+            &controls,
+        )
+        .expect("mutation run must succeed")
+    };
+
+    let sequential = run(1);
+    let parallel = run(2);
+    for mutation_run in [&sequential, &parallel] {
+        let created_marker = mutation_run
+            .results()
+            .iter()
+            .find(|result| result.line == 2)
+            .expect("create_marker mutant must be present");
+        let unused_value = mutation_run
+            .results()
+            .iter()
+            .find(|result| result.line == 6)
+            .expect("unused_value mutant must be present");
+        assert_eq!(
+            created_marker.state,
+            mutarust::MutationState::Killed,
+            "the marker mutant must be killed by the workspace assertion"
+        );
+        assert_eq!(
+            unused_value.state,
+            mutarust::MutationState::Escaped,
+            "the unused mutant must escape when each run starts with a clean workspace"
+        );
+    }
 }
