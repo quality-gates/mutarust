@@ -1606,7 +1606,7 @@ fn test_clean_workspaces(
             continue;
         }
         groups
-            .entry(workspace.layout_root.clone())
+            .entry(workspace.root.clone())
             .or_default()
             .push(workspace);
     }
@@ -1671,6 +1671,7 @@ fn test_clean_layout(
         longest,
         WorkerScratch {
             temporary,
+            workspace_root: workspace.root.clone(),
             layout_root: workspace.layout_root.clone(),
             copied_workspace,
             dirty: None,
@@ -2853,9 +2854,9 @@ fn prepare_worker_scratch<'a>(
 ) -> Result<&'a mut WorkerScratch, RunError> {
     let needs_new = scratch
         .as_ref()
-        .is_none_or(|area| area.layout_root != workspace.layout_root);
+        .is_none_or(|area| area.workspace_root != workspace.root);
     if needs_new {
-        *scratch = Some(match warm.claim(&workspace.layout_root)? {
+        *scratch = Some(match warm.claim(&workspace.root)? {
             Some(existing) => existing,
             None => WorkerScratch::create(workspace)?,
         });
@@ -4175,17 +4176,19 @@ fn create_symbolic_link(_target: &Path, _destination: &Path) -> io::Result<()> {
 /// each receive a private clone so no two workers share a writable target dir.
 #[derive(Default)]
 struct WarmBuilds {
-    by_layout: Mutex<BTreeMap<PathBuf, WorkerScratch>>,
+    by_workspace: Mutex<BTreeMap<PathBuf, WorkerScratch>>,
     clone_for_each_worker: Mutex<bool>,
 }
 
 impl WarmBuilds {
     fn insert(&self, scratch: WorkerScratch) -> Result<(), RunError> {
         let mut builds = self
-            .by_layout
+            .by_workspace
             .lock()
             .map_err(|_| run_error("could not store clean suite build after a previous panic"))?;
-        builds.entry(scratch.layout_root.clone()).or_insert(scratch);
+        builds
+            .entry(scratch.workspace_root.clone())
+            .or_insert(scratch);
         Ok(())
     }
 
@@ -4197,34 +4200,35 @@ impl WarmBuilds {
         Ok(())
     }
 
-    fn claim(&self, layout_root: &Path) -> Result<Option<WorkerScratch>, RunError> {
+    fn claim(&self, workspace_root: &Path) -> Result<Option<WorkerScratch>, RunError> {
         let clone = *self.clone_for_each_worker.lock().map_err(|_| {
             run_error("could not read clean suite build sharing after a previous panic")
         })?;
         if clone {
-            self.clone_from(layout_root)
+            self.clone_from(workspace_root)
         } else {
-            Ok(self.take(layout_root))
+            Ok(self.take(workspace_root))
         }
     }
 
-    fn take(&self, layout_root: &Path) -> Option<WorkerScratch> {
-        self.by_layout
+    fn take(&self, workspace_root: &Path) -> Option<WorkerScratch> {
+        self.by_workspace
             .lock()
             .ok()
-            .and_then(|mut builds| builds.remove(layout_root))
+            .and_then(|mut builds| builds.remove(workspace_root))
     }
 
-    fn clone_from(&self, layout_root: &Path) -> Result<Option<WorkerScratch>, RunError> {
+    fn clone_from(&self, workspace_root: &Path) -> Result<Option<WorkerScratch>, RunError> {
         let template = {
-            let builds = self.by_layout.lock().map_err(|_| {
+            let builds = self.by_workspace.lock().map_err(|_| {
                 run_error("could not read clean suite build after a previous panic")
             })?;
-            let Some(template) = builds.get(layout_root) else {
+            let Some(template) = builds.get(workspace_root) else {
                 return Ok(None);
             };
             (
                 template.temporary.path().to_path_buf(),
+                template.workspace_root.clone(),
                 template.layout_root.clone(),
                 template
                     .copied_workspace
@@ -4237,8 +4241,9 @@ impl WarmBuilds {
         Ok(Some(WorkerScratch::clone_from_template(
             &template.0,
             template.1,
-            &template.2,
+            template.2,
             &template.3,
+            &template.4,
         )?))
     }
 }
@@ -4255,6 +4260,7 @@ struct CleanSuite {
 /// build (original or private clone) instead of starting from a cold target.
 struct WorkerScratch {
     temporary: TemporaryWorkspace,
+    workspace_root: PathBuf,
     layout_root: PathBuf,
     copied_workspace: PathBuf,
     dirty: Option<DirtySource>,
@@ -4272,6 +4278,7 @@ impl WorkerScratch {
         let copied_workspace = copy_workspace(workspace, temporary.path())?;
         Ok(Self {
             temporary,
+            workspace_root: workspace.root.clone(),
             layout_root: workspace.layout_root.clone(),
             copied_workspace,
             dirty: None,
@@ -4281,6 +4288,7 @@ impl WorkerScratch {
 
     fn clone_from_template(
         template_root: &Path,
+        workspace_root: PathBuf,
         layout_root: PathBuf,
         workspace_relative: &Path,
         crate_prefixes: &[String],
@@ -4293,6 +4301,7 @@ impl WorkerScratch {
         let copied_workspace = temporary.path().join(workspace_relative);
         Ok(Self {
             temporary,
+            workspace_root,
             layout_root,
             copied_workspace,
             dirty: None,

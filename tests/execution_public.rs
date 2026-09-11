@@ -744,3 +744,168 @@ fn mutation_run_restores_the_host_interrupt_handler() {
         "the restored host console handler must receive the targeted interrupt"
     );
 }
+
+#[test]
+fn two_workspaces_sharing_layout_root_complete_clean_suite_and_run_mutants() {
+    let _run_guard = public_run_guard();
+    let parent = unique_temporary_root("shared-layout");
+    std::fs::create_dir_all(parent.0.join(".cargo")).expect("cargo config dir must be created");
+    std::fs::write(
+        parent.0.join(".cargo").join("config.toml"),
+        "# shared cargo config\n",
+    )
+    .expect("cargo config must be written");
+
+    let crate_a = parent.0.join("crate_a");
+    std::fs::create_dir_all(crate_a.join("src")).expect("crate_a src dir must be created");
+    std::fs::write(
+        crate_a.join("Cargo.toml"),
+        "[package]\nname = \"crate-a\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .expect("crate_a manifest must be written");
+    let source_a = crate_a.join("src").join("lib.rs");
+    std::fs::write(
+        &source_a,
+        "pub fn answer_a() -> bool {\n    let value_a = false;\n    value_a\n}\n",
+    )
+    .expect("crate_a source must be written");
+    std::fs::create_dir_all(crate_a.join("tests")).expect("crate_a tests dir must be created");
+    std::fs::write(
+        crate_a.join("tests").join("suite.rs"),
+        "#[test]\nfn test_a() {\n    assert!(!crate_a::answer_a());\n}\n",
+    )
+    .expect("crate_a test must be written");
+
+    let crate_b = parent.0.join("crate_b");
+    std::fs::create_dir_all(crate_b.join("src")).expect("crate_b src dir must be created");
+    std::fs::write(
+        crate_b.join("Cargo.toml"),
+        "[package]\nname = \"crate-b\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .expect("crate_b manifest must be written");
+    let source_b = crate_b.join("src").join("lib.rs");
+    std::fs::write(
+        &source_b,
+        "pub fn answer_b() -> bool {\n    let value_b = false;\n    value_b\n}\n",
+    )
+    .expect("crate_b source must be written");
+    std::fs::create_dir_all(crate_b.join("tests")).expect("crate_b tests dir must be created");
+    std::fs::write(
+        crate_b.join("tests").join("suite.rs"),
+        "#[test]\nfn test_b() {\n    assert!(!crate_b::answer_b());\n}\n",
+    )
+    .expect("crate_b test must be written");
+
+    let run = mutarust::run_mutation_tests(
+        &[
+            source_a.to_string_lossy().into_owned(),
+            source_b.to_string_lossy().into_owned(),
+        ],
+        &mutarust::Registry::builtins(),
+    )
+    .expect("the mutation run across two shared-layout workspaces must succeed");
+
+    assert_eq!(run.results().len(), 2);
+    let has_crate_a = run
+        .results()
+        .iter()
+        .any(|r| r.diff.contains("value_a") && r.state == mutarust::MutationState::Killed);
+    let has_crate_b = run
+        .results()
+        .iter()
+        .any(|r| r.diff.contains("value_b") && r.state == mutarust::MutationState::Killed);
+    assert!(has_crate_a, "mutants must run and be killed for crate_a");
+    assert!(has_crate_b, "mutants must run and be killed for crate_b");
+}
+
+#[test]
+fn two_workspaces_sharing_layout_root_complete_clean_suite_and_run_mutants_in_parallel() {
+    let _run_guard = public_run_guard();
+    let parent = unique_temporary_root("shared-layout-parallel");
+    std::fs::create_dir_all(parent.0.join(".cargo")).expect("cargo config dir must be created");
+    std::fs::write(
+        parent.0.join(".cargo").join("config.toml"),
+        "# shared cargo config\n",
+    )
+    .expect("cargo config must be written");
+
+    let crate_a = parent.0.join("crate_a");
+    std::fs::create_dir_all(crate_a.join("src")).expect("crate_a src dir must be created");
+    std::fs::write(
+        crate_a.join("Cargo.toml"),
+        "[package]\nname = \"crate-a\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .expect("crate_a manifest must be written");
+    let source_a = crate_a.join("src").join("lib.rs");
+    std::fs::write(
+        &source_a,
+        "pub fn answer_a() -> bool {\n    let value_a = false;\n    value_a\n}\n",
+    )
+    .expect("crate_a source must be written");
+    std::fs::create_dir_all(crate_a.join("tests")).expect("crate_a tests dir must be created");
+    std::fs::write(
+        crate_a.join("tests").join("suite.rs"),
+        "#[test]\nfn test_a() {\n    assert!(!crate_a::answer_a());\n}\n",
+    )
+    .expect("crate_a test must be written");
+
+    let crate_b = parent.0.join("crate_b");
+    std::fs::create_dir_all(crate_b.join("src")).expect("crate_b src dir must be created");
+    std::fs::write(
+        crate_b.join("Cargo.toml"),
+        "[package]\nname = \"crate-b\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .expect("crate_b manifest must be written");
+    let source_b = crate_b.join("src").join("lib.rs");
+    std::fs::write(
+        &source_b,
+        "pub fn answer_b() -> bool {\n    let value_b = false;\n    value_b\n}\n",
+    )
+    .expect("crate_b source must be written");
+    std::fs::create_dir_all(crate_b.join("tests")).expect("crate_b tests dir must be created");
+    std::fs::write(
+        crate_b.join("tests").join("suite.rs"),
+        "#[test]\nfn test_b() {\n    assert!(!crate_b::answer_b());\n}\n",
+    )
+    .expect("crate_b test must be written");
+
+    let registry = mutarust::Registry::builtins();
+    let names = registry.names().map(str::to_owned).collect::<Vec<_>>();
+    let filters = mutarust::SourceFilters::new(&[], &[], None, &names)
+        .expect("source filters must accept builtins");
+    let controls = mutarust::ExecutionControls {
+        workers: mutarust::WorkerLimit::new(2).expect("worker count must be valid"),
+        ..Default::default()
+    };
+    let run = mutarust::run_mutation_tests_with_controls(
+        &[
+            source_a.to_string_lossy().into_owned(),
+            source_b.to_string_lossy().into_owned(),
+        ],
+        &registry,
+        std::time::Duration::from_secs(30),
+        None,
+        &filters,
+        &mutarust::TestExecution::cargo(),
+        &controls,
+    )
+    .expect("parallel mutation run across two shared-layout workspaces must succeed");
+
+    assert_eq!(run.results().len(), 2);
+    let has_crate_a = run
+        .results()
+        .iter()
+        .any(|r| r.diff.contains("value_a") && r.state == mutarust::MutationState::Killed);
+    let has_crate_b = run
+        .results()
+        .iter()
+        .any(|r| r.diff.contains("value_b") && r.state == mutarust::MutationState::Killed);
+    assert!(
+        has_crate_a,
+        "mutants must run and be killed for crate_a in parallel"
+    );
+    assert!(
+        has_crate_b,
+        "mutants must run and be killed for crate_b in parallel"
+    );
+}
