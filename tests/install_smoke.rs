@@ -2232,6 +2232,63 @@ fn installed_command_writes_html_and_agentic_reports() {
 }
 
 #[test]
+fn installed_command_writes_agentic_context_for_targets_outside_the_current_directory() {
+    let root = smoke_root();
+    let install = install_command(&root);
+    let fixture = write_mutation_fixture(&root);
+    let source = fixture.join("checked").join("src").join("lib.rs");
+    let config = fixture.join("mutarust.yml");
+    fs::write(&config, "enable_mutators:\n  - conditional/bool-literal\n")
+        .expect("agentic report configuration must be written");
+    let agentic_report = root.join("mutarust-agentic.json");
+
+    let output = Command::new(command_path(&install))
+        .args([
+            "--config",
+            config.to_str().expect("config path must be UTF-8"),
+            "--logger-agentic-json",
+        ])
+        .arg(&source)
+        .current_dir(&*root)
+        .output()
+        .expect("installed mutarust must start for a target outside the current directory");
+    assert!(
+        output.status.success(),
+        "a run from outside the target workspace must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let agentic = read_json_object(&agentic_report);
+    assert_eq!(agentic["escaped_count"], 1);
+    let mutant = &agentic["mutants"][0];
+    assert_eq!(mutant["file"], "checked/src/lib.rs");
+    assert!(
+        mutant["context_start_line"]
+            .as_u64()
+            .expect("context_start_line")
+            > 0,
+        "escaped mutant must include a positive context start line: {mutant}"
+    );
+    assert!(
+        mutant["context_lines"]
+            .as_array()
+            .expect("context_lines")
+            .iter()
+            .any(|line| line.as_str().unwrap_or_default().contains("unchecked")),
+        "escaped mutant must include source context for a target outside the current directory: {mutant}"
+    );
+    assert!(
+        mutant["test_files"]
+            .as_array()
+            .expect("test_files")
+            .iter()
+            .any(|path| path == "checked/tests/mutation.rs"),
+        "escaped mutant must include nearby test files for a target outside the current directory: {mutant}"
+    );
+    validate_agentic_report_schema(&agentic);
+}
+
+#[test]
 fn installed_command_emits_github_and_gitlab_ci_results() {
     let root = smoke_root();
     let install = install_command(&root);

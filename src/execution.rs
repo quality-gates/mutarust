@@ -140,6 +140,8 @@ impl MutationRun {
 pub struct MutationResult {
     /// The source file name relative to the isolated workspace layout.
     pub source: PathBuf,
+    /// The workspace root directory the source path resolves against.
+    pub source_root: PathBuf,
     /// The stable ID for this source change.
     pub stable_id: String,
     /// The source line where this mutation begins.
@@ -1274,6 +1276,7 @@ fn validate_adaptive_timeout(
 fn generated_result(candidate: &MutationCandidate) -> MutationResult {
     MutationResult {
         source: candidate.evidence.source.clone(),
+        source_root: candidate.workspace.source_root.clone(),
         stable_id: candidate.evidence.stable_id.as_str().to_owned(),
         line: candidate.evidence.line,
         mutator: candidate.mutator.clone(),
@@ -1557,6 +1560,7 @@ mod tests {
     fn test_result(state: MutationState) -> MutationResult {
         MutationResult {
             source: PathBuf::from("src/lib.rs"),
+            source_root: PathBuf::new(),
             stable_id: "a".repeat(32),
             line: 1,
             mutator: "conditional/bool-literal".to_owned(),
@@ -2725,6 +2729,7 @@ fn test_candidate(
     counters.record(state);
     MutationResult {
         source: candidate.evidence.source,
+        source_root: candidate.workspace.source_root.clone(),
         stable_id: candidate.evidence.stable_id.into_string(),
         line: candidate.evidence.line,
         mutator: candidate.mutator,
