@@ -289,13 +289,14 @@ fn normalize_ranges(mut ranges: Vec<Range<usize>>) -> Vec<Range<usize>> {
 }
 
 fn range_overlaps_any(ranges: &[Range<usize>], target: &Range<usize>) -> bool {
-    if target.is_empty() {
-        return false;
-    }
     let index = ranges.partition_point(|range| range.end <= target.start);
-    ranges
-        .get(index)
-        .is_some_and(|range| range.start < target.end)
+    ranges.get(index).is_some_and(|range| {
+        if target.is_empty() {
+            range.start <= target.start && target.start < range.end
+        } else {
+            range.start < target.end
+        }
+    })
 }
 
 fn source_has_unit_tests(file: Option<&syn::File>) -> bool {
@@ -881,6 +882,6 @@ mod tests {
         assert!(!super::range_overlaps_any(&normalized, &(40..50)));
         assert!(super::range_overlaps_any(&normalized, &(45..55)));
         assert!(!super::range_overlaps_any(&normalized, &(60..70)));
-        assert!(!super::range_overlaps_any(&normalized, &(15..15)));
+        assert!(super::range_overlaps_any(&normalized, &(15..15)));
     }
 }

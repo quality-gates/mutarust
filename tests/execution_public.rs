@@ -118,6 +118,76 @@ fn write_single_file_crate(root: &FixtureRoot, package: &str, source: &str) -> s
 }
 
 #[test]
+fn dry_run_excludes_range_break_mutants_inside_cfg_test_modules() {
+    let _run_guard = public_run_guard();
+    let root = unique_temporary_root("range-filter");
+    let source = write_single_file_crate(
+        &root,
+        "cfg-test-range-filter",
+        "pub fn production() { for _ in 0..1 {} }\n#[cfg(test)]\nmod tests { fn helper() { for _ in 0..1 {} } }\n",
+    );
+    let mut registry = mutarust::Registry::builtins();
+    registry.retain(|name| name == "loop/range_break");
+    let names = registry.names().map(str::to_owned).collect::<Vec<_>>();
+    let filters = mutarust::SourceFilters::with_policies(&[], &[], None, &names, false, false)
+        .expect("source filters must accept the loop mutator");
+    let controls = mutarust::ExecutionControls {
+        dry_run: true,
+        ..mutarust::ExecutionControls::default()
+    };
+    let execution = mutarust::TestExecution::custom("false", false, false, false)
+        .expect("the dry-run command must parse");
+    let run = mutarust::run_mutation_tests_with_controls(
+        &[source.to_string_lossy().into_owned()],
+        &registry,
+        std::time::Duration::from_secs(1),
+        None,
+        &filters,
+        &execution,
+        &controls,
+    )
+    .expect("the dry run must complete");
+
+    assert_eq!(run.results().len(), 1);
+    assert_eq!(run.results()[0].line, 1);
+}
+
+#[test]
+fn dry_run_excludes_range_break_mutants_inside_cfg_items() {
+    let _run_guard = public_run_guard();
+    let root = unique_temporary_root("range-filter");
+    let source = write_single_file_crate(
+        &root,
+        "cfg-item-range-filter",
+        "pub fn production() { for _ in 0..1 {} }\n#[cfg(feature = \"extra\")]\nfn gated() { for _ in 0..1 {} }\n",
+    );
+    let mut registry = mutarust::Registry::builtins();
+    registry.retain(|name| name == "loop/range_break");
+    let names = registry.names().map(str::to_owned).collect::<Vec<_>>();
+    let filters = mutarust::SourceFilters::with_policies(&[], &[], None, &names, false, true)
+        .expect("source filters must accept the loop mutator");
+    let controls = mutarust::ExecutionControls {
+        dry_run: true,
+        ..mutarust::ExecutionControls::default()
+    };
+    let execution = mutarust::TestExecution::custom("false", false, false, false)
+        .expect("the dry-run command must parse");
+    let run = mutarust::run_mutation_tests_with_controls(
+        &[source.to_string_lossy().into_owned()],
+        &registry,
+        std::time::Duration::from_secs(1),
+        None,
+        &filters,
+        &execution,
+        &controls,
+    )
+    .expect("the dry run must complete");
+
+    assert_eq!(run.results().len(), 1);
+    assert_eq!(run.results()[0].line, 1);
+}
+
+#[test]
 fn timeout_coefficient_extends_the_clean_suite_budget() {
     let _run_guard = public_run_guard();
     let root = unique_temporary_root("slow-suite");
