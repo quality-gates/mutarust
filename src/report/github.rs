@@ -67,6 +67,7 @@ mod tests {
     fn mutant(state: MutationState, source: &str, line: usize) -> MutationResult {
         MutationResult {
             source: PathBuf::from(source),
+            source_root: PathBuf::new(),
             stable_id: "a".repeat(32),
             line,
             mutator: "conditional/bool-literal".to_owned(),

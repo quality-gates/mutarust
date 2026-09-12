@@ -801,11 +801,7 @@ fn write_reports_or_error(
         )
     })
     .or_else(|| write_report_if(command.reports.summary_json, || write_compact_summary(run)))
-    .or_else(|| {
-        write_report_if(command.reports.agentic_json, || {
-            write_agentic_report(run, std::path::Path::new("."))
-        })
-    })
+    .or_else(|| write_report_if(command.reports.agentic_json, || write_agentic_report(run)))
     .or_else(|| write_github_annotations_if(command.reports.github, run))
     .or_else(|| write_report_if(command.reports.gitlab, || write_gitlab_report(run)))
 }

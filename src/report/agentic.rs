@@ -21,8 +21,6 @@ const CONTEXT_RADIUS: usize = 3;
 pub struct AgenticReportInput<'a> {
     /// RFC 3339 generation time.
     pub generated_at: &'a str,
-    /// Directory used to resolve repository-relative source paths.
-    pub source_root: &'a Path,
 }
 
 /// Agent-ready report for escaped mutants.
@@ -71,7 +69,7 @@ pub fn agentic_report(run: &MutationRun, input: &AgenticReportInput<'_>) -> Agen
         .results()
         .iter()
         .filter(|result| result.state == MutationState::Escaped)
-        .map(|result| agentic_mutant(result, input.source_root))
+        .map(agentic_mutant)
         .collect::<Vec<_>>();
     AgenticReport {
         generated_at: input.generated_at.to_owned(),
@@ -83,13 +81,12 @@ pub fn agentic_report(run: &MutationRun, input: &AgenticReportInput<'_>) -> Agen
 }
 
 /// Writes the agent-ready report when enabled.
-pub fn write_agentic_report(run: &MutationRun, source_root: &Path) -> Result<(), String> {
+pub fn write_agentic_report(run: &MutationRun) -> Result<(), String> {
     let generated_at = utc_rfc3339_now()?;
     let report = agentic_report(
         run,
         &AgenticReportInput {
             generated_at: &generated_at,
-            source_root,
         },
     );
     let text = serde_json::to_string_pretty(&report)
@@ -98,9 +95,9 @@ pub fn write_agentic_report(run: &MutationRun, source_root: &Path) -> Result<(),
         .map_err(|error| format!("could not write {AGENTIC_REPORT_FILE_NAME}: {error}"))
 }
 
-fn agentic_mutant(result: &MutationResult, source_root: &Path) -> AgenticMutant {
+fn agentic_mutant(result: &MutationResult) -> AgenticMutant {
     let file = portable_path(&result.source);
-    let source_path = source_root.join(&result.source);
+    let source_path = result.source_root.join(&result.source);
     let source_text = fs::read_to_string(&source_path).unwrap_or_default();
     let (context_lines, context_start_line) =
         extract_context_lines(&source_text, result.line, CONTEXT_RADIUS);
@@ -116,7 +113,7 @@ fn agentic_mutant(result: &MutationResult, source_root: &Path) -> AgenticMutant 
         diff: result.diff.clone(),
         context_start_line,
         context_lines,
-        test_files: find_test_files(&result.source, source_root),
+        test_files: find_test_files(&result.source, &result.source_root),
     }
 }
 
@@ -279,7 +276,6 @@ mod tests {
             &run,
             &AgenticReportInput {
                 generated_at: "2026-08-02T22:00:00Z",
-                source_root: Path::new("."),
             },
         );
         assert_eq!(report.generated_at, "2026-08-02T22:00:00Z");
@@ -302,7 +298,6 @@ mod tests {
             &MutationRun::for_test(Vec::new(), false),
             &AgenticReportInput {
                 generated_at: "2026-08-02T22:00:00Z",
-                source_root: Path::new("."),
             },
         );
         assert_eq!(report.escaped_count, 0);
@@ -334,11 +329,12 @@ mod tests {
         .expect("unit test");
 
         let run = MutationRun::for_test(
-            vec![mutant(
+            vec![mutant_with_root(
                 MutationState::Escaped,
                 "checked/src/lib.rs",
                 4,
                 "id-escaped",
+                root.clone(),
             )],
             false,
         );
@@ -346,7 +342,6 @@ mod tests {
             &run,
             &AgenticReportInput {
                 generated_at: "2026-08-02T22:00:00Z",
-                source_root: &root,
             },
         );
         let mutant = &report.mutants[0];
@@ -374,8 +369,19 @@ mod tests {
     }
 
     fn mutant(state: MutationState, source: &str, line: usize, id: &str) -> MutationResult {
+        mutant_with_root(state, source, line, id, PathBuf::new())
+    }
+
+    fn mutant_with_root(
+        state: MutationState,
+        source: &str,
+        line: usize,
+        id: &str,
+        source_root: PathBuf,
+    ) -> MutationResult {
         MutationResult {
             source: PathBuf::from(source),
+            source_root,
             stable_id: id.to_owned(),
             line,
             mutator: "conditional/bool-literal".to_owned(),
