@@ -4508,13 +4508,14 @@ fn installed_command_tests_one_mutation_per_temporary_workspace() {
     let record = root.join("mutant-tests");
     fs::write(
         &fake_cargo,
-        "#!/bin/sh\nif [ \"$1\" = \"metadata\" ]; then\n  exec \"$MUTARUST_REAL_CARGO\" \"$@\"\nfi\ncase \" $* \" in\n  *\" --no-run \"*) exec \"$MUTARUST_REAL_CARGO\" \"$@\" ;;\nesac\nif grep -q false checked/src/lib.rs 2>/dev/null; then\n  checked=true\n  unchecked=true\n  grep -q 'pub fn checked() -> bool { let value = false; value }' checked/src/lib.rs && checked=false\n  grep -q 'pub fn unchecked() -> bool { let value = false; value }' checked/src/lib.rs && unchecked=false\n  mode=$(stat -c %a \"$PWD\" 2>/dev/null || stat -f %Lp \"$PWD\")\n  printf '%s|%s|%s|%s\\n' \"$PWD\" \"$checked\" \"$unchecked\" \"$mode\" >> \"$MUTARUST_TEST_RECORD\"\nfi\nexec \"$MUTARUST_REAL_CARGO\" \"$@\"\n",
+        "#!/bin/sh\nif [ \"$1\" = \"metadata\" ]; then\n  exec \"$MUTARUST_REAL_CARGO\" \"$@\"\nfi\ncase \" $* \" in\n  *\" --no-run \"*) exec \"$MUTARUST_REAL_CARGO\" \"$@\" ;;\nesac\nif grep -q false checked/src/lib.rs 2>/dev/null; then\n  checked=true\n  unchecked=true\n  grep -q 'pub fn checked() -> bool { let value = false; value }' checked/src/lib.rs && checked=false\n  grep -q 'pub fn unchecked() -> bool { let value = false; value }' checked/src/lib.rs && unchecked=false\n  mode=$(stat -c %a \"$PWD\" 2>/dev/null || stat -f %Lp \"$PWD\")\n  side_effect=clean\n  if [ -f mutant-side-effect.txt ] || [ -f checked/mutant-side-effect.txt ]; then\n    side_effect=dirty\n  fi\n  printf 'side-effect\\n' > mutant-side-effect.txt\n  printf 'side-effect\\n' > checked/mutant-side-effect.txt\n  printf '%s|%s|%s|%s|%s\\n' \"$PWD\" \"$checked\" \"$unchecked\" \"$mode\" \"$side_effect\" >> \"$MUTARUST_TEST_RECORD\"\nfi\nexec \"$MUTARUST_REAL_CARGO\" \"$@\"\n",
     )
     .expect("recording Cargo command must be written");
     fs::set_permissions(&fake_cargo, fs::Permissions::from_mode(0o755))
         .expect("recording Cargo command must be executable");
 
     let output = Command::new(command_path(&install))
+        .args(["--workers", "1"])
         .arg(&source)
         .current_dir(&fixture)
         .env("CARGO", &fake_cargo)
@@ -4534,7 +4535,10 @@ fn installed_command_tests_one_mutation_per_temporary_workspace() {
         .map(|line| line.split('|').collect::<Vec<_>>())
         .collect::<Vec<_>>();
     assert_eq!(records.len(), 2, "exactly two mutant tests must run");
-    assert_ne!(records[0][0], records[1][0], "mutants need separate copies");
+    assert_eq!(
+        records[0][0], records[1][0],
+        "one worker must reuse its workspace path across mutants"
+    );
     let mutations = records
         .iter()
         .map(|record| (record[1], record[2]))
@@ -4546,6 +4550,10 @@ fn installed_command_tests_one_mutation_per_temporary_workspace() {
     );
     for record in records {
         assert_eq!(record[3], "700", "temporary workspaces must be private");
+        assert_eq!(
+            record[4], "clean",
+            "files outside target must reset between consecutive mutants"
+        );
         assert!(
             !Path::new(record[0]).exists(),
             "each temporary workspace must be removed"
