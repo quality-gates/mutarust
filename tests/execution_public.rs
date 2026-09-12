@@ -1070,3 +1070,78 @@ fn cargo_worker_scratch_removes_test_files_between_mutants() {
         );
     }
 }
+
+#[test]
+fn source_discovery_keeps_a_lockless_package_lockless() {
+    let _run_guard = public_run_guard();
+    let root = unique_temporary_root("lockless-discovery");
+    let source = write_single_file_crate(
+        &root,
+        "lockless-discovery-fixture",
+        "pub fn answer() -> bool {\n    true\n}\n",
+    );
+    let lockfile = root.0.join("Cargo.lock");
+    assert!(
+        !lockfile.exists(),
+        "the fixture package must start without a lock file"
+    );
+
+    let sources = mutarust::find_rust_sources(&[root.0.to_string_lossy().into_owned()])
+        .expect("source discovery must complete");
+
+    assert!(
+        sources.contains(&source),
+        "source discovery must find the package source file"
+    );
+    assert!(
+        !lockfile.exists(),
+        "source discovery must not write Cargo.lock in the user source tree"
+    );
+}
+
+#[test]
+fn dry_run_keeps_a_lockless_package_lockless() {
+    let _run_guard = public_run_guard();
+    let root = unique_temporary_root("lockless-dry-run");
+    write_single_file_crate(
+        &root,
+        "lockless-dry-run-fixture",
+        "pub fn increment(value: i32) -> i32 {\n    value + 1\n}\n",
+    );
+    let lockfile = root.0.join("Cargo.lock");
+    let registry = mutarust::Registry::builtins();
+    let names = registry.names().map(str::to_owned).collect::<Vec<_>>();
+    let filters = mutarust::SourceFilters::with_policies(&[], &[], None, &names, false, false)
+        .expect("source filters must accept the builtin mutators");
+    let controls = mutarust::ExecutionControls {
+        dry_run: true,
+        ..mutarust::ExecutionControls::default()
+    };
+    let execution = mutarust::TestExecution::custom("false", false, false, false)
+        .expect("the dry-run command must parse");
+
+    let sources = mutarust::find_rust_sources(&[root.0.to_string_lossy().into_owned()])
+        .expect("source discovery must complete")
+        .iter()
+        .map(|path| path.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    let run = mutarust::run_mutation_tests_with_controls(
+        &sources,
+        &registry,
+        std::time::Duration::from_secs(1),
+        None,
+        &filters,
+        &execution,
+        &controls,
+    )
+    .expect("the dry run must complete");
+
+    assert!(
+        !run.results().is_empty(),
+        "the dry run must report the mutants it would generate"
+    );
+    assert!(
+        !lockfile.exists(),
+        "a dry run must not write Cargo.lock in the user source tree"
+    );
+}

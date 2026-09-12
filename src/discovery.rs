@@ -238,13 +238,14 @@ fn cargo_metadata(
     directory: &Path,
     manifest_path: Option<&Path>,
 ) -> Result<Metadata, cargo_metadata::Error> {
+    let lockless = is_lockless_package(directory, manifest_path);
     let mut command = MetadataCommand::new();
     command.current_dir(directory);
     if let Some(manifest_path) = manifest_path {
         command.manifest_path(manifest_path);
     }
 
-    command.exec().or_else(|error| {
+    let metadata = command.exec().or_else(|error| {
         let host_target = cargo_host_target().ok_or(error)?;
         let mut fallback = MetadataCommand::new();
         fallback
@@ -254,7 +255,38 @@ fn cargo_metadata(
             fallback.manifest_path(manifest_path);
         }
         fallback.exec()
-    })
+    });
+
+    if lockless {
+        if let Ok(metadata) = &metadata {
+            remove_written_lock_file(metadata);
+        }
+    }
+
+    metadata
+}
+
+/// Tells if a target package tree has no `Cargo.lock` file.
+///
+/// The workspace root is the package directory or a parent of it. A tree with
+/// no lock file at or above the package therefore has no lock file in the
+/// workspace root.
+fn is_lockless_package(directory: &Path, manifest_path: Option<&Path>) -> bool {
+    let package_directory = manifest_path.and_then(Path::parent).unwrap_or(directory);
+    !package_directory
+        .ancestors()
+        .any(|ancestor| ancestor.join("Cargo.lock").is_file())
+}
+
+/// Removes the lock file that a `cargo metadata` command wrote.
+///
+/// Cargo resolves dependencies for a full `cargo metadata` command and writes
+/// `Cargo.lock` in the workspace root. Mutarust must not change the user
+/// source tree, so a package that had no lock file must have no lock file
+/// after discovery.
+fn remove_written_lock_file(metadata: &Metadata) {
+    let lock_file = metadata.workspace_root.as_std_path().join("Cargo.lock");
+    let _ = fs::remove_file(lock_file);
 }
 
 fn cargo_host_target() -> Option<String> {
@@ -343,7 +375,7 @@ fn non_production_source_paths(path: &Path) -> Result<BTreeSet<PathBuf>, SourceE
     let Some(cargo_root) = cargo_root(path) else {
         return Ok(BTreeSet::new());
     };
-    let Ok(metadata) = MetadataCommand::new().current_dir(cargo_root).exec() else {
+    let Ok(metadata) = cargo_metadata(&cargo_root, None) else {
         return Ok(BTreeSet::new());
     };
 
@@ -2122,8 +2154,7 @@ fn is_test_directory(name: &std::ffi::OsStr) -> bool {
 fn collect_package(target: &Target, files: &mut BTreeSet<PathBuf>) -> Result<bool, SourceError> {
     let directory = env::current_dir()
         .map_err(|error| SourceError::new(format!("cannot read current directory: {error}")))?;
-    let metadata = MetadataCommand::new()
-        .exec()
+    let metadata = cargo_metadata(&directory, None)
         .map_err(|error| SourceError::new(format!("cannot read Cargo metadata: {error}")))?;
     let Some(package) = metadata.packages.iter().find(|package| {
         package.name.as_ref() == target.value && metadata.workspace_members.contains(&package.id)
@@ -2146,7 +2177,7 @@ fn workspace_metadata(path: &Path) -> Option<Metadata> {
         return None;
     }
 
-    let metadata = MetadataCommand::new().current_dir(path).exec().ok()?;
+    let metadata = cargo_metadata(path, None).ok()?;
     let workspace_root = canonical_path(metadata.workspace_root.as_std_path()).ok()?;
 
     (workspace_root == path).then_some(metadata)
