@@ -313,8 +313,20 @@ fn item_has_cfg_test(item: &syn::Item) -> bool {
                 .content
                 .as_ref()
                 .is_some_and(|(_, items)| items.iter().any(item_has_cfg_test)),
+            syn::Item::Impl(item) => item.items.iter().any(impl_item_has_cfg_test),
+            syn::Item::Trait(item) => item.items.iter().any(trait_item_has_cfg_test),
             _ => false,
         }
+}
+
+fn impl_item_has_cfg_test(item: &syn::ImplItem) -> bool {
+    impl_item_attributes(item).iter().any(attribute_is_cfg_test)
+}
+
+fn trait_item_has_cfg_test(item: &syn::TraitItem) -> bool {
+    trait_item_attributes(item)
+        .iter()
+        .any(attribute_is_cfg_test)
 }
 
 fn conditional_source_ranges(text: &str, file: Option<&syn::File>) -> Vec<Range<usize>> {
@@ -351,10 +363,19 @@ fn collect_test_items(text: &str, items: &[syn::Item], ranges: &mut Vec<Range<us
             }
             continue;
         }
-        if let syn::Item::Mod(module) = item {
-            if let Some((_, nested)) = &module.content {
-                collect_test_items(text, nested, ranges);
+        match item {
+            syn::Item::Mod(module) => {
+                if let Some((_, nested)) = &module.content {
+                    collect_test_items(text, nested, ranges);
+                }
             }
+            syn::Item::Impl(item) => {
+                collect_impl_item_ranges(text, &item.items, ranges, attribute_is_cfg_test);
+            }
+            syn::Item::Trait(item) => {
+                collect_trait_item_ranges(text, &item.items, ranges, attribute_is_cfg_test);
+            }
+            _ => {}
         }
     }
 }
@@ -367,9 +388,48 @@ fn collect_conditional_items(text: &str, items: &[syn::Item], ranges: &mut Vec<R
             }
             continue;
         }
-        if let syn::Item::Mod(module) = item {
-            if let Some((_, nested)) = &module.content {
-                collect_conditional_items(text, nested, ranges);
+        match item {
+            syn::Item::Mod(module) => {
+                if let Some((_, nested)) = &module.content {
+                    collect_conditional_items(text, nested, ranges);
+                }
+            }
+            syn::Item::Impl(item) => {
+                collect_impl_item_ranges(text, &item.items, ranges, attribute_is_non_test_cfg);
+            }
+            syn::Item::Trait(item) => {
+                collect_trait_item_ranges(text, &item.items, ranges, attribute_is_non_test_cfg);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_impl_item_ranges(
+    text: &str,
+    items: &[syn::ImplItem],
+    ranges: &mut Vec<Range<usize>>,
+    attribute_matches: fn(&syn::Attribute) -> bool,
+) {
+    for item in items {
+        if impl_item_attributes(item).iter().any(attribute_matches) {
+            if let Some(range) = item_span_range(text, item) {
+                ranges.push(range);
+            }
+        }
+    }
+}
+
+fn collect_trait_item_ranges(
+    text: &str,
+    items: &[syn::TraitItem],
+    ranges: &mut Vec<Range<usize>>,
+    attribute_matches: fn(&syn::Attribute) -> bool,
+) {
+    for item in items {
+        if trait_item_attributes(item).iter().any(attribute_matches) {
+            if let Some(range) = item_span_range(text, item) {
+                ranges.push(range);
             }
         }
     }
@@ -424,8 +484,27 @@ fn other_item_attributes(item: &syn::Item) -> &[syn::Attribute] {
     }
 }
 
-fn item_span_range(text: &str, item: &syn::Item) -> Option<Range<usize>> {
-    use syn::spanned::Spanned;
+fn impl_item_attributes(item: &syn::ImplItem) -> &[syn::Attribute] {
+    match item {
+        syn::ImplItem::Const(item) => &item.attrs,
+        syn::ImplItem::Fn(item) => &item.attrs,
+        syn::ImplItem::Type(item) => &item.attrs,
+        syn::ImplItem::Macro(item) => &item.attrs,
+        _ => &[],
+    }
+}
+
+fn trait_item_attributes(item: &syn::TraitItem) -> &[syn::Attribute] {
+    match item {
+        syn::TraitItem::Const(item) => &item.attrs,
+        syn::TraitItem::Fn(item) => &item.attrs,
+        syn::TraitItem::Type(item) => &item.attrs,
+        syn::TraitItem::Macro(item) => &item.attrs,
+        _ => &[],
+    }
+}
+
+fn item_span_range<T: Spanned>(text: &str, item: &T) -> Option<Range<usize>> {
     crate::mutator::span_range(text, item.span())
 }
 
@@ -780,6 +859,101 @@ mod tests {
     fn plus_range(text: &str) -> Range<usize> {
         let start = text.find('+').expect("fixture must contain plus");
         start..start + 1
+    }
+
+    fn associated_cfg_fixture() -> &'static str {
+        concat!(
+            "pub struct Service;\n",
+            "impl Service {\n",
+            "    pub fn production_method() -> bool {\n",
+            "        let value = true;\n",
+            "        value\n",
+            "    }\n",
+            "\n",
+            "    #[cfg(test)]\n",
+            "    pub fn test_helper_method() -> bool {\n",
+            "        let value = true;\n",
+            "        value\n",
+            "    }\n",
+            "\n",
+            "    #[cfg(feature = \"gated\")]\n",
+            "    pub fn gated_feature_method() -> bool {\n",
+            "        let value = true;\n",
+            "        value\n",
+            "    }\n",
+            "}\n",
+            "\n",
+            "pub trait Contract {\n",
+            "    fn production_trait_method() -> bool {\n",
+            "        let value = true;\n",
+            "        value\n",
+            "    }\n",
+            "\n",
+            "    #[cfg(test)]\n",
+            "    fn test_trait_method() -> bool {\n",
+            "        let value = true;\n",
+            "        value\n",
+            "    }\n",
+            "\n",
+            "    #[cfg(feature = \"gated\")]\n",
+            "    fn gated_trait_method() -> bool {\n",
+            "        let value = true;\n",
+            "        value\n",
+            "    }\n",
+            "}\n",
+        )
+    }
+
+    fn true_ranges(text: &str) -> Vec<Range<usize>> {
+        text.match_indices("true")
+            .map(|(start, value)| start..start + value.len())
+            .collect()
+    }
+
+    fn filter_for(text: &str, skip_without_test: bool, skip_with_cfg: bool) -> super::SourceFilter {
+        let syntax = syn::parse_file(text).expect("associated item fixture must parse");
+        SourceFilters::with_policies(
+            &[],
+            &[],
+            None,
+            &known_mutators(),
+            skip_without_test,
+            skip_with_cfg,
+        )
+        .expect("source filters must accept associated item policies")
+        .for_source(Path::new("associated.rs"), text, Some(&syntax))
+        .expect("associated item fixture must build source filters")
+    }
+
+    #[test]
+    fn cfg_attributes_on_impl_and_trait_items_filter_mutations() {
+        let text = associated_cfg_fixture();
+        let ranges = true_ranges(text);
+        let filter = filter_for(text, false, true);
+
+        assert_eq!(ranges.len(), 6, "fixture must contain one value per method");
+        for (index, range) in ranges.iter().enumerate() {
+            let should_allow = matches!(index, 0 | 3);
+            assert_eq!(
+                filter.allows_mutation("conditional/bool-literal", range),
+                should_allow,
+                "unexpected filter result for associated method {index}"
+            );
+        }
+    }
+
+    #[test]
+    fn cfg_test_on_impl_and_trait_items_counts_as_a_unit_test() {
+        let text = associated_cfg_fixture();
+        let filter = filter_for(text, true, false);
+
+        let ranges = true_ranges(text);
+        for index in [0, 3] {
+            assert!(
+                filter.allows_mutation("conditional/bool-literal", &ranges[index]),
+                "associated cfg(test) items must keep the source candidate selected"
+            );
+        }
     }
 
     #[test]
