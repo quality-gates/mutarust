@@ -2,6 +2,15 @@
 
 This file records important user changes.
 
+## 0.1.9 — 2026-09-20
+
+A compatible fix release. The public library interface does not change.
+
+### Fixed
+
+- Source filters traverse associated items in impl and trait blocks for cfg and test ranges.
+- Associated items marked `#[cfg(test)]` count as unit tests for `skip_without_test`.
+
 ## 0.1.8 — 2026-09-11
 
 A compatible fix release. The public library interface does not change.
