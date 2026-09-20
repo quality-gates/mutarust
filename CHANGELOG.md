@@ -2,6 +2,16 @@
 
 This file records important user changes.
 
+## 0.1.9 — 2026-09-20
+
+A compatible fix release. The public library interface does not change.
+
+### Fixed
+
+- Source filters traverse associated items in impl and trait blocks for cfg and test ranges.
+- Associated items marked `#[cfg(test)]` count as unit tests for `skip_without_test`.
+- The `yoke-derive` dependency is pinned to 0.8.2. The 0.8.3 version needs a newer compiler than Rust 1.85 and does not record a minimum Rust version, so fresh downstream resolutions stopped building on 1.85.
+
 ## 0.1.8 — 2026-09-11
 
 A compatible fix release. The public library interface does not change.
