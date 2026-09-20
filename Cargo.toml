@@ -34,6 +34,7 @@ shell-words = "1.1.0"
 syn = { version = "3.0.3", features = ["full", "visit", "extra-traits"] }
 toml = "1.1.4"
 yaml_serde = "0.10.4"
+yoke-derive = "=0.8.2"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = ["Win32_System_Console", "Win32_System_Threading"] }
