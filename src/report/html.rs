@@ -1,12 +1,32 @@
 use std::collections::BTreeMap;
-use std::fs;
+use std::path::PathBuf;
 
-use crate::{MutationResult, MutationRun, MutationState};
+use crate::{MutationResult, MutationRun};
 
-use super::{ReportMutatorStats, compact_summary, mutator_stats, portable_path};
+use super::{
+    Rendered, Report, ReportContext, ReportMutatorStats, compact_summary, escaped_mutants,
+    mutator_stats, portable_path, write_one,
+};
 
 /// File name for the HTML mutation report.
 pub const HTML_REPORT_FILE_NAME: &str = "mutarust-report.html";
+
+/// Report generator for the HTML report.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct HtmlReport;
+
+impl Report for HtmlReport {
+    fn name(&self) -> &'static str {
+        "html"
+    }
+
+    fn render(&self, run: &MutationRun, _context: &ReportContext) -> Result<Rendered, String> {
+        Ok(Rendered::File {
+            path: PathBuf::from(HTML_REPORT_FILE_NAME),
+            body: html_report(run),
+        })
+    }
+}
 
 /// Builds a self-contained HTML report from a completed run.
 pub fn html_report(run: &MutationRun) -> String {
@@ -103,16 +123,12 @@ pub fn html_report(run: &MutationRun) -> String {
 
 /// Writes the HTML report when enabled.
 pub fn write_html_report(run: &MutationRun) -> Result<(), String> {
-    fs::write(HTML_REPORT_FILE_NAME, html_report(run))
-        .map_err(|error| format!("could not write {HTML_REPORT_FILE_NAME}: {error}"))
+    write_one(&HtmlReport, run, &ReportContext::default())
 }
 
 fn group_escaped_mutants(run: &MutationRun) -> BTreeMap<String, Vec<&MutationResult>> {
     let mut grouped = BTreeMap::new();
-    for result in run.results() {
-        if result.state != MutationState::Escaped {
-            continue;
-        }
+    for result in escaped_mutants(run) {
         let path = portable_path(&result.source);
         grouped.entry(path).or_insert_with(Vec::new).push(result);
     }
@@ -380,7 +396,7 @@ function collapseAll() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::MutationResult;
+    use crate::{MutationResult, MutationState};
     use std::path::PathBuf;
 
     #[test]

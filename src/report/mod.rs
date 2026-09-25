@@ -5,22 +5,22 @@ mod hints;
 mod html;
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
 use crate::{MutationResult, MutationRun, MutationState, MutatorSummary, VERSION};
 
 pub use agentic::{
-    AGENTIC_REMINDER, AGENTIC_REPORT_FILE_NAME, AgenticMutant, AgenticReport, AgenticReportInput,
-    agentic_report, write_agentic_report,
+    AGENTIC_REMINDER, AGENTIC_REPORT_FILE_NAME, AgenticJsonReport, AgenticMutant, AgenticReport,
+    AgenticReportInput, agentic_report, write_agentic_report,
 };
-pub use github::github_annotations;
+pub use github::{GithubAnnotations, github_annotations};
 pub use gitlab::{
-    GITLAB_REPORT_FILE_NAME, GitLabIssue, GitLabLines, GitLabLocation, gitlab_report,
+    GITLAB_REPORT_FILE_NAME, GitLabIssue, GitLabLines, GitLabLocation, GitlabReport, gitlab_report,
     write_gitlab_report,
 };
-pub use html::{HTML_REPORT_FILE_NAME, html_report, write_html_report};
+pub use html::{HTML_REPORT_FILE_NAME, HtmlReport, html_report, write_html_report};
 
 /// File name for the full JSON mutation report.
 pub const FULL_REPORT_FILE_NAME: &str = "report.json";
@@ -28,14 +28,108 @@ pub const FULL_REPORT_FILE_NAME: &str = "report.json";
 /// File name for the compact JSON summary.
 pub const COMPACT_SUMMARY_FILE_NAME: &str = "mutarust-summary.json";
 
+/// One report generator that renders mutation test results.
+pub trait Report {
+    /// Identifier for this report format.
+    fn name(&self) -> &'static str;
+    /// Renders this report for a mutation run.
+    fn render(&self, run: &MutationRun, context: &ReportContext) -> Result<Rendered, String>;
+}
+
+/// The output of a rendered report.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Rendered {
+    /// A file report to write to disk.
+    File {
+        /// Target path for the report file.
+        path: PathBuf,
+        /// File contents.
+        body: String,
+    },
+    /// A report to print to standard output.
+    Stdout(String),
+}
+
+/// Report generator for the full JSON report.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct FullJsonReport;
+
+impl Report for FullJsonReport {
+    fn name(&self) -> &'static str {
+        "full"
+    }
+
+    fn render(&self, run: &MutationRun, context: &ReportContext) -> Result<Rendered, String> {
+        let body = serialize_json(&full_report(run, context))
+            .map_err(|error| format!("could not write {FULL_REPORT_FILE_NAME}: {error}"))?;
+        Ok(Rendered::File {
+            path: PathBuf::from(FULL_REPORT_FILE_NAME),
+            body,
+        })
+    }
+}
+
+/// Report generator for the compact summary JSON report.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct SummaryJsonReport;
+
+impl Report for SummaryJsonReport {
+    fn name(&self) -> &'static str {
+        "summary"
+    }
+
+    fn render(&self, run: &MutationRun, _context: &ReportContext) -> Result<Rendered, String> {
+        let body = serialize_json(&compact_summary(run))
+            .map_err(|error| format!("could not write {COMPACT_SUMMARY_FILE_NAME}: {error}"))?;
+        Ok(Rendered::File {
+            path: PathBuf::from(COMPACT_SUMMARY_FILE_NAME),
+            body,
+        })
+    }
+}
+
+/// Writes all active reports and returns the result for each report.
+pub fn write_all(
+    reports: &[&dyn Report],
+    run: &MutationRun,
+    context: &ReportContext,
+) -> Vec<Result<(), String>> {
+    reports
+        .iter()
+        .map(|report| write_one(*report, run, context))
+        .collect()
+}
+
+pub(super) fn write_one(
+    report: &dyn Report,
+    run: &MutationRun,
+    context: &ReportContext,
+) -> Result<(), String> {
+    match report.render(run, context)? {
+        Rendered::File { path, body } => fs::write(&path, body)
+            .map_err(|error| format!("could not write {}: {error}", path.display())),
+        Rendered::Stdout(body) => {
+            if body.is_empty() {
+                Ok(())
+            } else {
+                use std::io::Write;
+                let mut stdout = std::io::stdout().lock();
+                stdout
+                    .write_all(body.as_bytes())
+                    .map_err(|error| error.to_string())
+            }
+        }
+    }
+}
+
 /// Writes the full JSON report when enabled.
 pub fn write_full_report(run: &MutationRun, context: &ReportContext) -> Result<(), String> {
-    write_json(FULL_REPORT_FILE_NAME, &full_report(run, context))
+    write_one(&FullJsonReport, run, context)
 }
 
 /// Writes the compact JSON summary when enabled.
 pub fn write_compact_summary(run: &MutationRun) -> Result<(), String> {
-    write_json(COMPACT_SUMMARY_FILE_NAME, &compact_summary(run))
+    write_one(&SummaryJsonReport, run, &ReportContext::default())
 }
 
 /// Context that shapes documented report forms.
@@ -226,10 +320,18 @@ fn report_mutant(result: &MutationResult) -> ReportMutant {
     }
 }
 
-fn write_json(file_name: &str, value: &impl Serialize) -> Result<(), String> {
-    let text = serde_json::to_string(value)
-        .map_err(|error| format!("could not write {file_name}: {error}"))?;
-    fs::write(file_name, text).map_err(|error| format!("could not write {file_name}: {error}"))
+pub(super) fn escaped_mutants(run: &MutationRun) -> impl Iterator<Item = &MutationResult> {
+    run.results()
+        .iter()
+        .filter(|result| result.state == MutationState::Escaped)
+}
+
+pub(super) fn serialize_json(value: &impl Serialize) -> Result<String, String> {
+    serde_json::to_string(value).map_err(|error| error.to_string())
+}
+
+pub(super) fn serialize_json_pretty(value: &impl Serialize) -> Result<String, String> {
+    serde_json::to_string_pretty(value).map_err(|error| error.to_string())
 }
 
 pub(super) fn portable_path(path: &Path) -> String {

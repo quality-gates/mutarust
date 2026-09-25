@@ -1,19 +1,38 @@
-use std::fs;
-
 use serde::Serialize;
 
-use crate::{MutationRun, MutationState};
+use crate::MutationRun;
 
-use super::portable_path;
+use super::{
+    Rendered, Report, ReportContext, escaped_mutants, portable_path, serialize_json_pretty,
+    write_one,
+};
 
 /// File name for the GitLab Code Quality report.
 pub const GITLAB_REPORT_FILE_NAME: &str = "mutarust-gitlab.json";
 
+/// Report generator for the GitLab Code Quality report.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct GitlabReport;
+
+impl Report for GitlabReport {
+    fn name(&self) -> &'static str {
+        "gitlab"
+    }
+
+    fn render(&self, run: &MutationRun, _context: &ReportContext) -> Result<Rendered, String> {
+        let issues = gitlab_report(run);
+        let body = serialize_json_pretty(&issues)
+            .map_err(|error| format!("could not write {GITLAB_REPORT_FILE_NAME}: {error}"))?;
+        Ok(Rendered::File {
+            path: std::path::PathBuf::from(GITLAB_REPORT_FILE_NAME),
+            body,
+        })
+    }
+}
+
 /// Builds the GitLab Code Quality document for escaped mutants.
 pub fn gitlab_report(run: &MutationRun) -> Vec<GitLabIssue> {
-    run.results()
-        .iter()
-        .filter(|result| result.state == MutationState::Escaped)
+    escaped_mutants(run)
         .map(|result| {
             let path = portable_path(&result.source);
             GitLabIssue {
@@ -36,10 +55,7 @@ pub fn gitlab_report(run: &MutationRun) -> Vec<GitLabIssue> {
 
 /// Writes the GitLab Code Quality report when enabled.
 pub fn write_gitlab_report(run: &MutationRun) -> Result<(), String> {
-    let text = serde_json::to_string_pretty(&gitlab_report(run))
-        .map_err(|error| format!("could not write {GITLAB_REPORT_FILE_NAME}: {error}"))?;
-    fs::write(GITLAB_REPORT_FILE_NAME, text)
-        .map_err(|error| format!("could not write {GITLAB_REPORT_FILE_NAME}: {error}"))
+    write_one(&GitlabReport, run, &ReportContext::default())
 }
 
 /// One GitLab Code Quality finding.
@@ -79,7 +95,7 @@ pub struct GitLabLines {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::MutationResult;
+    use crate::{MutationResult, MutationState};
     use std::path::PathBuf;
 
     #[test]

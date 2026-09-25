@@ -1,14 +1,25 @@
-use crate::{MutationRun, MutationState};
+use crate::MutationRun;
 
-use super::portable_path;
+use super::{Rendered, Report, ReportContext, escaped_mutants, portable_path};
+
+/// Report generator for GitHub Actions warning annotations.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct GithubAnnotations;
+
+impl Report for GithubAnnotations {
+    fn name(&self) -> &'static str {
+        "github"
+    }
+
+    fn render(&self, run: &MutationRun, _context: &ReportContext) -> Result<Rendered, String> {
+        Ok(Rendered::Stdout(github_annotations(run)))
+    }
+}
 
 /// Builds GitHub Actions warning annotations for escaped mutants.
 pub fn github_annotations(run: &MutationRun) -> String {
     let mut output = String::new();
-    for result in run.results() {
-        if result.state != MutationState::Escaped {
-            continue;
-        }
+    for result in escaped_mutants(run) {
         let path = portable_path(&result.source);
         let title = format!("Mutant escaped ({})", result.mutator);
         let message = format!(
