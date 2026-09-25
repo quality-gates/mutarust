@@ -4,10 +4,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 
-use crate::{MutationResult, MutationRun, MutationState};
+use crate::{MutationResult, MutationRun};
 
 use super::hints::{kill_hint, mutator_description};
-use super::portable_path;
+use super::{
+    Rendered, Report, ReportContext, escaped_mutants, portable_path, serialize_json_pretty,
+    write_one,
+};
 
 /// File name for the agent-ready escaped-mutant report.
 pub const AGENTIC_REPORT_FILE_NAME: &str = "mutarust-agentic.json";
@@ -63,14 +66,35 @@ pub struct AgenticMutant {
     pub test_files: Vec<String>,
 }
 
+/// Report generator for the agent-ready JSON report.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct AgenticJsonReport;
+
+impl Report for AgenticJsonReport {
+    fn name(&self) -> &'static str {
+        "agentic"
+    }
+
+    fn render(&self, run: &MutationRun, _context: &ReportContext) -> Result<Rendered, String> {
+        let generated_at = utc_rfc3339_now()?;
+        let report = agentic_report(
+            run,
+            &AgenticReportInput {
+                generated_at: &generated_at,
+            },
+        );
+        let body = serialize_json_pretty(&report)
+            .map_err(|error| format!("could not write {AGENTIC_REPORT_FILE_NAME}: {error}"))?;
+        Ok(Rendered::File {
+            path: PathBuf::from(AGENTIC_REPORT_FILE_NAME),
+            body,
+        })
+    }
+}
+
 /// Builds the agent-ready report from a completed run.
 pub fn agentic_report(run: &MutationRun, input: &AgenticReportInput<'_>) -> AgenticReport {
-    let mutants = run
-        .results()
-        .iter()
-        .filter(|result| result.state == MutationState::Escaped)
-        .map(agentic_mutant)
-        .collect::<Vec<_>>();
+    let mutants = escaped_mutants(run).map(agentic_mutant).collect::<Vec<_>>();
     AgenticReport {
         generated_at: input.generated_at.to_owned(),
         msi: run.mutation_score(),
@@ -82,17 +106,7 @@ pub fn agentic_report(run: &MutationRun, input: &AgenticReportInput<'_>) -> Agen
 
 /// Writes the agent-ready report when enabled.
 pub fn write_agentic_report(run: &MutationRun) -> Result<(), String> {
-    let generated_at = utc_rfc3339_now()?;
-    let report = agentic_report(
-        run,
-        &AgenticReportInput {
-            generated_at: &generated_at,
-        },
-    );
-    let text = serde_json::to_string_pretty(&report)
-        .map_err(|error| format!("could not write {AGENTIC_REPORT_FILE_NAME}: {error}"))?;
-    fs::write(AGENTIC_REPORT_FILE_NAME, text)
-        .map_err(|error| format!("could not write {AGENTIC_REPORT_FILE_NAME}: {error}"))
+    write_one(&AgenticJsonReport, run, &ReportContext::default())
 }
 
 fn agentic_mutant(result: &MutationResult) -> AgenticMutant {
@@ -260,7 +274,7 @@ fn civil_from_days(days: i64) -> (i64, u8, u8) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::MutationResult;
+    use crate::{MutationResult, MutationState};
     use std::path::PathBuf;
 
     #[test]

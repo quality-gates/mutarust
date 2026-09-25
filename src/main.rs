@@ -5,10 +5,10 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use mutarust::{
-    Baseline, CommandSettings, Configuration, CoverageControls, DisplayFilter, ExecutionControls,
-    GitDiffControls, Registry, ReportContext, TestExecution, WorkerLimit, github_annotations,
-    write_agentic_report, write_compact_summary, write_full_report, write_gitlab_report,
-    write_html_report,
+    AgenticJsonReport, Baseline, CommandSettings, Configuration, CoverageControls, DisplayFilter,
+    ExecutionControls, FullJsonReport, GitDiffControls, GithubAnnotations, GitlabReport,
+    HtmlReport, Registry, Report, ReportContext, SummaryJsonReport, TestExecution, WorkerLimit,
+    write_all,
 };
 
 fn main() -> ExitCode {
@@ -791,48 +791,46 @@ fn write_reports_or_error(
     let context = ReportContext {
         one_mutant: command.run_mutant_id.is_some(),
     };
-    write_report_if(configuration.json_output, || {
-        write_full_report(run, &context)
-    })
-    .or_else(|| {
-        write_report_if(
-            configuration.html_output || command.reports.html_output,
-            || write_html_report(run),
-        )
-    })
-    .or_else(|| write_report_if(command.reports.summary_json, || write_compact_summary(run)))
-    .or_else(|| write_report_if(command.reports.agentic_json, || write_agentic_report(run)))
-    .or_else(|| write_github_annotations_if(command.reports.github, run))
-    .or_else(|| write_report_if(command.reports.gitlab, || write_gitlab_report(run)))
+    let reports = active_reports(command, configuration);
+    let results = write_all(&reports, run, &context);
+    report_exit_code(results)
 }
 
-fn write_report_if(enabled: bool, write: impl FnOnce() -> Result<(), String>) -> Option<ExitCode> {
-    if !enabled {
-        return None;
+fn active_reports(command: &RunCommand, configuration: &Configuration) -> Vec<&'static dyn Report> {
+    let mut reports: Vec<&'static dyn Report> = Vec::new();
+    if configuration.json_output {
+        reports.push(&FullJsonReport);
     }
-    match write() {
-        Ok(()) => None,
-        Err(error) => {
+    if configuration.html_output || command.reports.html_output {
+        reports.push(&HtmlReport);
+    }
+    if command.reports.summary_json {
+        reports.push(&SummaryJsonReport);
+    }
+    if command.reports.agentic_json {
+        reports.push(&AgenticJsonReport);
+    }
+    if command.reports.github {
+        reports.push(&GithubAnnotations);
+    }
+    if command.reports.gitlab {
+        reports.push(&GitlabReport);
+    }
+    reports
+}
+
+fn report_exit_code(results: Vec<Result<(), String>>) -> Option<ExitCode> {
+    let mut failed = false;
+    for result in results {
+        if let Err(error) = result {
             write_error(&error);
-            Some(ExitCode::from(3))
+            failed = true;
         }
     }
-}
-
-fn write_github_annotations_if(enabled: bool, run: &mutarust::MutationRun) -> Option<ExitCode> {
-    if !enabled {
-        return None;
-    }
-    let annotations = github_annotations(run);
-    if annotations.is_empty() {
-        return None;
-    }
-    match write!(io::stdout().lock(), "{annotations}") {
-        Ok(()) => None,
-        Err(error) => {
-            write_error(&error.to_string());
-            Some(ExitCode::from(3))
-        }
+    if failed {
+        Some(ExitCode::from(3))
+    } else {
+        None
     }
 }
 

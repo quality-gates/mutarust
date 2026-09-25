@@ -42,7 +42,6 @@ pub struct MutationRun {
 
 impl MutationRun {
     /// Builds a run from completed results for report tests.
-    #[cfg(test)]
     pub(crate) fn for_test(results: Vec<MutationResult>, has_coverage: bool) -> Self {
         Self {
             results,
@@ -134,6 +133,11 @@ impl MutationRun {
             .filter(|result| result.state == expected)
             .count()
     }
+}
+
+/// Builds a mutation run from results for testing.
+pub fn run_for_test(results: Vec<MutationResult>, has_coverage: bool) -> MutationRun {
+    MutationRun::for_test(results, has_coverage)
 }
 
 /// The result of testing one mutant.

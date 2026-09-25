@@ -269,3 +269,14 @@ fn lookup(entries: &'static [(&'static str, &'static str)], mutator: &str) -> Op
         .ok()
         .map(|index| entries[index].1)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tables_are_sorted() {
+        assert!(MUTATOR_DESCRIPTIONS.windows(2).all(|w| w[0].0 < w[1].0));
+        assert!(KILL_HINTS.windows(2).all(|w| w[0].0 < w[1].0));
+    }
+}
