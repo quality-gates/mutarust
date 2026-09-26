@@ -1,0 +1,45 @@
+escaped src/lib.rs arithmetic/base
+  ID: 79d632fc0b61961df1c37796a91c525b
+--- src/lib.rs
++++ src/lib.rs
+@@ -24,1 +24,1 @@
+-    sum(items) / items.len() as u32
++    sum(items) * items.len() as u32
+killed src/lib.rs conditional/negated
+  ID: 8d79d04a37d743cbe75e33c1480bb370
+escaped src/lib.rs expression/comparison
+  ID: 618be0332b833abdab7694dffd679b10
+--- src/lib.rs
++++ src/lib.rs
+@@ -10,1 +10,1 @@
+-    total >= 55
++    total > 55
+escaped src/lib.rs numbers/decrementer
+  ID: 8e0c0ba7e5fbac2df43155a52087110a
+--- src/lib.rs
++++ src/lib.rs
+@@ -10,1 +10,1 @@
+-    total >= 55
++    total >= 54
+escaped src/lib.rs numbers/incrementer
+  ID: 20b44db4e0a3f5ba1445df0baa6f1248
+--- src/lib.rs
++++ src/lib.rs
+@@ -10,1 +10,1 @@
+-    total >= 55
++    total >= 56
+Killed: 1
+Escaped: 4
+Errored: 0
+Not covered: 0
+Skipped: 0
+Total: 5
+Mutation score: 20.00%
+Per-mutator results:
+Mutator | Killed | Escaped | Skipped | Total
+arithmetic/base | 0 | 1 | 0 | 1
+conditional/negated | 1 | 0 | 0 | 1
+expression/comparison | 0 | 1 | 0 | 1
+numbers/decrementer | 0 | 1 | 0 | 1
+numbers/incrementer | 0 | 1 | 0 | 1
+EXIT=0

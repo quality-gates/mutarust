@@ -1,0 +1,14 @@
+=== replay 1
+Git repository root: /tmp/repo
+::warning file=src/lib.rs,line=2,title=Mutant escaped (arithmetic/base)::Escaped mutation at src/lib.rs:2 — add a test to kill it
+gitlab location.path: ['src/lib.rs']
+agentic file: ['src/lib.rs']
+missing at repo root: src/lib.rs
+exists at repo root: rust/calc/src/lib.rs
+=== replay 2
+Git repository root: /tmp/repo
+::warning file=src/lib.rs,line=2,title=Mutant escaped (arithmetic/base)::Escaped mutation at src/lib.rs:2 — add a test to kill it
+gitlab location.path: ['src/lib.rs']
+agentic file: ['src/lib.rs']
+missing at repo root: src/lib.rs
+exists at repo root: rust/calc/src/lib.rs

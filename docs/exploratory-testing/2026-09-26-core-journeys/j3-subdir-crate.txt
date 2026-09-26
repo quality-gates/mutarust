@@ -1,0 +1,7 @@
+escaped src/lib.rs arithmetic/base
+Total: 1
+::warning file=src/lib.rs,line=24,title=Mutant escaped (arithmetic/base)::Escaped mutation at src/lib.rs:24 — add a test to kill it
+['src/lib.rs']
+['src/lib.rs']
+--- from crate dir
+::warning file=src/lib.rs,line=24,title=Mutant escaped (arithmetic/base)::Escaped mutation at src/lib.rs:24 — add a test to kill it

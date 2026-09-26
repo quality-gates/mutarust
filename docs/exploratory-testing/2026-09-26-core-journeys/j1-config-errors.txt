@@ -1,0 +1,21 @@
+Killed: 0
+Escaped: 0
+Errored: 0
+Not covered: 0
+Skipped: 0
+Total: 0
+Mutation score: 0.00%
+Per-mutator results:
+Mutator | Killed | Escaped | Skipped | Total
+mutarust: mutation score 0.00% is below the required 90%
+EXCL_EXIT=4
+mutarust: could not parse configuration b.yml: unknown field `bogus`, expected one of `skip_without_test`, `skip_with_cfg`, `json_output`, `html_output`, `silent_mode`, `min_msi`, `min_covered_msi`, `exclude_dirs`, `disable_mutators`, `enable_mutators`, `ignore_source_lines`
+BOGUS_EXIT=3
+mutarust: --workers requires a positive whole number
+W0=3
+mutarust: --output-statuses requires only these letters: k (killed), e (escaped), s (skipped), n (not covered), x (errored)
+OS=3
+mutarust: cannot find Cargo package: nosuchpkg
+NOPKG=3
+mutarust: --min-msi requires a whole percentage from 0 to 100
+MSI101=3

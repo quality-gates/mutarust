@@ -1,0 +1,50 @@
+refs/remotes/origin/main
+mutarust: mutation score 20.00% is below the required 50%
+escaped src/lib.rs arithmetic/base
+  ID: 79d632fc0b61961df1c37796a91c525b
+escaped src/lib.rs expression/comparison
+  ID: 618be0332b833abdab7694dffd679b10
+escaped src/lib.rs numbers/decrementer
+  ID: 8e0c0ba7e5fbac2df43155a52087110a
+escaped src/lib.rs numbers/incrementer
+  ID: 20b44db4e0a3f5ba1445df0baa6f1248
+Killed: 1
+Escaped: 4
+Errored: 0
+Not covered: 0
+Skipped: 0
+Total: 5
+Mutation score: 20.00%
+Per-mutator results:
+Mutator | Killed | Escaped | Skipped | Total
+arithmetic/base | 0 | 1 | 0 | 1
+conditional/negated | 1 | 0 | 0 | 1
+expression/comparison | 0 | 1 | 0 | 1
+numbers/decrementer | 0 | 1 | 0 | 1
+numbers/incrementer | 0 | 1 | 0 | 1
+::warning file=src/lib.rs,line=24,title=Mutant escaped (arithmetic/base)::Escaped mutation at src/lib.rs:24 — add a test to kill it
+::warning file=src/lib.rs,line=10,title=Mutant escaped (expression/comparison)::Escaped mutation at src/lib.rs:10 — add a test to kill it
+::warning file=src/lib.rs,line=10,title=Mutant escaped (numbers/decrementer)::Escaped mutation at src/lib.rs:10 — add a test to kill it
+::warning file=src/lib.rs,line=10,title=Mutant escaped (numbers/incrementer)::Escaped mutation at src/lib.rs:10 — add a test to kill it
+EXIT=4
+mutarust: mutation score 0.00% is below the required 50%
+Killed: 0
+Escaped: 0
+Errored: 0
+Not covered: 0
+Skipped: 0
+Total: 0
+Mutation score: 0.00%
+Per-mutator results:
+Mutator | Killed | Escaped | Skipped | Total
+EMPTY_EXIT=4
+Killed: 0
+Escaped: 0
+Errored: 0
+Not covered: 0
+Skipped: 0
+Total: 0
+Mutation score: 0.00%
+Per-mutator results:
+Mutator | Killed | Escaped | Skipped | Total
+EMPTY_IGNORE_EXIT=0

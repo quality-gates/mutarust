@@ -1,0 +1,72 @@
+/work/ws/app/src/main.rs
+/work/ws/core/src/lib.rs
+/work/ws/core/src/math.rs
+---
+/work/ws/app/src/main.rs
+/work/ws/core/src/lib.rs
+/work/ws/core/src/math.rs
+---
+/work/ws/core/src/lib.rs
+/work/ws/core/src/math.rs
+---
+skipped app/src/main.rs branch/else
+  ID: e4865f54a83a66713fb37252b9486b41
+  mutant did not compile: Compiling core v0.1.0 (/tmp/mutarust-50-0/core)
+   Compiling app v0.1.0 (/tmp/mutarust-50-0/app)
+error[E0308]: mismatched types
+ --> app/src/main.rs:2:45
+  |
+2 |     if core::is_adult(age) { "adult" } else {  }
+  |                                             ^^^^ expected `&str`, found `()`
+
+For more information about this error, try `rustc --explain E0308`.
+error: could not compile `app` (bin "app" test) due to 1 previous error
+skipped app/src/main.rs branch/if
+  ID: 8a8aa5c5c2fcb6c09aafc2e06808f43b
+  mutant did not compile: Compiling core v0.1.0 (/tmp/mutarust-50-0/core)
+   Compiling app v0.1.0 (/tmp/mutarust-50-0/app)
+error[E0308]: mismatched types
+ --> app/src/main.rs:2:28
+  |
+2 |     if core::is_adult(age) {  } else { "minor" }
+  |                            ^^^^ expected `&str`, found `()`
+
+For more information about this error, try `rustc --explain E0308`.
+error: could not compile `app` (bin "app" test) due to 1 previous error
+escaped app/src/main.rs statement/remove
+  ID: 8d533cdd134043b06cd46c140eb72d26
+killed core/src/lib.rs conditional/negated
+  ID: ff10d819b264820df3c9ae28508de699
+escaped core/src/lib.rs expression/comparison
+  ID: 4f9e533ebcc7f3d62dcd11bb4a462966
+escaped core/src/lib.rs numbers/decrementer
+  ID: b2e31a660339e598cd7c822e002b7d35
+escaped core/src/lib.rs numbers/incrementer
+  ID: 9b2bc34274df478d42f16dd6c974fcb5
+killed core/src/math.rs arithmetic/base
+  ID: 90503f411388083fe82ba3215f0c4c9e
+killed core/src/math.rs numbers/decrementer
+  ID: 127ec02a62ebd26c4b238f922ff79229
+killed core/src/math.rs numbers/incrementer
+  ID: 9499a569fad9b244995bad45c6ba13fa
+Killed: 4
+Escaped: 4
+Errored: 0
+Not covered: 0
+Skipped: 2
+Total: 10
+Mutation score: 60.00%
+Per-mutator results:
+Mutator | Killed | Escaped | Skipped | Total
+arithmetic/base | 1 | 0 | 0 | 1
+branch/else | 0 | 0 | 1 | 1
+branch/if | 0 | 0 | 1 | 1
+conditional/negated | 1 | 0 | 0 | 1
+expression/comparison | 0 | 1 | 0 | 1
+numbers/decrementer | 1 | 1 | 0 | 2
+numbers/incrementer | 1 | 1 | 0 | 2
+statement/remove | 0 | 1 | 0 | 1
+EXIT=0
+Cargo.toml
+app
+core

@@ -1,0 +1,23 @@
+=== replay 1
+first escaped ID: 0c4f6f8ad767786dccb4f13ec7d7cd3d
+--- step 1: files that contain the word checksum:
+(none)
+--- step 2: blacklist the printed ID
+  ID: 0c4f6f8ad767786dccb4f13ec7d7cd3d
+Total: 1
+--- step 3: blacklist md5 of the changed lines (from src/evidence.rs)
+fe3b5867f97b347788d4723abf54d963
+Total: 0
+=== replay 2
+first escaped ID: 0c4f6f8ad767786dccb4f13ec7d7cd3d
+--- step 1: files that contain the word checksum:
+(none)
+--- step 2: blacklist the printed ID
+  ID: 0c4f6f8ad767786dccb4f13ec7d7cd3d
+Total: 1
+--- step 3: blacklist md5 of the changed lines (from src/evidence.rs)
+fe3b5867f97b347788d4723abf54d963
+Total: 0
+Total: 0
+--- step 4: search every output for the working checksum value
+(checksum value not in any output)
