@@ -933,27 +933,29 @@ how to enable each report.</p>
 <a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a><span class="w">  </span><span class="nt">"escaped"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
 <a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a><span class="w">    </span><span class="p">{</span>
 <a id="__codelineno-1-28" name="__codelineno-1-28" href="#__codelineno-1-28"></a><span class="w">      </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"4582b234c128077507b7558eb62c337e"</span><span class="p">,</span>
-<a id="__codelineno-1-29" name="__codelineno-1-29" href="#__codelineno-1-29"></a><span class="w">      </span><span class="nt">"mutator"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-1-30" name="__codelineno-1-30" href="#__codelineno-1-30"></a><span class="w">        </span><span class="nt">"mutatorName"</span><span class="p">:</span><span class="w"> </span><span class="s2">"conditional/bool-literal"</span><span class="p">,</span>
-<a id="__codelineno-1-31" name="__codelineno-1-31" href="#__codelineno-1-31"></a><span class="w">        </span><span class="nt">"originalFilePath"</span><span class="p">:</span><span class="w"> </span><span class="s2">"checked/src/lib.rs"</span><span class="p">,</span>
-<a id="__codelineno-1-32" name="__codelineno-1-32" href="#__codelineno-1-32"></a><span class="w">        </span><span class="nt">"originalStartLine"</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span>
-<a id="__codelineno-1-33" name="__codelineno-1-33" href="#__codelineno-1-33"></a><span class="w">      </span><span class="p">},</span>
-<a id="__codelineno-1-34" name="__codelineno-1-34" href="#__codelineno-1-34"></a><span class="w">      </span><span class="nt">"diff"</span><span class="p">:</span><span class="w"> </span><span class="s2">"--- checked/src/lib.rs\n+++ checked/src/lib.rs\n@@ -2,1 +2,1 @@\n-pub fn unchecked() -&gt; bool { let value = true; value }\n+pub fn unchecked() -&gt; bool { let value = false; value }\n"</span>
-<a id="__codelineno-1-35" name="__codelineno-1-35" href="#__codelineno-1-35"></a><span class="w">    </span><span class="p">}</span>
-<a id="__codelineno-1-36" name="__codelineno-1-36" href="#__codelineno-1-36"></a><span class="w">  </span><span class="p">],</span>
-<a id="__codelineno-1-37" name="__codelineno-1-37" href="#__codelineno-1-37"></a><span class="w">  </span><span class="nt">"killed"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
-<a id="__codelineno-1-38" name="__codelineno-1-38" href="#__codelineno-1-38"></a><span class="w">    </span><span class="p">{</span>
-<a id="__codelineno-1-39" name="__codelineno-1-39" href="#__codelineno-1-39"></a><span class="w">      </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"c2b28e81b2cc0af0ff4a6a1225106223"</span><span class="p">,</span>
-<a id="__codelineno-1-40" name="__codelineno-1-40" href="#__codelineno-1-40"></a><span class="w">      </span><span class="nt">"mutator"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-1-41" name="__codelineno-1-41" href="#__codelineno-1-41"></a><span class="w">        </span><span class="nt">"mutatorName"</span><span class="p">:</span><span class="w"> </span><span class="s2">"conditional/bool-literal"</span><span class="p">,</span>
-<a id="__codelineno-1-42" name="__codelineno-1-42" href="#__codelineno-1-42"></a><span class="w">        </span><span class="nt">"originalFilePath"</span><span class="p">:</span><span class="w"> </span><span class="s2">"checked/src/lib.rs"</span><span class="p">,</span>
-<a id="__codelineno-1-43" name="__codelineno-1-43" href="#__codelineno-1-43"></a><span class="w">        </span><span class="nt">"originalStartLine"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span>
-<a id="__codelineno-1-44" name="__codelineno-1-44" href="#__codelineno-1-44"></a><span class="w">      </span><span class="p">},</span>
-<a id="__codelineno-1-45" name="__codelineno-1-45" href="#__codelineno-1-45"></a><span class="w">      </span><span class="nt">"diff"</span><span class="p">:</span><span class="w"> </span><span class="s2">"--- checked/src/lib.rs\n+++ checked/src/lib.rs\n@@ -1,1 +1,1 @@\n-pub fn checked() -&gt; bool { let value = true; value }\n+pub fn checked() -&gt; bool { let value = false; value }\n"</span>
-<a id="__codelineno-1-46" name="__codelineno-1-46" href="#__codelineno-1-46"></a><span class="w">    </span><span class="p">}</span>
-<a id="__codelineno-1-47" name="__codelineno-1-47" href="#__codelineno-1-47"></a><span class="w">  </span><span class="p">],</span>
-<a id="__codelineno-1-48" name="__codelineno-1-48" href="#__codelineno-1-48"></a><span class="w">  </span><span class="nt">"errored"</span><span class="p">:</span><span class="w"> </span><span class="p">[]</span>
-<a id="__codelineno-1-49" name="__codelineno-1-49" href="#__codelineno-1-49"></a><span class="p">}</span>
+<a id="__codelineno-1-29" name="__codelineno-1-29" href="#__codelineno-1-29"></a><span class="w">      </span><span class="nt">"blacklistChecksum"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2dc2c146da136da396da6529a670b07e"</span><span class="p">,</span>
+<a id="__codelineno-1-30" name="__codelineno-1-30" href="#__codelineno-1-30"></a><span class="w">      </span><span class="nt">"mutator"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-1-31" name="__codelineno-1-31" href="#__codelineno-1-31"></a><span class="w">        </span><span class="nt">"mutatorName"</span><span class="p">:</span><span class="w"> </span><span class="s2">"conditional/bool-literal"</span><span class="p">,</span>
+<a id="__codelineno-1-32" name="__codelineno-1-32" href="#__codelineno-1-32"></a><span class="w">        </span><span class="nt">"originalFilePath"</span><span class="p">:</span><span class="w"> </span><span class="s2">"checked/src/lib.rs"</span><span class="p">,</span>
+<a id="__codelineno-1-33" name="__codelineno-1-33" href="#__codelineno-1-33"></a><span class="w">        </span><span class="nt">"originalStartLine"</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span>
+<a id="__codelineno-1-34" name="__codelineno-1-34" href="#__codelineno-1-34"></a><span class="w">      </span><span class="p">},</span>
+<a id="__codelineno-1-35" name="__codelineno-1-35" href="#__codelineno-1-35"></a><span class="w">      </span><span class="nt">"diff"</span><span class="p">:</span><span class="w"> </span><span class="s2">"--- checked/src/lib.rs\n+++ checked/src/lib.rs\n@@ -2,1 +2,1 @@\n-pub fn unchecked() -&gt; bool { let value = true; value }\n+pub fn unchecked() -&gt; bool { let value = false; value }\n"</span>
+<a id="__codelineno-1-36" name="__codelineno-1-36" href="#__codelineno-1-36"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-1-37" name="__codelineno-1-37" href="#__codelineno-1-37"></a><span class="w">  </span><span class="p">],</span>
+<a id="__codelineno-1-38" name="__codelineno-1-38" href="#__codelineno-1-38"></a><span class="w">  </span><span class="nt">"killed"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-1-39" name="__codelineno-1-39" href="#__codelineno-1-39"></a><span class="w">    </span><span class="p">{</span>
+<a id="__codelineno-1-40" name="__codelineno-1-40" href="#__codelineno-1-40"></a><span class="w">      </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"c2b28e81b2cc0af0ff4a6a1225106223"</span><span class="p">,</span>
+<a id="__codelineno-1-41" name="__codelineno-1-41" href="#__codelineno-1-41"></a><span class="w">      </span><span class="nt">"blacklistChecksum"</span><span class="p">:</span><span class="w"> </span><span class="s2">"c056b4a14386291b011db5e4053d8e58"</span><span class="p">,</span>
+<a id="__codelineno-1-42" name="__codelineno-1-42" href="#__codelineno-1-42"></a><span class="w">      </span><span class="nt">"mutator"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-1-43" name="__codelineno-1-43" href="#__codelineno-1-43"></a><span class="w">        </span><span class="nt">"mutatorName"</span><span class="p">:</span><span class="w"> </span><span class="s2">"conditional/bool-literal"</span><span class="p">,</span>
+<a id="__codelineno-1-44" name="__codelineno-1-44" href="#__codelineno-1-44"></a><span class="w">        </span><span class="nt">"originalFilePath"</span><span class="p">:</span><span class="w"> </span><span class="s2">"checked/src/lib.rs"</span><span class="p">,</span>
+<a id="__codelineno-1-45" name="__codelineno-1-45" href="#__codelineno-1-45"></a><span class="w">        </span><span class="nt">"originalStartLine"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span>
+<a id="__codelineno-1-46" name="__codelineno-1-46" href="#__codelineno-1-46"></a><span class="w">      </span><span class="p">},</span>
+<a id="__codelineno-1-47" name="__codelineno-1-47" href="#__codelineno-1-47"></a><span class="w">      </span><span class="nt">"diff"</span><span class="p">:</span><span class="w"> </span><span class="s2">"--- checked/src/lib.rs\n+++ checked/src/lib.rs\n@@ -1,1 +1,1 @@\n-pub fn checked() -&gt; bool { let value = true; value }\n+pub fn checked() -&gt; bool { let value = false; value }\n"</span>
+<a id="__codelineno-1-48" name="__codelineno-1-48" href="#__codelineno-1-48"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-1-49" name="__codelineno-1-49" href="#__codelineno-1-49"></a><span class="w">  </span><span class="p">],</span>
+<a id="__codelineno-1-50" name="__codelineno-1-50" href="#__codelineno-1-50"></a><span class="w">  </span><span class="nt">"errored"</span><span class="p">:</span><span class="w"> </span><span class="p">[]</span>
+<a id="__codelineno-1-51" name="__codelineno-1-51" href="#__codelineno-1-51"></a><span class="p">}</span>
 </code></pre></div>
 <table>
 <thead>
@@ -1023,6 +1025,11 @@ how to enable each report.</p>
 <td><code>*.id</code></td>
 <td>string</td>
 <td>Stable mutant ID</td>
+</tr>
+<tr>
+<td><code>*.blacklistChecksum</code></td>
+<td>string</td>
+<td>Blacklist checksum; put it in a <code>--blacklist</code> file to accept this mutant</td>
 </tr>
 <tr>
 <td><code>*.mutator.mutatorName</code></td>
@@ -1166,7 +1173,8 @@ not load assets from an external repository or network host.</p>
 <li>Run counts for total, killed, escaped, errored, not-covered, and skipped mutants</li>
 <li>Total mutation score and covered-code mutation score as percentages</li>
 <li>A per-mutator result table</li>
-<li>Escaped-mutant evidence grouped by source file, with unified diffs</li>
+<li>Escaped-mutant evidence grouped by source file, with stable mutant IDs,
+  blacklist checksums, and unified diffs</li>
 </ul>
 <p>An empty run still writes a valid HTML file with zero counts and the text
 <code>No escaped mutants.</code></p>
