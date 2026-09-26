@@ -49,9 +49,13 @@
     "mutant": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "mutator", "diff"],
+      "required": ["id", "blacklistChecksum", "mutator", "diff"],
       "properties": {
         "id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
+        },
+        "blacklistChecksum": {
           "type": "string",
           "pattern": "^[0-9a-f]{32}$"
         },

@@ -170,10 +170,11 @@ fn push_file_section(body: &mut String, file_path: &str, mutants: &[&MutationRes
     ));
     for mutant in mutants {
         body.push_str(&format!(
-            r#"<div class="mutator"><div class="mutator-header" onclick="toggleMutator(this)"><span>{} — {} (line {})</span></div><div class="mutator-content"><div class="diff"><h3>Diff:</h3><div class="diff-content">"#,
+            r#"<div class="mutator"><div class="mutator-header" onclick="toggleMutator(this)"><span>{} — {} (line {})</span></div><div class="mutator-content"><p class="checksum">Blacklist checksum: <code>{}</code></p><div class="diff"><h3>Diff:</h3><div class="diff-content">"#,
             escape_html(&mutant.stable_id),
             escape_html(&mutant.mutator),
-            mutant.line
+            mutant.line,
+            escape_html(&mutant.blacklist_checksum)
         ));
         for line in mutant.diff.lines() {
             let class = if line.starts_with('-') && !line.starts_with("---") {
@@ -419,6 +420,7 @@ mod tests {
         assert!(html.contains("Per-mutator results"));
         assert!(html.contains("conditional/bool-literal"));
         assert!(html.contains("id-escaped"));
+        assert!(html.contains("Blacklist checksum: <code>depacse-di</code>"));
         assert!(html.contains("src/lib.rs"));
         assert!(html.contains("Diff:"));
         assert!(html.contains("let value = true;"));
@@ -440,6 +442,7 @@ mod tests {
             source: PathBuf::from(source),
             source_root: PathBuf::new(),
             stable_id: id.to_owned(),
+            blacklist_checksum: id.chars().rev().collect(),
             line,
             mutator: "conditional/bool-literal".to_owned(),
             diff: format!(

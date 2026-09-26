@@ -642,35 +642,56 @@ fn adjacent_equal_statement_removals_keep_distinct_stable_ids() {
         );
     }
 
-    let blacklist = root.0.join("blacklist.txt");
-    std::fs::write(
-        &blacklist,
-        format!("{:x}\n", md5::compute("-    println!(\"same\");\n+    \n")),
-    )
-    .expect("blacklist must be written");
-    let mut blacklist_controls = controls.clone();
-    blacklist_controls.blacklist_files.push(blacklist);
-    let unblacklisted = mutarust::run_mutation_tests_with_controls(
-        &[source.to_string_lossy().into_owned()],
-        &registry,
-        std::time::Duration::from_secs(1),
-        None,
-        &filters,
-        &mutarust::TestExecution::cargo(),
-        &blacklist_controls,
-    )
-    .expect("the blacklist run must complete");
-    assert_eq!(
-        unblacklisted.results().len(),
-        1,
-        "the first blacklist checksum must apply to one mutant: {:?}",
-        unblacklisted
-            .results()
+    let checksum_of = |id: &str| {
+        run.results()
             .iter()
-            .map(|result| (&result.stable_id, &result.diff))
-            .collect::<Vec<_>>()
+            .find(|result| result.stable_id == id)
+            .expect("the planned mutant must exist")
+            .blacklist_checksum
+            .clone()
+    };
+    assert_eq!(
+        checksum_of(&first_id),
+        format!("{:x}", md5::compute("-    println!(\"same\");\n+    \n")),
+        "unique evidence must report the changed-line checksum"
     );
-    assert_eq!(unblacklisted.results()[0].stable_id, second_id);
+    assert_ne!(
+        checksum_of(&first_id),
+        checksum_of(&second_id),
+        "repeated evidence must report the location-specific checksum"
+    );
+    let blacklist = root.0.join("blacklist.txt");
+    let run_with_blacklist = |line: &str| {
+        std::fs::write(&blacklist, format!("{line}\n")).expect("blacklist must be written");
+        let mut blacklist_controls = controls.clone();
+        blacklist_controls.blacklist_files.push(blacklist.clone());
+        mutarust::run_mutation_tests_with_controls(
+            &[source.to_string_lossy().into_owned()],
+            &registry,
+            std::time::Duration::from_secs(1),
+            None,
+            &filters,
+            &mutarust::TestExecution::cargo(),
+            &blacklist_controls,
+        )
+        .expect("the blacklist run must complete")
+        .results()
+        .iter()
+        .map(|result| result.stable_id.clone())
+        .collect::<Vec<_>>()
+    };
+    for (accepted, remaining) in [(&first_id, &second_id), (&second_id, &first_id)] {
+        assert_eq!(
+            run_with_blacklist(&checksum_of(accepted)),
+            vec![remaining.clone()],
+            "a reported blacklist checksum must accept only its own mutant"
+        );
+    }
+    assert_eq!(
+        run_with_blacklist(&first_id),
+        vec![first_id.clone(), second_id.clone()],
+        "a stable mutant ID must not match a blacklist checksum"
+    );
 
     let baseline_path = root.0.join("baseline.json");
     std::fs::write(

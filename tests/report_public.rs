@@ -27,6 +27,7 @@ fn mutant(state: MutationState, source: &str, line: usize, id: &str) -> Mutation
         source: PathBuf::from(source),
         source_root: PathBuf::new(),
         stable_id: id.to_owned(),
+        blacklist_checksum: id.chars().rev().collect(),
         line,
         mutator: "conditional/bool-literal".to_owned(),
         diff: format!("--- {source}\n+++ {source}\n@@ -{line},1 +{line},1 @@\n"),

@@ -55,6 +55,7 @@ mutarust --config mutarust.yml [TARGET]...
   "escaped": [
     {
       "id": "4582b234c128077507b7558eb62c337e",
+      "blacklistChecksum": "2dc2c146da136da396da6529a670b07e",
       "mutator": {
         "mutatorName": "conditional/bool-literal",
         "originalFilePath": "checked/src/lib.rs",
@@ -66,6 +67,7 @@ mutarust --config mutarust.yml [TARGET]...
   "killed": [
     {
       "id": "c2b28e81b2cc0af0ff4a6a1225106223",
+      "blacklistChecksum": "c056b4a14386291b011db5e4053d8e58",
       "mutator": {
         "mutatorName": "conditional/bool-literal",
         "originalFilePath": "checked/src/lib.rs",
@@ -92,6 +94,7 @@ mutarust --config mutarust.yml [TARGET]...
 | `notCovered` | array | Not-covered mutants; omitted when empty |
 | `generated` | array | Generated mutants from dry-run or no-exec; omitted when empty |
 | `*.id` | string | Stable mutant ID |
+| `*.blacklistChecksum` | string | Blacklist checksum; put it in a `--blacklist` file to accept this mutant |
 | `*.mutator.mutatorName` | string | Mutator name |
 | `*.mutator.originalFilePath` | string | Repository-relative source path |
 | `*.mutator.originalStartLine` | integer | One-based source line of the mutation |
@@ -167,7 +170,8 @@ The report shows:
 - Run counts for total, killed, escaped, errored, not-covered, and skipped mutants
 - Total mutation score and covered-code mutation score as percentages
 - A per-mutator result table
-- Escaped-mutant evidence grouped by source file, with unified diffs
+- Escaped-mutant evidence grouped by source file, with stable mutant IDs,
+  blacklist checksums, and unified diffs
 
 An empty run still writes a valid HTML file with zero counts and the text
 `No escaped mutants.`

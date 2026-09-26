@@ -950,6 +950,11 @@ fn print_result_details(
         result.mutator
     )?;
     writeln!(output, "  ID: {}", result.stable_id)?;
+    writeln!(
+        output,
+        "  Blacklist checksum: {}",
+        result.blacklist_checksum
+    )?;
     if let Some(detail) = &result.error {
         writeln!(output, "  {detail}")?;
     }
@@ -1307,7 +1312,35 @@ fn baseline_control_error(command: &RunCommand) -> Option<&'static str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{RunCommand, progress_allowed};
+    use super::{RunCommand, print_result_details, progress_allowed};
+
+    #[test]
+    fn result_details_show_the_blacklist_checksum_after_the_stable_id() {
+        let run = mutarust::run_for_test(
+            vec![mutarust::MutationResult {
+                source: std::path::PathBuf::from("src/lib.rs"),
+                source_root: std::path::PathBuf::new(),
+                stable_id: "a".repeat(32),
+                blacklist_checksum: "b".repeat(32),
+                line: 2,
+                mutator: "conditional/bool-literal".to_owned(),
+                diff: String::new(),
+                state: mutarust::MutationState::Escaped,
+                error: None,
+            }],
+            false,
+        );
+        let mut output = Vec::new();
+        print_result_details(&mut output, &run.results()[0]).expect("details must be written");
+        assert_eq!(
+            String::from_utf8(output).expect("details must be UTF-8"),
+            format!(
+                "escaped src/lib.rs conditional/bool-literal\n  ID: {}\n  Blacklist checksum: {}\n",
+                "a".repeat(32),
+                "b".repeat(32)
+            )
+        );
+    }
 
     #[test]
     fn progress_is_allowed_only_without_diagnostics_or_result_free_modes() {
