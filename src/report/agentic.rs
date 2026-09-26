@@ -397,6 +397,7 @@ mod tests {
             source: PathBuf::from(source),
             source_root,
             stable_id: id.to_owned(),
+            blacklist_checksum: id.chars().rev().collect(),
             line,
             mutator: "conditional/bool-literal".to_owned(),
             diff: format!(

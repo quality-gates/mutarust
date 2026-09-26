@@ -2,6 +2,16 @@
 
 This file records important user changes.
 
+## Unreleased
+
+### Fixed
+
+- Each mutant result shows its blacklist checksum on a `Blacklist checksum:` line. `report.json` mutant records include a `blacklistChecksum` field, and the HTML report shows the checksum with the mutant evidence. Before, no output showed the checksum that `--blacklist` accepts ([#198](https://github.com/quality-gates/mutarust/issues/198)).
+
+### Changed
+
+- `MutationResult` has a new public `blacklist_checksum` field. Code that builds a `MutationResult` value must set it.
+
 ## 0.1.10 — 2026-09-26
 
 A compatible release. The public library interface does not change existing functions and exports the new report seam.

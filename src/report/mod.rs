@@ -211,6 +211,8 @@ pub struct ReportMutatorStats {
 pub struct ReportMutant {
     /// Stable mutant ID.
     pub id: String,
+    /// Checksum that `--blacklist` matches to accept this mutant.
+    pub blacklist_checksum: String,
     /// Mutator identity and source position.
     pub mutator: ReportMutator,
     /// Unified source diff.
@@ -310,6 +312,7 @@ pub(super) fn mutator_stats(summaries: Vec<MutatorSummary>) -> Vec<ReportMutator
 fn report_mutant(result: &MutationResult) -> ReportMutant {
     ReportMutant {
         id: result.stable_id.clone(),
+        blacklist_checksum: result.blacklist_checksum.clone(),
         mutator: ReportMutator {
             mutator_name: result.mutator.clone(),
             original_file_path: portable_path(&result.source),
@@ -369,6 +372,7 @@ mod tests {
         assert_eq!(json["metadata"]["oneMutant"], false);
         assert_eq!(json["metadata"]["version"], VERSION);
         assert_eq!(json["killed"][0]["id"], "id-killed");
+        assert_eq!(json["killed"][0]["blacklistChecksum"], "dellik-di");
         assert_eq!(
             json["killed"][0]["mutator"]["originalFilePath"],
             "checked/src/lib.rs"
@@ -454,6 +458,7 @@ mod tests {
             source: PathBuf::from(source),
             source_root: PathBuf::new(),
             stable_id: id.to_owned(),
+            blacklist_checksum: id.chars().rev().collect(),
             line,
             mutator: "conditional/bool-literal".to_owned(),
             diff: format!("--- {source}\n+++ {source}\n@@ -{line},1 +{line},1 @@\n"),

@@ -19,6 +19,9 @@ small way. It then runs tests to find if the tests detect the change.
 - Mutator: A component that produces mutations.
 - Baseline: A set of accepted escaped mutant IDs.
 - Blacklist: A set of accepted mutation checksums.
+- Blacklist checksum: A checksum from the changed source lines of a mutant.
+  Repeated evidence also uses the replaced byte range. Each mutant result
+  shows it.
 - Stable mutant ID: An ID from a source name, mutator name, and mutation diff.
   Repeated evidence uses the replaced byte range to distinguish each mutant.
 - Source candidate: A Rust production source file selected as a possible input.

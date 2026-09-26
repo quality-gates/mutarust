@@ -148,6 +148,8 @@ pub struct MutationResult {
     pub source_root: PathBuf,
     /// The stable ID for this source change.
     pub stable_id: String,
+    /// The checksum that `--blacklist` matches to accept this mutant.
+    pub blacklist_checksum: String,
     /// The source line where this mutation begins.
     pub line: usize,
     /// The stable name of the mutator that produced this mutant.
@@ -1282,6 +1284,7 @@ fn generated_result(candidate: &MutationCandidate) -> MutationResult {
         source: candidate.evidence.source.clone(),
         source_root: candidate.workspace.source_root.clone(),
         stable_id: candidate.evidence.stable_id.as_str().to_owned(),
+        blacklist_checksum: candidate.evidence.blacklist_checksum.as_str().to_owned(),
         line: candidate.evidence.line,
         mutator: candidate.mutator.clone(),
         diff: candidate.evidence.diff.clone(),
@@ -1566,6 +1569,7 @@ mod tests {
             source: PathBuf::from("src/lib.rs"),
             source_root: PathBuf::new(),
             stable_id: "a".repeat(32),
+            blacklist_checksum: "b".repeat(32),
             line: 1,
             mutator: "conditional/bool-literal".to_owned(),
             diff: String::new(),
@@ -2735,6 +2739,7 @@ fn test_candidate(
         source: candidate.evidence.source,
         source_root: candidate.workspace.source_root.clone(),
         stable_id: candidate.evidence.stable_id.into_string(),
+        blacklist_checksum: candidate.evidence.blacklist_checksum.into_string(),
         line: candidate.evidence.line,
         mutator: candidate.mutator,
         diff: candidate.evidence.diff,

@@ -80,6 +80,7 @@ mod tests {
             source: PathBuf::from(source),
             source_root: PathBuf::new(),
             stable_id: "a".repeat(32),
+            blacklist_checksum: "b".repeat(32),
             line,
             mutator: "conditional/bool-literal".to_owned(),
             diff: String::new(),
