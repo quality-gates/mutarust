@@ -2,7 +2,9 @@
 
 This file records important user changes.
 
-## Unreleased
+## 0.2.0 — 2026-09-26
+
+An incompatible library release. The public `MutationResult` struct has a new required field. Command-line use does not change, except for the new checksum output.
 
 ### Fixed
 
