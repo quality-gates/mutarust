@@ -1,0 +1,23 @@
+escaped src/lib.rs expression/comparison
+  ID: afe03a10629f584aa21ac0d1446f9db0
+escaped src/lib.rs numbers/decrementer
+  ID: 751a1e9dd3766b73e44da88e02450147
+escaped src/lib.rs numbers/incrementer
+  ID: f7fb0be27a26b817355ac120888a428e
+Killed: 1
+Escaped: 3
+Errored: 0
+Not covered: 0
+Skipped: 0
+Total: 4
+Mutation score: 25.00%
+Per-mutator results:
+Mutator | Killed | Escaped | Skipped | Total
+conditional/negated | 1 | 0 | 0 | 1
+expression/comparison | 0 | 1 | 0 | 1
+numbers/decrementer | 0 | 1 | 0 | 1
+numbers/incrementer | 0 | 1 | 0 | 1
+::warning file=src/lib.rs,line=10,title=Mutant escaped (expression/comparison)::Escaped mutation at src/lib.rs:10 — add a test to kill it
+::warning file=src/lib.rs,line=10,title=Mutant escaped (numbers/decrementer)::Escaped mutation at src/lib.rs:10 — add a test to kill it
+::warning file=src/lib.rs,line=10,title=Mutant escaped (numbers/incrementer)::Escaped mutation at src/lib.rs:10 — add a test to kill it
+EXIT=0

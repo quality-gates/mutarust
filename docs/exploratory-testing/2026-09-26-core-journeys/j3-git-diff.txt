@@ -1,0 +1,6 @@
+Total: 5 mutation(s) would be generated. No files written, no tests run.
+EXIT=0
+
+--- default base (no origin):
+Total: 0 mutation(s) would be generated. No files written, no tests run.
+EXIT=0

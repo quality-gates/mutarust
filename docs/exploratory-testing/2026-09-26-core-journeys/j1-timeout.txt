@@ -1,0 +1,33 @@
+errored src/lib.rs arithmetic/assign_invert
+  ID: 6470a41c885da8e11a99b659b5a70e32
+  cargo test timed out after 5 seconds
+errored src/lib.rs arithmetic/assignment
+  ID: a1e061564775f2fd8b7e2e37a7d9bb7d
+  cargo test timed out after 5 seconds
+errored src/lib.rs numbers/decrementer
+  ID: 2f60e6c219a95f6f7d23df7fbea28799
+  cargo test timed out after 5 seconds
+errored src/lib.rs numbers/incrementer
+  ID: 3f9f6be8dc27945443020226d23c812e
+  cargo test timed out after 5 seconds
+errored src/lib.rs statement/remove
+  ID: 7b2b8c93ab8de9a2c5457e5aebb5b651
+  cargo test timed out after 5 seconds
+Killed: 2
+Escaped: 2
+Errored: 5
+Not covered: 0
+Skipped: 0
+Total: 9
+Mutation score: 77.78%
+Per-mutator results:
+Mutator | Killed | Escaped | Skipped | Total
+arithmetic/assign_invert | 1 | 0 | 0 | 1
+arithmetic/assignment | 1 | 0 | 0 | 1
+conditional/negated | 1 | 0 | 0 | 1
+loop/condition | 1 | 0 | 0 | 1
+numbers/decrementer | 1 | 1 | 0 | 2
+numbers/incrementer | 1 | 1 | 0 | 2
+statement/remove | 1 | 0 | 0 | 1
+EXIT=0 secs=33
+    PID     ELAPSED CMD

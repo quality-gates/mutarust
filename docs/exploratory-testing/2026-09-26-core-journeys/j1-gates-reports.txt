@@ -1,0 +1,133 @@
+EXIT48=4
+statement/remove | 0 | 1 | 0 | 1
+statement/return | 0 | 1 | 0 | 1
+mutarust: mutation score 47.37% is below the required 48%
+EXIT47=0
+Killed: 14
+Escaped: 20
+Errored: 0
+Not covered: 0
+Skipped: 4
+Total: 38
+Mutation score: 47.37%
+Per-mutator results:
+Mutator | Killed | Escaped | Skipped | Total
+arithmetic/assign_invert | 0 | 1 | 0 | 1
+arithmetic/assignment | 0 | 0 | 1 | 1
+arithmetic/base | 2 | 0 | 0 | 2
+branch/else | 0 | 0 | 1 | 1
+branch/if | 1 | 1 | 1 | 3
+conditional/negated | 4 | 0 | 0 | 4
+expression/comparison | 0 | 4 | 0 | 4
+expression/logical | 1 | 0 | 0 | 1
+expression/remove | 1 | 1 | 0 | 2
+loop/range_break | 0 | 1 | 0 | 1
+numbers/decrementer | 3 | 4 | 1 | 8
+numbers/incrementer | 2 | 6 | 0 | 8
+statement/remove | 0 | 1 | 0 | 1
+statement/return | 0 | 1 | 0 | 1
+EXIT=0
+total 76
+drwxr-xr-x 1 root root   352 Sep 26 00:29 .
+drwxr-xr-x 1 root root    96 Sep 26 00:28 ..
+drwxr-xr-x 1 root root   384 Sep 26 00:28 .git
+-rw-r--r-- 1 root root     8 Sep 26 00:28 .gitignore
+-rw-r--r-- 1 root root    78 Sep 26 00:28 Cargo.toml
+-rw-r--r-- 1 root root 14637 Sep 26 00:29 mutarust-agentic.json
+-rw-r--r-- 1 root root  7098 Sep 26 00:29 mutarust-gitlab.json
+-rw-r--r-- 1 root root 21713 Sep 26 00:29 mutarust-report.html
+-rw-r--r-- 1 root root   158 Sep 26 00:29 mutarust-summary.json
+-rw-r--r-- 1 root root 12712 Sep 26 00:29 report.json
+drwxr-xr-x 1 root root    96 Sep 26 00:28 src
+{"totalMutantsCount":38,"killedCount":14,"notCoveredCount":0,"escapedCount":20,"errorCount":0,"skippedCount":4,"msi":0.47368421052631576,"coveredCodeMsi":0.0}['metadata', 'stats', 'mutatorStats', 'escaped', 'killed', 'skipped', 'errored']
+{}
+{
+    "generated_at": "2026-09-26T00:29:47Z",
+    "msi": 0.47368421052631576,
+    "escaped_count": 20,
+    "reminder": "A mutant is an example of how this code could be wrong \u2014 it's not a script for the test. Don't assert on the mutant directly. Instead ask: if this code were buggy, what would a caller of the public API observe go wrong? Write a test for that.",
+    "mutants": [
+        {
+            "id": "11221fa321d09a867f5682dd6facf006",
+            "file": "src/lib.rs",
+            "line": 26,
+            "mutator": "arithmetic/assign_invert",
+            "description": "Changes: `s += i;` \u2192 `s -= i;`",
+            "kill_hint": "Write a test that asserts the accumulated result after the operation \u2014 inverting += to -= produces a different total",
+            "diff": "--- src/lib.rs\n+++ src/lib.rs\n@@ -26,1 +26,1 @@\n-        s += i;\n+        s -= i;\n",
+            "context_start_line": 23,
+            "context_lines": [
+                "pub fn sum(items: &[u32]) -> u32 {",
+                "    let mut s = 0;",
+                "    for i in items {",
+                "        s += i;",
+                "    }",
+                "    s",
+                "}"
+            ],
+            "test_files": []
+        },
+        {
+            "id": "8d952806b5f3d7f317f83abec7d3c631",
+            "file": "src/lib.rs",
+            "line": 18,
+            "mutator": "branch/if",
+            "description": "Removes an if-block body so the condition becomes a no-op",
+            "kill_hint": "Write a test that enters this branch and asserts the output or side effect it produces",
+            "diff": "--- src/lib.rs\n+++ src/lib.rs\n@@ -18,1 +18,1 @@\n-        return 99;\n+        \n",
+            "context_start_line": 15,
+            "context_lines": [
+                "        return 1;",
+                "    }",
+                "    if q > 99 {",
+                "        return 99;",
+                "    }",
+                "    q",
+                "}"
+            ],
+            "test_files": []
+        },
+        {
+            "id": "1920acb7a24d9e1546635eb89195b391",
+            "file": "src/lib.rs",
+            "line": 2,
+            "mutator": "expression/comparison",
+            "description": "Changes: `if loyal && total > 100 {` \u2192 `if loyal && total >= 100 {`",
+            "kill_hint": "Write tests at the exact boundary value \u2014 one that satisfies the condition and one that doesn't \u2014 and assert different outcomes",
+            "diff": "--- src/lib.rs\n+++ src/lib.rs\n@@ -2,1 +2,1 @@\n-    if loyal && total > 100 {\n+    if loyal && total >= 100 {\n",
+            "context_start_line": 1,
+            "context_lines": [
+                "pub fn discount(total: u32, loyal: bool) -> u32 {",
+                "    if loyal && total > 100 {",
+                "        total - total / 10",
+                "    } else {",
+[
+    {
+        "type": "issue",
+        "check_name": "arithmetic/assign_invert",
+        "description": "Escaped mutant (arithmetic/assign_invert) at src/lib.rs:26 \u2014 no test kills this mutation",
+        "severity": "minor",
+        "fingerprint": "11221fa321d09a867f5682dd6facf006",
+        "location": {
+            "path": "src/lib.rs",
+            "lines": {
+                "begin": 26
+            }
+        }
+    },
+    {
+        "type": "issue",
+        "check_name": "branch/if",
+        "description": "Escaped mutant (branch/if) at src/lib.rs:18 \u2014 no test kills this mutation",
+        "severity": "minor",
+        "fingerprint": "8d952806b5f3d7f317f83abec7d3c631",
+        "location": {
+            "path": "src/lib.rs",
+            "lines": {
+                "begin": 18
+            }
+        }
+    },
+    {
+        "type": "issue",
+        "check_name": "expression/comparison",

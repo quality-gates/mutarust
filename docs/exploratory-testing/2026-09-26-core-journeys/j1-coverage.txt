@@ -1,0 +1,52 @@
+cargo-llvm-cov 0.6.16
+mutarust: covered-code mutation score 57.14% is below the required 60%
+not covered src/lib.rs arithmetic/assign_invert
+  ID: 11221fa321d09a867f5682dd6facf006
+not covered src/lib.rs arithmetic/assignment
+  ID: 99eccdaf1212f32c387a1a4f8436ef7c
+not covered src/lib.rs branch/if
+  ID: 8d952806b5f3d7f317f83abec7d3c631
+not covered src/lib.rs loop/range_break
+  ID: 7aab759bbe5b7814ff75270897e567cb
+not covered src/lib.rs numbers/decrementer
+  ID: ea52ffdc39c4e2fc089a6511abaf5a72
+not covered src/lib.rs numbers/decrementer
+  ID: e3be57584ee4aff6d423046e54f22b80
+not covered src/lib.rs numbers/incrementer
+  ID: 75eaefe5db3321ff1e6156553543dca3
+not covered src/lib.rs numbers/incrementer
+  ID: 31cc68f17fdeaeb29d6c1b7e270c1a56
+not covered src/lib.rs statement/remove
+  ID: d020cc217c9bf2467552ae57058c3e5b
+not covered src/lib.rs statement/return
+  ID: f6353a40b321d985b6328753ba280852
+Killed: 14
+Escaped: 12
+Errored: 0
+Not covered: 10
+Skipped: 2
+Total: 38
+Mutation score: 42.11%
+Covered-code mutation score: 57.14%
+Per-mutator results:
+Mutator | Killed | Escaped | Skipped | Total
+arithmetic/base | 2 | 0 | 0 | 2
+branch/else | 0 | 0 | 1 | 1
+branch/if | 1 | 0 | 1 | 2
+conditional/negated | 4 | 0 | 0 | 4
+expression/comparison | 0 | 4 | 0 | 4
+expression/logical | 1 | 0 | 0 | 1
+expression/remove | 1 | 1 | 0 | 2
+numbers/decrementer | 3 | 3 | 0 | 6
+numbers/incrementer | 2 | 4 | 0 | 6
+EXIT=4
+{"totalMutantsCount":38,"killedCount":14,"notCoveredCount":10,"escapedCount":12,"errorCount":0,"skippedCount":2,"msi":0.42105263157894735,"coveredCodeMsi":0.5714285714285714}
+numbers/decrementer | 3 | 4 | 1 | 8
+numbers/incrementer | 2 | 6 | 0 | 8
+statement/remove | 0 | 1 | 0 | 1
+statement/return | 0 | 1 | 0 | 1
+PERTEST_EXIT=0
+?? mutarust-summary.json
+Cargo.toml
+mutarust-summary.json
+src

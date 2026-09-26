@@ -1,0 +1,16 @@
+EXIT=4
+23
+escaped src/lib.rs arithmetic/assign_invert
+  ID: 11221fa321d09a867f5682dd6facf006
+escaped src/lib.rs arithmetic/base
+  ID: c1ccd208c42eeb949c880ce7115a522b
+escaped src/lib.rs branch/if
+  ID: 8d952806b5f3d7f317f83abec7d3c631
+escaped src/lib.rs expression/comparison
+  ID: 1920acb7a24d9e1546635eb89195b391
+escaped src/lib.rs expression/comparison
+  ID: e05586d153fabe9a24b22809f7729ed4
+escaped src/lib.rs expression/comparison
+  ID: 5549262f346b8bfe9ad0542c72004c9a
+statement/return | 0 | 1 | 0 | 1
+mutarust: 3 new mutant(s) escaped — kill them or run --update-baseline to accept

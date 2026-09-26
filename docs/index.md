@@ -20,3 +20,7 @@ mutarust --coverage --min-msi 75 --min-covered-msi 80 .
 
 See [Quick Start](quickstart.md) for a short walkthrough. See the
 [domain glossary](glossary.md) for the project terms.
+
+Exploratory testing reports record user journeys, confirmed bugs, and
+evidence. See the
+[2026-09-26 core journeys report](exploratory-testing/2026-09-26-core-journeys.md).

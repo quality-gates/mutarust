@@ -1,0 +1,259 @@
+Total: 38 mutation(s) would be generated. No files written, no tests run.
+EXIT=0
+/work/pricing/src/lib.rs
+escaped src/lib.rs arithmetic/assign_invert
+  ID: 11221fa321d09a867f5682dd6facf006
+--- src/lib.rs
++++ src/lib.rs
+@@ -26,1 +26,1 @@
+-        s += i;
++        s -= i;
+skipped src/lib.rs arithmetic/assignment
+  ID: 99eccdaf1212f32c387a1a4f8436ef7c
+  mutant did not compile: Compiling pricing v0.1.0 (/tmp/mutarust-33-0)
+error[E0308]: mismatched types
+  --> src/lib.rs:26:13
+   |
+24 |     let mut s = 0;
+   |                 - expected due to this value
+25 |     for i in items {
+26 |         s = i;
+   |             ^ expected integer, found `&u32`
+
+For more information about this error, try `rustc --explain E0308`.
+error: could not compile `pricing` (lib) due to 1 previous error
+killed src/lib.rs arithmetic/base
+  ID: 3b8d581daa418a698f1cdb8ce1b423b8
+killed src/lib.rs arithmetic/base
+  ID: a32449a8c45202c5f9ee7ce8240c4e0b
+skipped src/lib.rs branch/else
+  ID: 4c54a832e3d4f71e6f191828d3d625b4
+  mutant did not compile: Compiling pricing v0.1.0 (/tmp/mutarust-33-0)
+error[E0308]: mismatched types
+ --> src/lib.rs:4:12
+  |
+4 |       } else {
+  |  ____________^
+5 | |         
+6 | |     }
+  | |_____^ expected `u32`, found `()`
+
+For more information about this error, try `rustc --explain E0308`.
+error: could not compile `pricing` (lib) due to 1 previous error
+skipped src/lib.rs branch/if
+  ID: 5a082dff27311fde0ad834b2de4c0380
+  mutant did not compile: Compiling pricing v0.1.0 (/tmp/mutarust-33-0)
+error[E0308]: mismatched types
+ --> src/lib.rs:2:29
+  |
+2 |       if loyal && total > 100 {
+  |  _____________________________^
+3 | |         
+4 | |     } else {
+  | |_____^ expected `u32`, found `()`
+
+For more information about this error, try `rustc --explain E0308`.
+error: could not compile `pricing` (lib) due to 1 previous error
+killed src/lib.rs branch/if
+  ID: 0acfae5a922753d8de66b45222a0c67c
+escaped src/lib.rs branch/if
+  ID: 8d952806b5f3d7f317f83abec7d3c631
+--- src/lib.rs
++++ src/lib.rs
+@@ -18,1 +18,1 @@
+-        return 99;
++        
+killed src/lib.rs conditional/negated
+  ID: 2408b1715f79675f59a4550c04b40d7c
+killed src/lib.rs conditional/negated
+  ID: 8d8a2884ed6404186c7179104fb8fa1b
+killed src/lib.rs conditional/negated
+  ID: 680657ccc05aeeee9574a4b4efb98aa0
+killed src/lib.rs conditional/negated
+  ID: 56cb1c462d2944fdbbd2c4df5eecf288
+escaped src/lib.rs expression/comparison
+  ID: 1920acb7a24d9e1546635eb89195b391
+--- src/lib.rs
++++ src/lib.rs
+@@ -2,1 +2,1 @@
+-    if loyal && total > 100 {
++    if loyal && total >= 100 {
+escaped src/lib.rs expression/comparison
+  ID: e05586d153fabe9a24b22809f7729ed4
+--- src/lib.rs
++++ src/lib.rs
+@@ -10,1 +10,1 @@
+-    total >= 50
++    total > 50
+escaped src/lib.rs expression/comparison
+  ID: 5549262f346b8bfe9ad0542c72004c9a
+--- src/lib.rs
++++ src/lib.rs
+@@ -14,1 +14,1 @@
+-    if q < 1 {
++    if q <= 1 {
+escaped src/lib.rs expression/comparison
+  ID: 6328bea8eecb547b9a1bb59e1a764ecf
+--- src/lib.rs
++++ src/lib.rs
+@@ -17,1 +17,1 @@
+-    if q > 99 {
++    if q >= 99 {
+killed src/lib.rs expression/logical
+  ID: 4569db67a1e36e25f857aa718cef9925
+killed src/lib.rs expression/remove
+  ID: ff37486fbfd1f75cd4fbf1dc04c76be3
+escaped src/lib.rs expression/remove
+  ID: 2d4454194088d6b0a6f63d65c57ceb8b
+--- src/lib.rs
++++ src/lib.rs
+@@ -2,1 +2,1 @@
+-    if loyal && total > 100 {
++    if loyal && true {
+escaped src/lib.rs loop/range_break
+  ID: 7aab759bbe5b7814ff75270897e567cb
+--- src/lib.rs
++++ src/lib.rs
+@@ -25,1 +25,1 @@
+-    for i in items {
++    for i in items { break;
+escaped src/lib.rs numbers/decrementer
+  ID: bb5cf2ea90d12cd5029d761b483a9eb2
+--- src/lib.rs
++++ src/lib.rs
+@@ -2,1 +2,1 @@
+-    if loyal && total > 100 {
++    if loyal && total > 99 {
+killed src/lib.rs numbers/decrementer
+  ID: d95d86def52329b8bb549bf8a8d54c53
+escaped src/lib.rs numbers/decrementer
+  ID: d8cc1dc87f3f214d59e6836bb44e634c
+--- src/lib.rs
++++ src/lib.rs
+@@ -10,1 +10,1 @@
+-    total >= 50
++    total >= 49
+killed src/lib.rs numbers/decrementer
+  ID: 8c5802328fe70b4c90f90634ae9b1663
+killed src/lib.rs numbers/decrementer
+  ID: a5a4834c986418d846e5dd35a72c5d40
+escaped src/lib.rs numbers/decrementer
+  ID: 5225d398a6071dc37af45270cb3248ba
+--- src/lib.rs
++++ src/lib.rs
+@@ -17,1 +17,1 @@
+-    if q > 99 {
++    if q > 98 {
+escaped src/lib.rs numbers/decrementer
+  ID: ea52ffdc39c4e2fc089a6511abaf5a72
+--- src/lib.rs
++++ src/lib.rs
+@@ -18,1 +18,1 @@
+-        return 99;
++        return 98;
+skipped src/lib.rs numbers/decrementer
+  ID: e3be57584ee4aff6d423046e54f22b80
+  mutant did not compile: Compiling pricing v0.1.0 (/tmp/mutarust-33-0)
+error[E0277]: the trait bound `u32: Neg` is not satisfied
+  --> src/lib.rs:24:17
+   |
+24 |     let mut s = -1;
+   |                 ^^ the trait `Neg` is not implemented for `u32`
+   |
+   = help: the following other types implement trait `Neg`:
+             &f128
+             &f16
+             &f32
+             &f64
+             &i128
+             &i16
+             &i32
+             &i64
+           and 12 others
+
+For more information about this error, try `rustc --explain E0277`.
+error: could not compile `pricing` (lib) due to 1 previous error
+escaped src/lib.rs numbers/incrementer
+  ID: d43721a9a2c046979501ecf042a797e8
+--- src/lib.rs
++++ src/lib.rs
+@@ -2,1 +2,1 @@
+-    if loyal && total > 100 {
++    if loyal && total > 101 {
+killed src/lib.rs numbers/incrementer
+  ID: 7029807336b74e1a6e596d5f9f8bfeae
+escaped src/lib.rs numbers/incrementer
+  ID: 27824c7b7559240f785e0a87eef630c5
+--- src/lib.rs
++++ src/lib.rs
+@@ -10,1 +10,1 @@
+-    total >= 50
++    total >= 51
+escaped src/lib.rs numbers/incrementer
+  ID: f3173e51ecb558b45b0aae8ae220d140
+--- src/lib.rs
++++ src/lib.rs
+@@ -14,1 +14,1 @@
+-    if q < 1 {
++    if q < 2 {
+killed src/lib.rs numbers/incrementer
+  ID: 1dd8a2eec5b0475a226ea7131a8cdbb1
+escaped src/lib.rs numbers/incrementer
+  ID: 45ba231239b33adcbfb644d1dc723c2d
+--- src/lib.rs
++++ src/lib.rs
+@@ -17,1 +17,1 @@
+-    if q > 99 {
++    if q > 100 {
+escaped src/lib.rs numbers/incrementer
+  ID: 75eaefe5db3321ff1e6156553543dca3
+--- src/lib.rs
++++ src/lib.rs
+@@ -18,1 +18,1 @@
+-        return 99;
++        return 100;
+escaped src/lib.rs numbers/incrementer
+  ID: 31cc68f17fdeaeb29d6c1b7e270c1a56
+--- src/lib.rs
++++ src/lib.rs
+@@ -24,1 +24,1 @@
+-    let mut s = 0;
++    let mut s = 1;
+escaped src/lib.rs statement/remove
+  ID: d020cc217c9bf2467552ae57058c3e5b
+--- src/lib.rs
++++ src/lib.rs
+@@ -26,1 +26,1 @@
+-        s += i;
++        
+escaped src/lib.rs statement/return
+  ID: f6353a40b321d985b6328753ba280852
+--- src/lib.rs
++++ src/lib.rs
+@@ -18,1 +18,1 @@
+-        return 99;
++        return 0;
+Killed: 14
+Escaped: 20
+Errored: 0
+Not covered: 0
+Skipped: 4
+Total: 38
+Mutation score: 47.37%
+Per-mutator results:
+Mutator | Killed | Escaped | Skipped | Total
+arithmetic/assign_invert | 0 | 1 | 0 | 1
+arithmetic/assignment | 0 | 0 | 1 | 1
+arithmetic/base | 2 | 0 | 0 | 2
+branch/else | 0 | 0 | 1 | 1
+branch/if | 1 | 1 | 1 | 3
+conditional/negated | 4 | 0 | 0 | 4
+expression/comparison | 0 | 4 | 0 | 4
+expression/logical | 1 | 0 | 0 | 1
+expression/remove | 1 | 1 | 0 | 2
+loop/range_break | 0 | 1 | 0 | 1
+numbers/decrementer | 3 | 4 | 1 | 8
+numbers/incrementer | 2 | 6 | 0 | 8
+statement/remove | 0 | 1 | 0 | 1
+statement/return | 0 | 1 | 0 | 1
+EXIT=0
