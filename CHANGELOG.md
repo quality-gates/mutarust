@@ -2,6 +2,23 @@
 
 This file records important user changes.
 
+## 0.1.10 — 2026-09-26
+
+A compatible release. The public library interface does not change existing functions and exports the new report seam.
+
+### Added
+
+- A shared `Report` trait and `Rendered` enum for report generation.
+- `write_all` function to write every requested report and collect all write results.
+- `selected_reports` helper to resolve active report writers from configuration flags.
+- Exported report types: `FullJsonReport`, `SummaryJsonReport`, `HtmlReport`, `AgenticJsonReport`, `GitlabReport`, and `GithubAnnotations`.
+- `run_for_test` test execution helper in the execution module.
+
+### Changed
+
+- Report generation runs through the unified report seam. If a report write fails, the command still attempts all remaining reports before exit.
+- Escaped-mutant filtering and JSON serialization helpers are unified across report implementations.
+
 ## 0.1.9 — 2026-09-20
 
 A compatible fix release. The public library interface does not change.
