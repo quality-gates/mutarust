@@ -1,0 +1,1118 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Mutation testing for Rust">
+      
+      
+      
+        <link rel="canonical" href="https://quality-gates.github.io/mutarust/exploratory-testing/2026-09-26-core-journeys/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Exploratory testing: core journeys (2026-09-26) - mutarust</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#exploratory-testing-core-journeys-2026-09-26" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="mutarust" class="md-header__button md-logo" aria-label="mutarust" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            mutarust
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Exploratory testing: core journeys (2026-09-26)
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/quality-gates/mutarust" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    quality-gates/mutarust
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="mutarust" class="md-nav__button md-logo" aria-label="mutarust" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    mutarust
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/quality-gates/mutarust" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    quality-gates/mutarust
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Command Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../mutators/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Mutators
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../json-outputs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../custom-mutators/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Custom Mutators
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CI Integration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../selective-ci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Selective CI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../release/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../glossary/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Domain Glossary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../parity/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Parity Table
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#set-up" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Set-up
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#journeys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Journeys
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Journeys">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#j1-find-weak-tests-and-apply-a-score-gate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        J1: Find weak tests and apply a score gate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#j2-accept-the-current-escaped-mutants-on-a-legacy-crate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        J2: Accept the current escaped mutants on a legacy crate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#j3-test-only-changed-lines-in-ci" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        J3: Test only changed lines in CI
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#confirmed-bugs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Confirmed bugs
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Confirmed bugs">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b1-users-cannot-get-a-blacklist-checksum-198" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        B1: Users cannot get a blacklist checksum (#198)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b2-report-paths-are-relative-to-the-cargo-workspace-199" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        B2: Report paths are relative to the Cargo workspace (#199)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#unresolved-candidates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Unresolved candidates
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rejected-candidates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rejected candidates
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#usability-observations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Usability observations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#areas-not-explored" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Areas not explored
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#limits-of-this-pass" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Limits of this pass
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="exploratory-testing-core-journeys-2026-09-26">Exploratory testing: core journeys (2026-09-26)<a class="headerlink" href="#exploratory-testing-core-journeys-2026-09-26" title="Permanent link">&para;</a></h1>
+<p>This report gives the results of one exploratory testing pass. The pass used
+the <code>mutarust</code> command, which is the supported interface, on small scratch
+Cargo packages. The pass found two confirmed bugs:</p>
+<ul>
+<li><a href="https://github.com/quality-gates/mutarust/issues/198">#198</a>: Users cannot
+  get a blacklist checksum from any Mutarust output.</li>
+<li><a href="https://github.com/quality-gates/mutarust/issues/199">#199</a>: CI report paths
+  are relative to the Cargo workspace, not the Git repository.</li>
+</ul>
+<h2 id="set-up">Set-up<a class="headerlink" href="#set-up" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Build</td>
+<td>mutarust 0.1.9, commit <code>406beab</code>. Linux release binary (<code>cargo build --release --locked</code>) in <code>rust:1.85-slim</code>. See <a href="et.Dockerfile">et.Dockerfile</a>.</td>
+</tr>
+<tr>
+<td>Coverage build</td>
+<td>Same image, with <code>llvm-tools-preview</code> and <code>cargo-llvm-cov</code> 0.6.16. See <a href="cov.Dockerfile">cov.Dockerfile</a>.</td>
+</tr>
+<tr>
+<td>Re-check</td>
+<td>The two bugs were also replayed on <code>main</code> at <code>e599200</code> (after #197). See <a href="replay-e599200.txt">replay-e599200.txt</a>.</td>
+</tr>
+<tr>
+<td>Limits</td>
+<td><code>--cpus=1 --memory=512m --network=none</code> for each run. The coverage runs used <code>--memory=1g</code>. See <a href="run.sh">run.sh</a>.</td>
+</tr>
+<tr>
+<td>Starting state</td>
+<td>A new Git repository with the <code>pricing</code> package: four functions and three weak unit tests. A two-member Cargo workspace (<code>core</code>, <code>app</code>) with tests in <code>tests/</code>. A <code>spin</code> package with a loop that does not stop when mutated.</td>
+</tr>
+<tr>
+<td>Configuration</td>
+<td>No configuration file, except where a step names <code>--config</code>.</td>
+</tr>
+<tr>
+<td>Evidence</td>
+<td><code>docs/exploratory-testing/2026-09-26-core-journeys/</code></td>
+</tr>
+</tbody>
+</table>
+<p>Readiness check: <code>mutarust --version</code> printed <code>mutarust 0.1.9</code> in the capped
+container.</p>
+<h2 id="journeys">Journeys<a class="headerlink" href="#journeys" title="Permanent link">&para;</a></h2>
+<h3 id="j1-find-weak-tests-and-apply-a-score-gate">J1: Find weak tests and apply a score gate<a class="headerlink" href="#j1-find-weak-tests-and-apply-a-score-gate" title="Permanent link">&para;</a></h3>
+<p>Goal: the user runs <code>mutarust .</code>, sees the escaped mutants, and sets a score
+gate. The tool must not change the user source tree.</p>
+<table>
+<thead>
+<tr>
+<th>Step</th>
+<th>Result</th>
+<th>Evidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--dry-run</code>, <code>--list-files</code>, then <code>mutarust .</code></td>
+<td>38 mutants: 14 killed, 20 escaped, 4 skipped. Score 47.37% = (14 + 4) / 38, as <code>docs/cli.md</code> specifies. Each escaped mutant is a real gap in the tests. <code>git status</code> is clean. No <code>target/</code> or <code>Cargo.lock</code> in the user package.</td>
+<td><a href="j1-first-run.txt">j1-first-run.txt</a></td>
+</tr>
+<tr>
+<td><code>--min-msi 48</code>, then <code>--min-msi 47</code></td>
+<td>Exit value 4 with a clear message, then exit value 0. The limit is correct.</td>
+<td><a href="j1-gates-reports.txt">j1-gates-reports.txt</a></td>
+</tr>
+<tr>
+<td>All report outputs</td>
+<td><code>report.json</code>, <code>mutarust-report.html</code>, <code>mutarust-summary.json</code>, <code>mutarust-agentic.json</code>, and <code>mutarust-gitlab.json</code> were written. Their counts agree with the terminal.</td>
+<td><a href="j1-gates-reports.txt">j1-gates-reports.txt</a></td>
+</tr>
+<tr>
+<td><code>--coverage --min-covered-msi 60</code></td>
+<td>10 mutants are not covered. They are exactly the lines that no test calls (<code>sum</code>, <code>return 99</code>). Covered-code score 57.14% = 16 / 28. Exit value 4. <code>--per-test</code> gives the same results as the run without coverage.</td>
+<td><a href="j1-coverage.txt">j1-coverage.txt</a></td>
+</tr>
+<tr>
+<td>Two-member workspace, <code>mutarust ...</code></td>
+<td>Correct source names (<code>core/src/lib.rs</code>). The tests in <code>tests/</code> killed the mutants. The user tree is not changed.</td>
+<td><a href="j1-workspace.txt">j1-workspace.txt</a></td>
+</tr>
+<tr>
+<td>Mutant that does not stop, <code>--timeout 5</code></td>
+<td>5 errored mutants with "timed out after 5 seconds". No child process remains. <code>/tmp</code> is empty after the run.</td>
+<td><a href="j1-timeout.txt">j1-timeout.txt</a></td>
+</tr>
+<tr>
+<td>Incorrect input</td>
+<td>An unknown configuration field, <code>--workers 0</code>, an incorrect <code>--output-statuses</code>, an unknown package, and <code>--min-msi 101</code> each give exit value 3 with a clear cause.</td>
+<td><a href="j1-config-errors.txt">j1-config-errors.txt</a></td>
+</tr>
+</tbody>
+</table>
+<h3 id="j2-accept-the-current-escaped-mutants-on-a-legacy-crate">J2: Accept the current escaped mutants on a legacy crate<a class="headerlink" href="#j2-accept-the-current-escaped-mutants-on-a-legacy-crate" title="Permanent link">&para;</a></h3>
+<p>Goal: record a baseline. Then fail only on new escaped mutants. Accept one
+false positive with <code>--blacklist</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Step</th>
+<th>Result</th>
+<th>Evidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--update-baseline</code>, then <code>--baseline ... --fail-on-escaped</code></td>
+<td>20 IDs were written. The next run gave exit value 0.</td>
+<td><a href="j2-baseline.txt">j2-baseline.txt</a></td>
+</tr>
+<tr>
+<td>Add a new function at the top of the file (all lines move)</td>
+<td>The old IDs stay the same. 3 new escaped mutants cause exit value 4.</td>
+<td><a href="j2-baseline-new-code.txt">j2-baseline-new-code.txt</a></td>
+</tr>
+<tr>
+<td><code>--run-mutant-id</code> with a real ID and with an unknown ID</td>
+<td>The real ID shows only that mutant. The unknown ID gives exit value 3 with a clear message.</td>
+<td><a href="j2-baseline.txt">j2-baseline.txt</a></td>
+</tr>
+<tr>
+<td><code>--blacklist</code> with the printed ID</td>
+<td><strong>Failure (B1).</strong> No effect and no warning. No output contains a checksum.</td>
+<td><a href="j2-blacklist.txt">j2-blacklist.txt</a></td>
+</tr>
+</tbody>
+</table>
+<h3 id="j3-test-only-changed-lines-in-ci">J3: Test only changed lines in CI<a class="headerlink" href="#j3-test-only-changed-lines-in-ci" title="Permanent link">&para;</a></h3>
+<p>Goal: in a pull request, mutate only the changed lines. Show the escaped
+mutants as CI annotations, and apply a score gate.</p>
+<table>
+<thead>
+<tr>
+<th>Step</th>
+<th>Result</th>
+<th>Evidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Feature branch, <code>--git-diff-lines --git-diff-base main</code></td>
+<td>Only lines 10 and 24 (the changed lines) were mutated. A comment-only change gave no mutants.</td>
+<td><a href="j3-git-diff.txt">j3-git-diff.txt</a>, <a href="j3-git-diff-run.txt">j3-git-diff-run.txt</a></td>
+</tr>
+<tr>
+<td>Clone with <code>origin/HEAD</code>, default base, <code>--logger-github --min-msi 50</code></td>
+<td>The default base came from <code>origin/HEAD</code>. The run gave warnings and exit value 4. On <code>main</code> with no changes, the run gave exit value 4 without <code>--ignore-msi-with-no-mutations</code> and exit value 0 with it, as documented.</td>
+<td><a href="j3-ci-clone.txt">j3-ci-clone.txt</a></td>
+</tr>
+<tr>
+<td>Package in a repository subdirectory (<code>crates/pricing</code>)</td>
+<td><strong>Failure (B2).</strong> The line selection is correct, but the warnings and report paths are <code>src/lib.rs</code>, not <code>crates/pricing/src/lib.rs</code>.</td>
+<td><a href="j3-subdir-crate.txt">j3-subdir-crate.txt</a>, <a href="j3-subdir-git-diff.txt">j3-subdir-git-diff.txt</a></td>
+</tr>
+</tbody>
+</table>
+<h2 id="confirmed-bugs">Confirmed bugs<a class="headerlink" href="#confirmed-bugs" title="Permanent link">&para;</a></h2>
+<h3 id="b1-users-cannot-get-a-blacklist-checksum-198">B1: Users cannot get a blacklist checksum (<a href="https://github.com/quality-gates/mutarust/issues/198">#198</a>)<a class="headerlink" href="#b1-users-cannot-get-a-blacklist-checksum-198" title="Permanent link">&para;</a></h3>
+<ul>
+<li>User impact: the documented <code>--blacklist</code> journey fails. If a user puts the
+  printed <code>ID:</code> value in the file, it has no effect and Mutarust gives no
+  warning.</li>
+<li>Starting conditions: a new Cargo package with one weak test. No
+  configuration.</li>
+<li>Replay: <a href="replay-blacklist.sh">replay-blacklist.sh</a>.</li>
+<li>Expected: an output gives the checksum for each mutant, or the documents
+  tell how to get it. <code>README.md</code> says "Blacklist a known false positive by
+  checksum".</li>
+<li>Actual: the terminal output, <code>--debug</code>, and all six report outputs do not
+  contain the checksum. The blacklist works only with the MD5 value that the
+  user calculates from the format in <code>src/evidence.rs</code>.</li>
+<li>Repeat observations: two replays from a clean state on <code>406beab</code>, one on
+  <code>e599200</code>, and one in the scratch package. See
+  <a href="replay-blacklist.txt">replay-blacklist.txt</a>.</li>
+</ul>
+<h3 id="b2-report-paths-are-relative-to-the-cargo-workspace-199">B2: Report paths are relative to the Cargo workspace (<a href="https://github.com/quality-gates/mutarust/issues/199">#199</a>)<a class="headerlink" href="#b2-report-paths-are-relative-to-the-cargo-workspace-199" title="Permanent link">&para;</a></h3>
+<ul>
+<li>User impact: the documented CI command, used in a repository that has the
+  Rust package in a subdirectory, gives GitHub warnings and GitLab Code
+  Quality findings for a path that does not exist. The pull request cannot
+  show them on the file.</li>
+<li>Starting conditions: a Git repository with one Cargo package at
+  <code>rust/calc/</code>.</li>
+<li>Replay: <a href="replay-paths.sh">replay-paths.sh</a>.</li>
+<li>Expected: <code>file=rust/calc/src/lib.rs</code>. <code>docs/json-outputs.md</code> says "Source
+  names are repository-relative".</li>
+<li>Actual: <code>file=src/lib.rs</code> in the GitHub warnings, <code>mutarust-gitlab.json</code>,
+  and <code>mutarust-agentic.json</code>. The cause is <code>source_root</code> in
+  <code>src/execution.rs</code>, which is the Cargo workspace root.</li>
+<li>Repeat observations: two replays from a clean state on <code>406beab</code>, one on
+  <code>e599200</code>, and three runs in the scratch repository. See
+  <a href="replay-paths.txt">replay-paths.txt</a>.</li>
+</ul>
+<h2 id="unresolved-candidates">Unresolved candidates<a class="headerlink" href="#unresolved-candidates" title="Permanent link">&para;</a></h2>
+<p>None.</p>
+<h2 id="rejected-candidates">Rejected candidates<a class="headerlink" href="#rejected-candidates" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>test_files</code> is empty in <code>mutarust-agentic.json</code> when the tests are in
+  <code>#[cfg(test)]</code> in the same file. <code>docs/json-outputs.md</code> defines the field as
+  "Nearby test file paths". The result agrees with the documents.</li>
+<li><code>coveredCodeMsi</code> is <code>0.0</code> without <code>--coverage</code>. The documented example shows
+  the same value.</li>
+<li>In the terminal per-mutator table, the <code>Killed</code> column includes errored
+  mutants (7 in the table, 2 in the summary, in <code>j1-timeout.txt</code>).
+  <code>docs/json-outputs.md</code> defines this for <code>mutatorStats</code>, "as in Mutago".</li>
+<li>A <code>--git-diff-lines</code> run stopped with "clean cargo test failed". The cause
+  was the test scenario: the change broke a test. Mutarust must stop before
+  mutation in this condition, as <code>docs/cli.md</code> says. That output was replaced
+  by the next run and is not kept as a file.</li>
+</ul>
+<h2 id="usability-observations">Usability observations<a class="headerlink" href="#usability-observations" title="Permanent link">&para;</a></h2>
+<p>These are observations from the journeys. The suggestions are not bugs.</p>
+<ul>
+<li>The <code>--fail-on-escaped</code> failure says "3 new mutant(s) escaped" but does not
+  identify them. The result lines do not mark new and accepted mutants
+  differently. Suggestion: print the new IDs with the failure message.</li>
+<li>A skipped mutant prints the full compiler error, which can be 20 lines for
+  each mutant. In the first run, the compiler errors were 56 of 259
+  lines.</li>
+<li>In a repository with no <code>origin/HEAD</code>, <code>--git-diff-lines</code> on a feature
+  branch uses the current branch as the base. It finds only uncommitted
+  changes and reports 0 mutants with exit value 0. This agrees with the
+  documents, but a user can think that the run passed.</li>
+<li><code>docs/cli.md</code> does not say that the terminal per-mutator <code>Killed</code> column
+  includes errored mutants.</li>
+</ul>
+<h2 id="areas-not-explored">Areas not explored<a class="headerlink" href="#areas-not-explored" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>--exec</code> custom test commands, <code>--no-exec</code>, <code>--do-not-remove-tmp-folder</code>.</li>
+<li><code>--test-flags</code>, <code>--test-recursive</code>, <code>--timeout-coefficient</code>, <code>--workers</code>
+  more than 1 (all runs used one CPU).</li>
+<li>Custom mutators, <code>--print-ast</code>, Bash completion, source annotations.</li>
+<li>The HTML report was checked for its presence only. Its content was not
+  examined in a browser.</li>
+<li>macOS host binaries. The pass used only Linux containers.</li>
+</ul>
+<h2 id="limits-of-this-pass">Limits of this pass<a class="headerlink" href="#limits-of-this-pass" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Each run used one CPU and 512 MB of memory. Parallel-worker behaviour was
+  not examined.</li>
+<li>Git operations in the container used <code>safe.directory "*"</code> for the mounted
+  scratch repository. This setting does not change Mutarust behaviour.</li>
+<li>The coverage image build needed network access. The coverage runs did not.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.sections", "navigation.top", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

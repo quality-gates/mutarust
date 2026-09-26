@@ -1,0 +1,17 @@
+UPD_EXIT=0
+Baseline written to "mutarust-baseline.json" (20 escaped mutant(s))
+1 20 {'id': '11221fa321d09a867f5682dd6facf006', 'file': 'src/lib.rs', 'mutator': 'arithmetic/assign_invert', 'line': 26}
+Cargo.toml
+mutarust-baseline.json
+src
+FAIL_ON_ESC_EXIT=0
+escaped src/lib.rs arithmetic/assign_invert
+  ID: 11221fa321d09a867f5682dd6facf006
+--- src/lib.rs
++++ src/lib.rs
+@@ -26,1 +26,1 @@
+-        s += i;
++        s -= i;
+RUNID_EXIT=0
+mutarust: could not find mutant ID 00000000000000000000000000000000
+BADID_EXIT=3
