@@ -172,6 +172,247 @@ impl fmt::Display for ConfigurationError {
 
 impl std::error::Error for ConfigurationError {}
 
+/// A command option that can conflict with another option.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CommandFlag {
+    /// The command lists mutations without writing files or running tests.
+    DryRun,
+    /// The command writes mutations without running tests.
+    NoExec,
+    /// The command uses a custom test command.
+    CustomCommand,
+    /// The command keeps mutation workspaces.
+    KeepTemporary,
+    /// The command sets a fixed test timeout.
+    FixedTimeout,
+    /// The command sets an adaptive test timeout.
+    TimeoutCoefficient,
+    /// The command sets Cargo test flags.
+    TestFlags,
+    /// The command sets the number of workers.
+    Workers,
+    /// The command selects recursive Cargo tests.
+    RecursiveTests,
+    /// The command collects coverage.
+    Coverage,
+    /// The command selects tests for each covered mutation.
+    PerTestCoverage,
+    /// The command selects mutations on changed Git lines.
+    GitDiffLines,
+    /// The command sets a Git base for changed-line selection.
+    GitDiffBase,
+    /// The command writes the escaped-mutant baseline.
+    UpdateBaseline,
+    /// The command selects one mutant by ID.
+    RunMutantId,
+}
+
+/// Checks command options for incompatible combinations.
+pub fn validate_command_flags(flags: &[CommandFlag]) -> Result<(), ConfigurationError> {
+    let error = run_mode_flag_error(flags)
+        .or_else(|| dry_run_flag_error(flags))
+        .or_else(|| cargo_flag_error(flags))
+        .or_else(|| coverage_flag_error(flags))
+        .or_else(|| git_diff_flag_error(flags))
+        .or_else(|| baseline_flag_error(flags));
+    match error {
+        Some(message) => Err(ConfigurationError::new(message.to_owned())),
+        None => Ok(()),
+    }
+}
+
+fn run_mode_flag_error(flags: &[CommandFlag]) -> Option<&'static str> {
+    flag_pair_error(
+        flags,
+        CommandFlag::DryRun,
+        CommandFlag::NoExec,
+        "--dry-run and --no-exec cannot be used together",
+    )
+    .or_else(|| {
+        flag_pair_error(
+            flags,
+            CommandFlag::DryRun,
+            CommandFlag::CustomCommand,
+            "--dry-run cannot be used with --exec",
+        )
+    })
+    .or_else(|| {
+        flag_pair_error(
+            flags,
+            CommandFlag::NoExec,
+            CommandFlag::CustomCommand,
+            "--no-exec cannot be used with --exec",
+        )
+    })
+}
+
+fn dry_run_flag_error(flags: &[CommandFlag]) -> Option<&'static str> {
+    [
+        (
+            CommandFlag::KeepTemporary,
+            "--dry-run cannot be used with --do-not-remove-tmp-folder",
+        ),
+        (
+            CommandFlag::FixedTimeout,
+            "--dry-run cannot be used with --timeout",
+        ),
+        (
+            CommandFlag::TimeoutCoefficient,
+            "--dry-run cannot be used with --timeout-coefficient",
+        ),
+        (
+            CommandFlag::TestFlags,
+            "--dry-run cannot be used with --test-flags",
+        ),
+        (
+            CommandFlag::Workers,
+            "--dry-run cannot be used with --workers",
+        ),
+        (
+            CommandFlag::RecursiveTests,
+            "--dry-run cannot be used with --test-recursive",
+        ),
+        (
+            CommandFlag::Coverage,
+            "--dry-run cannot be used with --coverage",
+        ),
+        (
+            CommandFlag::PerTestCoverage,
+            "--dry-run cannot be used with --per-test",
+        ),
+    ]
+    .into_iter()
+    .find_map(|(other, message)| flag_pair_error(flags, CommandFlag::DryRun, other, message))
+}
+
+fn cargo_flag_error(flags: &[CommandFlag]) -> Option<&'static str> {
+    flag_pair_error(
+        flags,
+        CommandFlag::TimeoutCoefficient,
+        CommandFlag::FixedTimeout,
+        "--timeout-coefficient cannot be used with --timeout",
+    )
+    .or_else(|| {
+        flag_pair_error(
+            flags,
+            CommandFlag::TimeoutCoefficient,
+            CommandFlag::CustomCommand,
+            "--timeout-coefficient requires the Cargo test command",
+        )
+    })
+    .or_else(|| {
+        flag_pair_error(
+            flags,
+            CommandFlag::TimeoutCoefficient,
+            CommandFlag::NoExec,
+            "--timeout-coefficient cannot be used with --no-exec",
+        )
+    })
+    .or_else(|| {
+        flag_pair_error(
+            flags,
+            CommandFlag::NoExec,
+            CommandFlag::FixedTimeout,
+            "--no-exec cannot be used with --timeout",
+        )
+    })
+    .or_else(|| {
+        flag_pair_error(
+            flags,
+            CommandFlag::TestFlags,
+            CommandFlag::CustomCommand,
+            "--test-flags cannot be used with --exec",
+        )
+    })
+    .or_else(|| {
+        flag_pair_error(
+            flags,
+            CommandFlag::TestFlags,
+            CommandFlag::NoExec,
+            "--test-flags cannot be used with --no-exec",
+        )
+    })
+    .or_else(|| {
+        flag_pair_error(
+            flags,
+            CommandFlag::RecursiveTests,
+            CommandFlag::NoExec,
+            "--test-recursive cannot be used with --no-exec",
+        )
+    })
+}
+
+fn coverage_flag_error(flags: &[CommandFlag]) -> Option<&'static str> {
+    flag_pair_error(
+        flags,
+        CommandFlag::Coverage,
+        CommandFlag::CustomCommand,
+        "--coverage requires the Cargo test command",
+    )
+    .or_else(|| {
+        flag_pair_error(
+            flags,
+            CommandFlag::PerTestCoverage,
+            CommandFlag::CustomCommand,
+            "--per-test requires the Cargo test command",
+        )
+    })
+    .or_else(|| {
+        flag_pair_error(
+            flags,
+            CommandFlag::Coverage,
+            CommandFlag::NoExec,
+            "--coverage cannot be used with --no-exec",
+        )
+    })
+    .or_else(|| {
+        flag_pair_error(
+            flags,
+            CommandFlag::PerTestCoverage,
+            CommandFlag::NoExec,
+            "--per-test cannot be used with --no-exec",
+        )
+    })
+}
+
+fn git_diff_flag_error(flags: &[CommandFlag]) -> Option<&'static str> {
+    (flags.contains(&CommandFlag::GitDiffBase) && !flags.contains(&CommandFlag::GitDiffLines))
+        .then_some("--git-diff-base requires --git-diff-lines")
+}
+
+fn baseline_flag_error(flags: &[CommandFlag]) -> Option<&'static str> {
+    flag_pair_error(
+        flags,
+        CommandFlag::UpdateBaseline,
+        CommandFlag::DryRun,
+        "--update-baseline cannot be used with --dry-run",
+    )
+    .or_else(|| {
+        flag_pair_error(
+            flags,
+            CommandFlag::UpdateBaseline,
+            CommandFlag::NoExec,
+            "--update-baseline cannot be used with --no-exec",
+        )
+    })
+    .or_else(|| {
+        flag_pair_error(
+            flags,
+            CommandFlag::UpdateBaseline,
+            CommandFlag::RunMutantId,
+            "--update-baseline cannot be used with --run-mutant-id",
+        )
+    })
+}
+
+fn flag_pair_error(
+    flags: &[CommandFlag],
+    first: CommandFlag,
+    second: CommandFlag,
+    message: &'static str,
+) -> Option<&'static str> {
+    (flags.contains(&first) && flags.contains(&second)).then_some(message)
+}
 fn validate_score(field: &str, score: Option<u8>) -> Result<(), ConfigurationError> {
     if score.is_some_and(|score| score > 100) {
         return Err(ConfigurationError::new(format!(

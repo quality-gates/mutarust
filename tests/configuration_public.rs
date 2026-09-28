@@ -1,6 +1,6 @@
 use std::fs;
 
-use mutarust::{CommandSettings, Configuration, Registry};
+use mutarust::{CommandFlag, CommandSettings, Configuration, Registry, validate_command_flags};
 
 struct TempConfig(std::path::PathBuf);
 
@@ -44,4 +44,121 @@ fn exact_assign_invert_selectors_work_in_command_settings_and_yaml() {
             .expect("the exact YAML selector must match")
             .contains(&"arithmetic/assign_invert".to_owned())
     );
+}
+
+#[test]
+fn command_flag_conflicts_are_validated_by_the_library() {
+    use CommandFlag as Flag;
+
+    let cases: &[(&[Flag], &str)] = &[
+        (
+            &[Flag::DryRun, Flag::NoExec],
+            "--dry-run and --no-exec cannot be used together",
+        ),
+        (
+            &[Flag::DryRun, Flag::CustomCommand],
+            "--dry-run cannot be used with --exec",
+        ),
+        (
+            &[Flag::NoExec, Flag::CustomCommand],
+            "--no-exec cannot be used with --exec",
+        ),
+        (
+            &[Flag::DryRun, Flag::KeepTemporary],
+            "--dry-run cannot be used with --do-not-remove-tmp-folder",
+        ),
+        (
+            &[Flag::DryRun, Flag::FixedTimeout],
+            "--dry-run cannot be used with --timeout",
+        ),
+        (
+            &[Flag::DryRun, Flag::TimeoutCoefficient],
+            "--dry-run cannot be used with --timeout-coefficient",
+        ),
+        (
+            &[Flag::DryRun, Flag::TestFlags],
+            "--dry-run cannot be used with --test-flags",
+        ),
+        (
+            &[Flag::DryRun, Flag::Workers],
+            "--dry-run cannot be used with --workers",
+        ),
+        (
+            &[Flag::DryRun, Flag::RecursiveTests],
+            "--dry-run cannot be used with --test-recursive",
+        ),
+        (
+            &[Flag::DryRun, Flag::Coverage],
+            "--dry-run cannot be used with --coverage",
+        ),
+        (
+            &[Flag::DryRun, Flag::PerTestCoverage],
+            "--dry-run cannot be used with --per-test",
+        ),
+        (
+            &[Flag::TimeoutCoefficient, Flag::FixedTimeout],
+            "--timeout-coefficient cannot be used with --timeout",
+        ),
+        (
+            &[Flag::TimeoutCoefficient, Flag::CustomCommand],
+            "--timeout-coefficient requires the Cargo test command",
+        ),
+        (
+            &[Flag::TimeoutCoefficient, Flag::NoExec],
+            "--timeout-coefficient cannot be used with --no-exec",
+        ),
+        (
+            &[Flag::NoExec, Flag::FixedTimeout],
+            "--no-exec cannot be used with --timeout",
+        ),
+        (
+            &[Flag::TestFlags, Flag::CustomCommand],
+            "--test-flags cannot be used with --exec",
+        ),
+        (
+            &[Flag::TestFlags, Flag::NoExec],
+            "--test-flags cannot be used with --no-exec",
+        ),
+        (
+            &[Flag::RecursiveTests, Flag::NoExec],
+            "--test-recursive cannot be used with --no-exec",
+        ),
+        (
+            &[Flag::Coverage, Flag::CustomCommand],
+            "--coverage requires the Cargo test command",
+        ),
+        (
+            &[Flag::PerTestCoverage, Flag::CustomCommand],
+            "--per-test requires the Cargo test command",
+        ),
+        (
+            &[Flag::Coverage, Flag::NoExec],
+            "--coverage cannot be used with --no-exec",
+        ),
+        (
+            &[Flag::PerTestCoverage, Flag::NoExec],
+            "--per-test cannot be used with --no-exec",
+        ),
+        (
+            &[Flag::GitDiffBase],
+            "--git-diff-base requires --git-diff-lines",
+        ),
+        (
+            &[Flag::UpdateBaseline, Flag::DryRun],
+            "--update-baseline cannot be used with --dry-run",
+        ),
+        (
+            &[Flag::UpdateBaseline, Flag::NoExec],
+            "--update-baseline cannot be used with --no-exec",
+        ),
+        (
+            &[Flag::UpdateBaseline, Flag::RunMutantId],
+            "--update-baseline cannot be used with --run-mutant-id",
+        ),
+    ];
+
+    for (flags, expected) in cases {
+        let error = validate_command_flags(flags).expect_err("incompatible flags must fail");
+        assert_eq!(error.to_string(), *expected);
+    }
 }

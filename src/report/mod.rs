@@ -3,6 +3,7 @@ mod github;
 mod gitlab;
 mod hints;
 mod html;
+mod terminal;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -21,6 +22,7 @@ pub use gitlab::{
     write_gitlab_report,
 };
 pub use html::{HTML_REPORT_FILE_NAME, HtmlReport, html_report, write_html_report};
+pub use terminal::{write_dry_run_summary, write_generated_mutants, write_mutation_results};
 
 /// File name for the full JSON mutation report.
 pub const FULL_REPORT_FILE_NAME: &str = "report.json";
@@ -339,6 +341,11 @@ pub(super) fn serialize_json_pretty(value: &impl Serialize) -> Result<String, St
 
 pub(super) fn portable_path(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
+}
+
+pub(crate) fn format_percentage(ratio: f64) -> String {
+    let percentage = (ratio * 10_000.0).round() / 100.0;
+    format!("{percentage:.2}%")
 }
 
 #[cfg(test)]
