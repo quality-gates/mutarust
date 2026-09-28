@@ -39,7 +39,8 @@ mod value;
 
 pub use baseline::Baseline;
 pub use configuration::{
-    CommandFlag, CommandSettings, Configuration, ConfigurationError, validate_command_flags,
+    CommandFlag, CommandSettings, Configuration, ConfigurationError, RegistryConfigurationError,
+    configured_registry, validate_command_flags,
 };
 pub use discovery::{SourceError, find_rust_sources};
 pub use execution::{

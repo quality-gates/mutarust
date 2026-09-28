@@ -642,7 +642,15 @@ fn start_mutation_run(
 ) -> Result<(Configuration, Baseline, mutarust::MutationRun), String> {
     let baseline = Baseline::load(command.baseline.path())?;
     let configuration = effective_configuration(command).map_err(|error| error.to_string())?;
-    let (registry, filters) = configured_registry(command, &configuration)?;
+    let (registry, filters) =
+        mutarust::configured_registry(&configuration, command.function_match.as_deref()).map_err(
+            |error| match error {
+                mutarust::RegistryConfigurationError::SourceFilters(error) => error,
+                mutarust::RegistryConfigurationError::MutatorSelection(error) => {
+                    selection_error(command.configuration.as_deref(), &error)
+                }
+            },
+        )?;
     let execution = test_execution(command)?;
     let run = mutarust::run_mutation_tests_with_controls(
         &command.targets,
@@ -720,27 +728,6 @@ fn progress_allowed(command: &RunCommand, silent_mode: bool) -> bool {
         && !silent_mode
         && !command.execution.no_exec
         && !command.execution.dry_run
-}
-
-fn configured_registry(
-    command: &RunCommand,
-    configuration: &Configuration,
-) -> Result<(Registry, mutarust::SourceFilters), String> {
-    let mut registry = Registry::builtins();
-    let names = registry.names().map(str::to_owned).collect::<Vec<_>>();
-    let filters = mutarust::SourceFilters::with_policies(
-        &configuration.exclude_dirs,
-        &configuration.ignore_source_lines,
-        command.function_match.as_deref(),
-        &names,
-        configuration.skip_without_test,
-        configuration.skip_with_cfg,
-    )?;
-    let selected = configuration
-        .select_mutators(&names)
-        .map_err(|error| selection_error(command.configuration.as_deref(), &error))?;
-    registry.retain(|name| selected.iter().any(|selected_name| selected_name == name));
-    Ok((registry, filters))
 }
 
 fn finish_mutation_run(

@@ -522,3 +522,46 @@ fn mutator_pattern_matches(pattern: &str, name: &str) -> bool {
         .strip_suffix('*')
         .map_or_else(|| pattern == name, |prefix| name.starts_with(prefix))
 }
+
+/// An error from registry and source filter configuration.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RegistryConfigurationError {
+    /// The source filters contain an invalid regular expression.
+    SourceFilters(String),
+    /// A mutator selection does not match an available mutator.
+    MutatorSelection(ConfigurationError),
+}
+
+impl fmt::Display for RegistryConfigurationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::SourceFilters(error) => formatter.write_str(error),
+            Self::MutatorSelection(error) => error.fmt(formatter),
+        }
+    }
+}
+
+impl std::error::Error for RegistryConfigurationError {}
+
+/// Builds the selected mutator registry and source filters from a configuration.
+pub fn configured_registry(
+    configuration: &Configuration,
+    function_match: Option<&str>,
+) -> Result<(crate::mutator::Registry, crate::filter::SourceFilters), RegistryConfigurationError> {
+    let mut registry = crate::mutator::Registry::builtins();
+    let names = registry.names().map(str::to_owned).collect::<Vec<_>>();
+    let filters = crate::filter::SourceFilters::with_policies(
+        &configuration.exclude_dirs,
+        &configuration.ignore_source_lines,
+        function_match,
+        &names,
+        configuration.skip_without_test,
+        configuration.skip_with_cfg,
+    )
+    .map_err(RegistryConfigurationError::SourceFilters)?;
+    let selected = configuration
+        .select_mutators(&names)
+        .map_err(RegistryConfigurationError::MutatorSelection)?;
+    registry.retain(|name| selected.iter().any(|selected_name| selected_name == name));
+    Ok((registry, filters))
+}

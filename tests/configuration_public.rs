@@ -1,6 +1,9 @@
 use std::fs;
 
-use mutarust::{CommandFlag, CommandSettings, Configuration, Registry, validate_command_flags};
+use mutarust::{
+    CommandFlag, CommandSettings, Configuration, Registry, RegistryConfigurationError,
+    configured_registry, validate_command_flags,
+};
 
 struct TempConfig(std::path::PathBuf);
 
@@ -161,4 +164,46 @@ fn command_flag_conflicts_are_validated_by_the_library() {
         let error = validate_command_flags(flags).expect_err("incompatible flags must fail");
         assert_eq!(error.to_string(), *expected);
     }
+}
+
+#[test]
+fn configured_registry_selects_mutators_and_builds_filters() {
+    let mut configuration = Configuration::default();
+    configuration
+        .apply(&CommandSettings {
+            enable_mutators: Some(vec!["conditional/bool-literal".to_owned()]),
+            ..CommandSettings::default()
+        })
+        .expect("the selected mutator must be valid");
+
+    let (registry, _filters) = configured_registry(&configuration, Some("sample"))
+        .expect("the registry and filters must be configured");
+    assert_eq!(
+        registry.names().collect::<Vec<_>>(),
+        vec!["conditional/bool-literal"]
+    );
+}
+
+#[test]
+fn configured_registry_reports_invalid_mutator_selection() {
+    let mut configuration = Configuration::default();
+    configuration
+        .apply(&CommandSettings {
+            enable_mutators: Some(vec!["missing/mutator".to_owned()]),
+            ..CommandSettings::default()
+        })
+        .expect("the selector pattern must be valid");
+
+    assert!(matches!(
+        configured_registry(&configuration, None),
+        Err(RegistryConfigurationError::MutatorSelection(_))
+    ));
+}
+
+#[test]
+fn configured_registry_reports_invalid_function_filter() {
+    assert!(matches!(
+        configured_registry(&Configuration::default(), Some("(")),
+        Err(RegistryConfigurationError::SourceFilters(_))
+    ));
 }
