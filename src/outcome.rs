@@ -5,9 +5,9 @@ use crate::{Baseline, MutationRun};
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Gates {
     /// The minimum mutation score percentage.
-    pub min_msi: Option<u8>,
+    pub minimum_mutation_score: Option<u8>,
     /// The minimum covered-code mutation score percentage.
-    pub min_covered_msi: Option<u8>,
+    pub minimum_covered_mutation_score: Option<u8>,
     /// Fails when the run has escaped mutants outside the baseline.
     pub fail_on_escaped: bool,
     /// Passes score gates when the run has no mutations.
@@ -54,7 +54,7 @@ pub fn judge(run: &MutationRun, baseline: &Baseline, gates: &Gates) -> RunOutcom
 }
 
 fn total_score_failure(run: &MutationRun, gates: &Gates) -> Option<RunOutcome> {
-    let minimum = gates.min_msi?;
+    let minimum = gates.minimum_mutation_score?;
     let score = run.mutation_score();
     (score * 100.0 < f64::from(minimum)).then(|| {
         RunOutcome::failure(format!(
@@ -65,7 +65,9 @@ fn total_score_failure(run: &MutationRun, gates: &Gates) -> Option<RunOutcome> {
 }
 
 fn covered_score_failure(run: &MutationRun, gates: &Gates) -> Option<RunOutcome> {
-    let minimum = gates.min_covered_msi.filter(|minimum| *minimum > 0)?;
+    let minimum = gates
+        .minimum_covered_mutation_score
+        .filter(|minimum| *minimum > 0)?;
     if !run.has_coverage() {
         return Some(RunOutcome::failure(
             "covered-code mutation score requires --coverage".into(),

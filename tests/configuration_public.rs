@@ -167,7 +167,7 @@ fn command_flag_conflicts_are_validated_by_the_library() {
 }
 
 #[test]
-fn configured_registry_selects_mutators_and_builds_filters() {
+fn configured_registry_selects_mutators() {
     let mut configuration = Configuration::default();
     configuration
         .apply(&CommandSettings {
