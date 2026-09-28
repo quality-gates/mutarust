@@ -118,7 +118,7 @@ fn empty_run_fails_score_gate_unless_ignore_is_set() {
         &run,
         &baseline,
         &Gates {
-            ignore_msi_with_no_mutations: true,
+            pass_score_gates_when_no_mutations: true,
             ..gates
         },
     );

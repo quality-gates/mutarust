@@ -777,7 +777,7 @@ fn finish_mutation_run(
             minimum_mutation_score: configuration.min_msi,
             minimum_covered_mutation_score: configuration.min_covered_msi,
             fail_on_escaped: command.baseline.fail_on_escaped,
-            ignore_msi_with_no_mutations: command.baseline.ignore_msi_with_no_mutations,
+            pass_score_gates_when_no_mutations: command.baseline.ignore_msi_with_no_mutations,
         },
     );
     if let Some(message) = outcome.message() {

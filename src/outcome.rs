@@ -11,7 +11,7 @@ pub struct Gates {
     /// Fails when the run has escaped mutants outside the baseline.
     pub fail_on_escaped: bool,
     /// Passes score gates when the run has no mutations.
-    pub ignore_msi_with_no_mutations: bool,
+    pub pass_score_gates_when_no_mutations: bool,
 }
 
 /// The result of judging a completed mutation run against its gates.
@@ -44,7 +44,7 @@ impl RunOutcome {
 
 /// Judges a mutation run against score requirements and an escaped-mutant baseline.
 pub fn judge(run: &MutationRun, baseline: &Baseline, gates: &Gates) -> RunOutcome {
-    if gates.ignore_msi_with_no_mutations && run.total() == 0 {
+    if gates.pass_score_gates_when_no_mutations && run.total() == 0 {
         return RunOutcome::success();
     }
     total_score_failure(run, gates)
