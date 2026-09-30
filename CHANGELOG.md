@@ -2,6 +2,14 @@
 
 This file records important user changes.
 
+## 0.2.1 — 2026-09-30
+
+A compatible fix release. The public library interface does not change.
+
+### Fixed
+
+- Workspace copies skip unsupported file-system entries, such as Unix sockets and FIFOs. Mutation runs continue.
+
 ## 0.2.0 — 2026-09-26
 
 An incompatible library release. The public `MutationResult` struct has a new required field. Command-line use does not change, except for the new checksum output.
