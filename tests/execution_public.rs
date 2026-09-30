@@ -1166,3 +1166,150 @@ fn dry_run_keeps_a_lockless_package_lockless() {
         "a dry run must not write Cargo.lock in the user source tree"
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn unix_socket_in_subdirectory_is_skipped_during_workspace_copy() {
+    let _run_guard = public_run_guard();
+    let control_root = unique_temporary_root("unix-socket-control");
+    let control_source = write_single_file_crate(
+        &control_root,
+        "unix-socket-fixture",
+        "pub fn answer() -> bool {\n    let value = false;\n    value\n}\n",
+    );
+    std::fs::create_dir_all(control_root.0.join("tests"))
+        .expect("control fixture tests directory must be created");
+    std::fs::write(
+        control_root.0.join("tests").join("suite.rs"),
+        "#[test]\nfn test_answer() {\n    assert!(!unix_socket_fixture::answer());\n}\n",
+    )
+    .expect("control fixture test must be written");
+
+    let root = unique_temporary_root("unix-socket-skip");
+    let source = write_single_file_crate(
+        &root,
+        "unix-socket-fixture",
+        "pub fn answer() -> bool {\n    let value = false;\n    value\n}\n",
+    );
+    std::fs::create_dir_all(root.0.join("tests")).expect("fixture tests directory must be created");
+    std::fs::write(
+        root.0.join("tests").join("suite.rs"),
+        "#[test]\nfn test_answer() {\n    let socket = std::path::Path::new(env!(\"CARGO_MANIFEST_DIR\")).join(\".codegraph\").join(\"daemon.sock\");\n    assert!(!socket.exists(), \"the copied workspace must not contain the skipped socket\");\n    assert!(!unix_socket_fixture::answer());\n}\n",
+    )
+    .expect("fixture test must be written");
+
+    let socket_dir = root.0.join(".codegraph");
+    std::fs::create_dir_all(&socket_dir).expect("socket directory must be created");
+    let socket_path = socket_dir.join("daemon.sock");
+    let _listener = std::os::unix::net::UnixListener::bind(&socket_path)
+        .expect("unix domain socket must be created");
+
+    let registry = mutarust::Registry::builtins();
+    let names = registry.names().map(str::to_owned).collect::<Vec<_>>();
+    let filters = mutarust::SourceFilters::new(&[], &[], None, &names)
+        .expect("source filters must accept builtins");
+    let controls = mutarust::ExecutionControls {
+        workers: mutarust::WorkerLimit::new(2).expect("worker count must be valid"),
+        ..Default::default()
+    };
+
+    let control_run = mutarust::run_mutation_tests_with_controls(
+        &[control_source.to_string_lossy().into_owned()],
+        &registry,
+        std::time::Duration::from_secs(30),
+        None,
+        &filters,
+        &mutarust::TestExecution::cargo(),
+        &controls,
+    )
+    .expect("control mutation run without socket must succeed");
+
+    let run = mutarust::run_mutation_tests_with_controls(
+        &[source.to_string_lossy().into_owned()],
+        &registry,
+        std::time::Duration::from_secs(30),
+        None,
+        &filters,
+        &mutarust::TestExecution::cargo(),
+        &controls,
+    )
+    .expect("the mutation run must succeed with a unix socket present");
+
+    assert_eq!(run.results().len(), control_run.results().len());
+    assert_eq!(run.results()[0].state, control_run.results()[0].state);
+    assert_eq!(run.results()[0].diff, control_run.results()[0].diff);
+}
+
+#[cfg(unix)]
+#[test]
+fn unix_fifo_at_workspace_root_is_skipped_during_workspace_copy() {
+    let _run_guard = public_run_guard();
+    let control_root = unique_temporary_root("unix-fifo-control");
+    let control_source = write_single_file_crate(
+        &control_root,
+        "unix-fifo-fixture",
+        "pub fn answer() -> bool {\n    let value = false;\n    value\n}\n",
+    );
+    std::fs::create_dir_all(control_root.0.join("tests"))
+        .expect("control fixture tests directory must be created");
+    std::fs::write(
+        control_root.0.join("tests").join("suite.rs"),
+        "#[test]\nfn test_answer() {\n    assert!(!unix_fifo_fixture::answer());\n}\n",
+    )
+    .expect("control fixture test must be written");
+
+    let root = unique_temporary_root("unix-fifo-skip");
+    let source = write_single_file_crate(
+        &root,
+        "unix-fifo-fixture",
+        "pub fn answer() -> bool {\n    let value = false;\n    value\n}\n",
+    );
+    std::fs::create_dir_all(root.0.join("tests")).expect("fixture tests directory must be created");
+    std::fs::write(
+        root.0.join("tests").join("suite.rs"),
+        "#[test]\nfn test_answer() {\n    let fifo = std::path::Path::new(env!(\"CARGO_MANIFEST_DIR\")).join(\"daemon.fifo\");\n    assert!(!fifo.exists(), \"the copied workspace must not contain the skipped fifo\");\n    assert!(!unix_fifo_fixture::answer());\n}\n",
+    )
+    .expect("fixture test must be written");
+
+    let fifo_path = root.0.join("daemon.fifo");
+    let fifo_c_str =
+        std::ffi::CString::new(fifo_path.to_str().expect("fifo path must be valid utf-8"))
+            .expect("fifo c-string must be valid");
+    let res = unsafe { libc::mkfifo(fifo_c_str.as_ptr(), 0o600) };
+    assert_eq!(res, 0, "fifo must be created");
+
+    let registry = mutarust::Registry::builtins();
+    let names = registry.names().map(str::to_owned).collect::<Vec<_>>();
+    let filters = mutarust::SourceFilters::new(&[], &[], None, &names)
+        .expect("source filters must accept builtins");
+    let controls = mutarust::ExecutionControls {
+        workers: mutarust::WorkerLimit::new(2).expect("worker count must be valid"),
+        ..Default::default()
+    };
+
+    let control_run = mutarust::run_mutation_tests_with_controls(
+        &[control_source.to_string_lossy().into_owned()],
+        &registry,
+        std::time::Duration::from_secs(30),
+        None,
+        &filters,
+        &mutarust::TestExecution::cargo(),
+        &controls,
+    )
+    .expect("control mutation run without fifo must succeed");
+
+    let run = mutarust::run_mutation_tests_with_controls(
+        &[source.to_string_lossy().into_owned()],
+        &registry,
+        std::time::Duration::from_secs(30),
+        None,
+        &filters,
+        &mutarust::TestExecution::cargo(),
+        &controls,
+    )
+    .expect("the mutation run must succeed with a fifo present");
+
+    assert_eq!(run.results().len(), control_run.results().len());
+    assert_eq!(run.results()[0].state, control_run.results()[0].state);
+    assert_eq!(run.results()[0].diff, control_run.results()[0].diff);
+}
