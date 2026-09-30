@@ -3852,6 +3852,9 @@ fn clone_tree_with_shared_dependencies(
         let file_type = fs::symlink_metadata(&from)
             .map_err(|error| run_error(format!("could not inspect {}: {error}", from.display())))?
             .file_type();
+        if !is_copyable_file_type(&file_type) {
+            continue;
+        }
         if file_type.is_symlink() {
             copy_symbolic_link(&from, &to)?;
             continue;
@@ -3877,10 +3880,6 @@ fn clone_tree_with_shared_dependencies(
             })?;
             continue;
         }
-        return Err(run_error(format!(
-            "could not copy unsupported workspace entry: {}",
-            from.display()
-        )));
     }
     Ok(())
 }
@@ -4088,6 +4087,9 @@ fn copy_tree(source: &Path, destination: &Path) -> Result<(), RunError> {
         let file_type = fs::symlink_metadata(&from)
             .map_err(|error| run_error(format!("could not inspect {}: {error}", from.display())))?
             .file_type();
+        if !is_copyable_file_type(&file_type) {
+            continue;
+        }
         if file_type.is_symlink() {
             copy_symbolic_link(&from, &to)?;
             continue;
@@ -4109,10 +4111,6 @@ fn copy_tree(source: &Path, destination: &Path) -> Result<(), RunError> {
             })?;
             continue;
         }
-        return Err(run_error(format!(
-            "could not copy unsupported workspace entry: {}",
-            from.display()
-        )));
     }
     Ok(())
 }
@@ -4141,6 +4139,9 @@ fn copy_entry(workspace: &Workspace, source: &Path, destination: &Path) -> Resul
     let file_type = fs::symlink_metadata(source)
         .map_err(|error| run_error(format!("could not inspect {}: {error}", source.display())))?
         .file_type();
+    if !is_copyable_file_type(&file_type) {
+        return Ok(());
+    }
     if file_type.is_symlink() {
         return copy_symbolic_link(source, destination);
     }
@@ -4152,16 +4153,15 @@ fn copy_entry(workspace: &Workspace, source: &Path, destination: &Path) -> Resul
             ))
         })?;
         copy_directory(workspace, source, destination)
-    } else if file_type.is_file() {
+    } else {
         fs::copy(source, destination)
             .map(|_| ())
             .map_err(|error| run_error(format!("could not copy {}: {error}", source.display())))
-    } else {
-        Err(run_error(format!(
-            "could not copy unsupported workspace entry: {}",
-            source.display()
-        )))
     }
+}
+
+fn is_copyable_file_type(file_type: &fs::FileType) -> bool {
+    file_type.is_dir() || file_type.is_file() || file_type.is_symlink()
 }
 
 fn copy_symbolic_link(source: &Path, destination: &Path) -> Result<(), RunError> {
