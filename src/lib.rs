@@ -31,13 +31,17 @@ mod expression;
 mod filter;
 mod git;
 mod mutator;
+mod outcome;
 mod progress;
 mod report;
 mod return_value;
 mod value;
 
 pub use baseline::Baseline;
-pub use configuration::{CommandSettings, Configuration, ConfigurationError};
+pub use configuration::{
+    CommandFlag, CommandSettings, Configuration, ConfigurationError, RegistryConfigurationError,
+    configured_registry, validate_command_flags,
+};
 pub use discovery::{SourceError, find_rust_sources};
 pub use execution::{
     CoverageControls, DEFAULT_TEST_TIMEOUT, DisplayFilter, ExecutionControls, GitDiffControls,
@@ -49,6 +53,7 @@ pub use execution::{
 };
 pub use filter::SourceFilters;
 pub use mutator::{Mutation, Mutator, Registry, RegistryBuilder, RegistryError};
+pub use outcome::{Gates, RunOutcome, judge};
 pub use report::{
     AGENTIC_REMINDER, AGENTIC_REPORT_FILE_NAME, AgenticJsonReport, AgenticMutant, AgenticReport,
     AgenticReportInput, COMPACT_SUMMARY_FILE_NAME, FULL_REPORT_FILE_NAME, FullJsonReport,
@@ -57,7 +62,8 @@ pub use report::{
     ReportContext, ReportMetadata, ReportMutant, ReportMutator, ReportMutatorStats, ReportStats,
     SummaryJsonReport, agentic_report, compact_summary, full_report, github_annotations,
     gitlab_report, html_report, write_agentic_report, write_all, write_compact_summary,
-    write_full_report, write_gitlab_report, write_html_report,
+    write_dry_run_summary, write_full_report, write_generated_mutants, write_gitlab_report,
+    write_html_report, write_mutation_results,
 };
 
 /// The package version for the installed command.
