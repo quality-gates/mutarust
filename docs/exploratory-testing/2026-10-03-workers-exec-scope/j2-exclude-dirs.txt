@@ -1,0 +1,7 @@
+src/gen                Total: 18 mutation(s) would be generated. No files written, no tests run.
+src/gen/               Total: 18 mutation(s) would be generated. No files written, no tests run.
+./src/gen              Total: 22 mutation(s) would be generated. No files written, no tests run.
+./src/gen/             Total: 22 mutation(s) would be generated. No files written, no tests run.
+/work/scope/src/gen    Total: 18 mutation(s) would be generated. No files written, no tests run.
+src/gen/mod.rs         Total: 18 mutation(s) would be generated. No files written, no tests run.
+src/ge                 Total: 22 mutation(s) would be generated. No files written, no tests run.

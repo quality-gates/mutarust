@@ -1,0 +1,3 @@
+EXIT=0
+workers=1 wall=75
+time="2026-10-03T01:46:55+01:00" level=error msg="error waiting for container: unexpected EOF"

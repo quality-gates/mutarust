@@ -1,0 +1,239 @@
+escaped src/lib.rs arithmetic/assign_invert
+  ID: 888aee432de6e1934d5fc77149e2b762
+  Blacklist checksum: 821cca6e2a13c1309101ad8f5cdf82bd
+--- src/lib.rs
++++ src/lib.rs
+@@ -20,1 +20,1 @@
+-        acc += i;
++        acc -= i;
+skipped src/lib.rs arithmetic/assignment
+  ID: f85d0fadba96d659349c5e5a2fdc31ec
+  Blacklist checksum: 9c4aaf7a731cd5c166f86ad0c5b16e85
+  mutant did not compile: Compiling pricing v0.1.0 (/tmp/mutarust-9-0)
+error[E0308]: mismatched types
+  --> src/lib.rs:20:15
+   |
+18 |     let mut acc = 0;
+   |                   - expected due to this value
+19 |     for i in items {
+20 |         acc = i;
+   |               ^ expected integer, found `&u32`
+
+For more information about this error, try `rustc --explain E0308`.
+error: could not compile `pricing` (lib test) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `pricing` (lib) due to 1 previous error
+killed src/lib.rs arithmetic/base
+  ID: b7784cbb1abce0221e79c27ef84e0604
+  Blacklist checksum: 8da4b8b40f9e5005530310c65656d280
+killed src/lib.rs arithmetic/base
+  ID: 9150d9b0adc70b941caf29d38ad5ce0e
+  Blacklist checksum: d59616514a49bfdf67591783ab1012ca
+killed src/lib.rs arithmetic/base
+  ID: 6c58e8964a445a64f88e2343b7b4952e
+  Blacklist checksum: cf1557230ed02f6a0e9f28fca892cd05
+skipped src/lib.rs branch/else
+  ID: 4c54a832e3d4f71e6f191828d3d625b4
+  Blacklist checksum: 541020e59bc8110002dab23247e4b6c6
+  mutant did not compile: Compiling pricing v0.1.0 (/tmp/mutarust-9-0)
+error[E0308]: mismatched types
+ --> src/lib.rs:4:12
+  |
+4 |       } else {
+  |  ____________^
+5 | |         
+6 | |     }
+  | |_____^ expected `u32`, found `()`
+
+For more information about this error, try `rustc --explain E0308`.
+error: could not compile `pricing` (lib) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `pricing` (lib test) due to 1 previous error
+skipped src/lib.rs branch/if
+  ID: dbb528a1813a533eacfa0c68067470f4
+  Blacklist checksum: 28ff5f16c8691f6ce3979c4c3e4d855e
+  mutant did not compile: Compiling pricing v0.1.0 (/tmp/mutarust-9-0)
+error[E0308]: mismatched types
+ --> src/lib.rs:2:30
+  |
+2 |       if member && total > 100 {
+  |  ______________________________^
+3 | |         
+4 | |     } else {
+  | |_____^ expected `u32`, found `()`
+
+For more information about this error, try `rustc --explain E0308`.
+error: could not compile `pricing` (lib) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `pricing` (lib test) due to 1 previous error
+killed src/lib.rs conditional/negated
+  ID: 38f5267a4baf4a06a50ec14e79711a81
+  Blacklist checksum: f9778754184a89e57df8ab9d3fc717ce
+killed src/lib.rs conditional/negated
+  ID: adc4bd7f588568e1b326da509bf1a8a1
+  Blacklist checksum: 70803c511e93bc07487a7e75f5a16224
+escaped src/lib.rs expression/comparison
+  ID: ef6d34a747a2e14d0ad69fee65ef5b55
+  Blacklist checksum: f0e3fe431dc09cc82a126d04dfcad03a
+--- src/lib.rs
++++ src/lib.rs
+@@ -2,1 +2,1 @@
+-    if member && total > 100 {
++    if member && total >= 100 {
+escaped src/lib.rs expression/logical
+  ID: e418aa14c5458b786f07fb609cc7d01b
+  Blacklist checksum: 1c1908e0045468abd9b40fab9c0e197d
+--- src/lib.rs
++++ src/lib.rs
+@@ -2,1 +2,1 @@
+-    if member && total > 100 {
++    if member || total > 100 {
+escaped src/lib.rs expression/remove
+  ID: 715e22042cc22fef6c8d9a11f2b22301
+  Blacklist checksum: 72adb986a91ea794d5cbc289845425d6
+--- src/lib.rs
++++ src/lib.rs
+@@ -2,1 +2,1 @@
+-    if member && total > 100 {
++    if true && total > 100 {
+escaped src/lib.rs expression/remove
+  ID: 01e37bdb0a74b26ac4a668c7a720125b
+  Blacklist checksum: 3ffafb420158124405cf05a2e8917188
+--- src/lib.rs
++++ src/lib.rs
+@@ -2,1 +2,1 @@
+-    if member && total > 100 {
++    if member && true {
+escaped src/lib.rs loop/range_break
+  ID: 7aab759bbe5b7814ff75270897e567cb
+  Blacklist checksum: 59485040abc19632629a00811bcbc7dd
+--- src/lib.rs
++++ src/lib.rs
+@@ -19,1 +19,1 @@
+-    for i in items {
++    for i in items { break;
+escaped src/lib.rs numbers/decrementer
+  ID: 6b7a08ff40c5b3631c64ff5c1c4998ef
+  Blacklist checksum: 0a8ed6e16ac68ce30523d0779d8df3f1
+--- src/lib.rs
++++ src/lib.rs
+@@ -2,1 +2,1 @@
+-    if member && total > 100 {
++    if member && total > 99 {
+killed src/lib.rs numbers/decrementer
+  ID: df193ab97bd902447fae76ae6855c97d
+  Blacklist checksum: d09106f9f6b45beb02fa3782da8b395d
+skipped src/lib.rs numbers/decrementer
+  ID: 6a5e1f0449a9944f903f12ca58f3fde7
+  Blacklist checksum: 20b6422c3f46967ba71cd3a59ef233b8
+  mutant did not compile: Compiling pricing v0.1.0 (/tmp/mutarust-9-0)
+error[E0600]: cannot apply unary operator `-` to type `u32`
+  --> src/lib.rs:10:14
+   |
+10 |     total == -1
+   |              ^^ cannot apply unary operator `-`
+   |
+   = note: unsigned values cannot be negated
+help: you may have meant the maximum value of `u32`
+   |
+10 |     total == u32::MAX
+   |              ~~~~~~~~
+
+For more information about this error, try `rustc --explain E0600`.
+error: could not compile `pricing` (lib test) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `pricing` (lib) due to 1 previous error
+killed src/lib.rs numbers/decrementer
+  ID: 6342f7a584a50a27b68ed4b013fe602b
+  Blacklist checksum: 30f1f1631fca6aed8350d9532abd53ec
+escaped src/lib.rs numbers/decrementer
+  ID: 814f9b494ca8eb48402ed41388362901
+  Blacklist checksum: f8994fd90937768eb6c20f58998b53ad
+--- src/lib.rs
++++ src/lib.rs
+@@ -14,1 +14,1 @@
+-    total * 20 / 100
++    total * 20 / 99
+skipped src/lib.rs numbers/decrementer
+  ID: be364a581f60cf6b5f9039e13b076ace
+  Blacklist checksum: a9d8800f6873b8fa3b3d848d038b08c7
+  mutant did not compile: Compiling pricing v0.1.0 (/tmp/mutarust-9-0)
+error[E0277]: the trait bound `u32: Neg` is not satisfied
+  --> src/lib.rs:18:19
+   |
+18 |     let mut acc = -1;
+   |                   ^^ the trait `Neg` is not implemented for `u32`
+   |
+   = help: the following other types implement trait `Neg`:
+             &f128
+             &f16
+             &f32
+             &f64
+             &i128
+             &i16
+             &i32
+             &i64
+           and 12 others
+
+For more information about this error, try `rustc --explain E0277`.
+error: could not compile `pricing` (lib) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `pricing` (lib test) due to 1 previous error
+escaped src/lib.rs numbers/incrementer
+  ID: c606e54b404e6674b92a9ac7e0148c80
+  Blacklist checksum: 234e14922120e38dc4ed60c0fbe08951
+--- src/lib.rs
++++ src/lib.rs
+@@ -2,1 +2,1 @@
+-    if member && total > 100 {
++    if member && total > 101 {
+killed src/lib.rs numbers/incrementer
+  ID: b7eeb121460e700de52f95ee0faefe11
+  Blacklist checksum: 9b2936d1f8f79488a50406ddea0a3a29
+killed src/lib.rs numbers/incrementer
+  ID: 64290818d02425aaebe8938f65640857
+  Blacklist checksum: 52275972b7fed5e2029a465bbe062c51
+killed src/lib.rs numbers/incrementer
+  ID: 5fb44e21e29ad94c60893f50a60b74b7
+  Blacklist checksum: 60c20f10129a850c282c3ae629e05e05
+killed src/lib.rs numbers/incrementer
+  ID: 023e960f4a12f8612b958ece32443fe2
+  Blacklist checksum: fd8bf1b28a94d9eaab7ae7feccc93ca0
+escaped src/lib.rs numbers/incrementer
+  ID: 2bb748d69c48c9ba927e7cd0f1b99314
+  Blacklist checksum: 40bd75fad426e308e81be2c955b8bf9e
+--- src/lib.rs
++++ src/lib.rs
+@@ -18,1 +18,1 @@
+-    let mut acc = 0;
++    let mut acc = 1;
+escaped src/lib.rs statement/remove
+  ID: 7d1fd02ae2c1b2fdf12a8e30652ad8a6
+  Blacklist checksum: 7d3b6c3203b213303663c3dcc8d37c12
+--- src/lib.rs
++++ src/lib.rs
+@@ -20,1 +20,1 @@
+-        acc += i;
++        
+Killed: 11
+Escaped: 11
+Errored: 0
+Not covered: 0
+Skipped: 5
+Total: 27
+Mutation score: 59.26%
+Per-mutator results:
+Mutator | Killed | Escaped | Skipped | Total
+arithmetic/assign_invert | 0 | 1 | 0 | 1
+arithmetic/assignment | 0 | 0 | 1 | 1
+arithmetic/base | 3 | 0 | 0 | 3
+branch/else | 0 | 0 | 1 | 1
+branch/if | 0 | 0 | 1 | 1
+conditional/negated | 2 | 0 | 0 | 2
+expression/comparison | 0 | 1 | 0 | 1
+expression/logical | 0 | 1 | 0 | 1
+expression/remove | 0 | 2 | 0 | 2
+loop/range_break | 0 | 1 | 0 | 1
+numbers/decrementer | 2 | 2 | 2 | 6
+numbers/incrementer | 4 | 2 | 0 | 6
+statement/remove | 0 | 1 | 0 | 1

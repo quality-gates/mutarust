@@ -1,0 +1,85 @@
+== c1
+exclude_dirs: [src/gen]
+skip_with_cfg: true
+EXIT=0
+src/lib.rs conditional/negated +    x <= 1
+src/lib.rs expression/comparison +    x >= 1
+src/lib.rs expression/comparison +    x >= 3
+src/lib.rs expression/comparison +    x >= 4
+src/lib.rs numbers/decrementer +    x > 0
+src/lib.rs numbers/decrementer +    x > 2
+src/lib.rs numbers/decrementer +    x > 3
+src/lib.rs numbers/incrementer +    x > 2
+src/lib.rs numbers/incrementer +    x > 4
+src/lib.rs numbers/incrementer +    x > 5
+src/other.rs conditional/negated +    x <= 9
+src/other.rs expression/comparison +    x >= 9
+src/other.rs numbers/decrementer +    x > 8
+src/other.rs numbers/incrementer +    x > 10
+Total: 14
+== c2
+skip_without_test: true
+EXIT=0
+src/lib.rs conditional/negated +    x <= 1
+src/lib.rs conditional/negated +    x <= 6
+src/lib.rs expression/comparison +    x >= 1
+src/lib.rs expression/comparison +    x >= 3
+src/lib.rs expression/comparison +    x >= 4
+src/lib.rs expression/comparison +    x >= 6
+src/lib.rs numbers/decrementer +    x > 0
+src/lib.rs numbers/decrementer +    x > 2
+src/lib.rs numbers/decrementer +    x > 3
+src/lib.rs numbers/decrementer +    x > 5
+src/lib.rs numbers/incrementer +    x > 2
+src/lib.rs numbers/incrementer +    x > 4
+src/lib.rs numbers/incrementer +    x > 5
+src/lib.rs numbers/incrementer +    x > 7
+Total: 14
+== c3
+enable_mutators: ["numbers/*"]
+disable_mutators: [numbers/decrementer]
+ignore_source_lines: ["x > 1$"]
+EXIT=0
+src/gen/mod.rs numbers/incrementer +    x > 9
+src/lib.rs numbers/incrementer +    x > 4
+src/lib.rs numbers/incrementer +    x > 5
+src/lib.rs numbers/incrementer +    x > 7
+src/other.rs numbers/incrementer +    x > 10
+Total: 5
+== c4
+exclude_dirs: [./src/gen/]
+EXIT=0
+src/gen/mod.rs conditional/negated +    x <= 8
+src/gen/mod.rs expression/comparison +    x >= 8
+src/gen/mod.rs numbers/decrementer +    x > 7
+src/gen/mod.rs numbers/incrementer +    x > 9
+src/lib.rs conditional/negated +    x <= 1
+src/lib.rs conditional/negated +    x <= 6
+src/lib.rs expression/comparison +    x >= 1
+src/lib.rs expression/comparison +    x >= 3
+src/lib.rs expression/comparison +    x >= 4
+src/lib.rs expression/comparison +    x >= 6
+src/lib.rs numbers/decrementer +    x > 0
+src/lib.rs numbers/decrementer +    x > 2
+src/lib.rs numbers/decrementer +    x > 3
+src/lib.rs numbers/decrementer +    x > 5
+src/lib.rs numbers/incrementer +    x > 2
+src/lib.rs numbers/incrementer +    x > 4
+src/lib.rs numbers/incrementer +    x > 5
+src/lib.rs numbers/incrementer +    x > 7
+src/other.rs conditional/negated +    x <= 9
+src/other.rs expression/comparison +    x >= 9
+src/other.rs numbers/decrementer +    x > 8
+src/other.rs numbers/incrementer +    x > 10
+Total: 22
+== match
++    x <= 1
++    x >= 1
++    x > 0
++    x > 2
+Total: 4
+== enable cli
++    x <= 8
++    x <= 6
++    x <= 9
+Total: 3
