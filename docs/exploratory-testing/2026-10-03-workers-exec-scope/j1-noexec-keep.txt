@@ -1,0 +1,102 @@
+generated src/lib.rs conditional/negated
+  ID: adc4bd7f588568e1b326da509bf1a8a1
+  Blacklist checksum: 70803c511e93bc07487a7e75f5a16224
+  mutation area: /tmp/mutarust-7-0
+generated src/lib.rs numbers/decrementer
+  ID: 6a5e1f0449a9944f903f12ca58f3fde7
+  Blacklist checksum: 20b6422c3f46967ba71cd3a59ef233b8
+  mutation area: /tmp/mutarust-7-1
+generated src/lib.rs numbers/incrementer
+  ID: 64290818d02425aaebe8938f65640857
+  Blacklist checksum: 52275972b7fed5e2029a465bbe062c51
+  mutation area: /tmp/mutarust-7-2
+Generated: 3
+No tests run. Generated mutations are in the mutation areas above.
+EXIT=0
+-- /tmp/mutarust-7-0
+Cargo.toml
+check.sh
+code.sh
+src
+10c10
+<     total == 0
+---
+>     total != 0
+-- /tmp/mutarust-7-1
+Cargo.toml
+check.sh
+code.sh
+src
+10c10
+<     total == 0
+---
+>     total == -1
+-- /tmp/mutarust-7-2
+Cargo.toml
+check.sh
+code.sh
+src
+10c10
+<     total == 0
+---
+>     total == 1
+== keep
+killed src/lib.rs conditional/negated
+  ID: adc4bd7f588568e1b326da509bf1a8a1
+  Blacklist checksum: 70803c511e93bc07487a7e75f5a16224
+  mutation area: /tmp/mutarust-29-1
+skipped src/lib.rs numbers/decrementer
+  ID: 6a5e1f0449a9944f903f12ca58f3fde7
+  Blacklist checksum: 20b6422c3f46967ba71cd3a59ef233b8
+  mutant did not compile: Compiling pricing v0.1.0 (/tmp/mutarust-29-2)
+error[E0600]: cannot apply unary operator `-` to type `u32`
+  --> src/lib.rs:10:14
+   |
+10 |     total == -1
+   |              ^^ cannot apply unary operator `-`
+   |
+   = note: unsigned values cannot be negated
+help: you may have meant the maximum value of `u32`
+   |
+10 |     total == u32::MAX
+   |              ~~~~~~~~
+
+For more information about this error, try `rustc --explain E0600`.
+error: could not compile `pricing` (lib) due to 1 previous error; mutation area: /tmp/mutarust-29-2
+killed src/lib.rs numbers/incrementer
+  ID: 64290818d02425aaebe8938f65640857
+  Blacklist checksum: 52275972b7fed5e2029a465bbe062c51
+  mutation area: /tmp/mutarust-29-3
+Killed: 2
+Escaped: 0
+Errored: 0
+Not covered: 0
+Skipped: 1
+Total: 3
+Mutation score: 100.00%
+Per-mutator results:
+Mutator | Killed | Escaped | Skipped | Total
+conditional/negated | 1 | 0 | 0 | 1
+numbers/decrementer | 0 | 0 | 1 | 1
+numbers/incrementer | 1 | 0 | 0 | 1
+EXIT=0
+/tmp/mutarust-29-1
+/tmp/mutarust-29-2
+/tmp/mutarust-29-3
+7.7M	/tmp/mutarust-29-1
+124K	/tmp/mutarust-29-2
+7.7M	/tmp/mutarust-29-3
+10c10
+<     total == 0
+---
+>     total != 0
+10c10
+<     total == 0
+---
+>     total == -1
+10c10
+<     total == 0
+---
+>     total == 1
+?? check.sh
+?? code.sh

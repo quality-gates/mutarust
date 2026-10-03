@@ -1,0 +1,23 @@
+/work/scope/src/other.rs
+File {
+    shebang: None,
+    frontmatter: None,
+    attrs: [],
+    items: [
+        Item::Fn {
+            attrs: [],
+            vis: Visibility::Public(
+                Token![pub],
+            ),
+            modifiers: FnModifiers {
+EXIT=0
+126
+== completion
+--logger-summary-json
+--logger-agentic-json
+--logger-github
+--logger-gitlab
+EXIT=2
+--workers
+EXIT=2
+EXIT=2

@@ -1,0 +1,10 @@
+EXIT=0
+Total: 14
+Mutation score: 42.86%
+workers=1 wall=151
+0
+EXIT=0
+Total: 14
+Mutation score: 64.29%
+workers=4 wall=288
+0

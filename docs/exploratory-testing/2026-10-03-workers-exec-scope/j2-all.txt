@@ -1,0 +1,189 @@
+escaped src/gen/mod.rs conditional/negated
+  ID: 16c180b5048ad6cd632a487ba239f24e
+  Blacklist checksum: 5ac17f0f02e4ad3be9303e9faf682547
+--- src/gen/mod.rs
++++ src/gen/mod.rs
+@@ -2,1 +2,1 @@
+-    x > 8
++    x <= 8
+escaped src/gen/mod.rs expression/comparison
+  ID: 717a1bba2665087999ac88f8a3da4de4
+  Blacklist checksum: ba1e156d3f498d3ad59d58c79e4bd349
+--- src/gen/mod.rs
++++ src/gen/mod.rs
+@@ -2,1 +2,1 @@
+-    x > 8
++    x >= 8
+escaped src/gen/mod.rs numbers/decrementer
+  ID: f4820e12cf3cce2ba5e12b69594fc426
+  Blacklist checksum: 3876a21c1a54b83b04556d299b61dcdf
+--- src/gen/mod.rs
++++ src/gen/mod.rs
+@@ -2,1 +2,1 @@
+-    x > 8
++    x > 7
+escaped src/gen/mod.rs numbers/incrementer
+  ID: 84c163ae62a1dbaadfe6ce1e2c0c9ceb
+  Blacklist checksum: 29185483cf37969b2804cc67ee90f58e
+--- src/gen/mod.rs
++++ src/gen/mod.rs
+@@ -2,1 +2,1 @@
+-    x > 8
++    x > 9
+escaped src/lib.rs conditional/negated
+  ID: 2d5e988aef63c86d929dabaaba13db51
+  Blacklist checksum: 2d8778eb89724e2bbc659e47684aa8c6
+--- src/lib.rs
++++ src/lib.rs
+@@ -5,1 +5,1 @@
+-    x > 1
++    x <= 1
+escaped src/lib.rs conditional/negated
+  ID: 9231ac8aeb7dc422b373d8f7584f5831
+  Blacklist checksum: 09a5cdeee9ba350520ca2ad540175f30
+--- src/lib.rs
++++ src/lib.rs
+@@ -32,1 +32,1 @@
+-    x > 6
++    x <= 6
+escaped src/lib.rs expression/comparison
+  ID: 4b826061b4a8b7094121878df50b919d
+  Blacklist checksum: 92895150bf7426a71c6fc64dc41a67c5
+--- src/lib.rs
++++ src/lib.rs
+@@ -5,1 +5,1 @@
+-    x > 1
++    x >= 1
+escaped src/lib.rs expression/comparison
+  ID: 26d445265dfb014be92f41f71a0b42e6
+  Blacklist checksum: ff20317a563a017fde3feb20c2dbd1dd
+--- src/lib.rs
++++ src/lib.rs
+@@ -17,1 +17,1 @@
+-    x > 3
++    x >= 3
+escaped src/lib.rs expression/comparison
+  ID: 11cb9fe984c78e93c4d8df5cd82bbd14
+  Blacklist checksum: b9f4b2173954d5578528b27b0b54f8cc
+--- src/lib.rs
++++ src/lib.rs
+@@ -22,1 +22,1 @@
+-    x > 4
++    x >= 4
+escaped src/lib.rs expression/comparison
+  ID: 5a9f4c4fbd2e7fbd1bb4cadfbf8f4a1d
+  Blacklist checksum: 5383ec5a461c84c65b119423352fea03
+--- src/lib.rs
++++ src/lib.rs
+@@ -32,1 +32,1 @@
+-    x > 6
++    x >= 6
+escaped src/lib.rs numbers/decrementer
+  ID: 7646329579521826ab6bec5580816065
+  Blacklist checksum: 19032af60e583988107e833f11ad3dca
+--- src/lib.rs
++++ src/lib.rs
+@@ -5,1 +5,1 @@
+-    x > 1
++    x > 0
+escaped src/lib.rs numbers/decrementer
+  ID: 3c5602f76a7af2b0b9331c8b564a682b
+  Blacklist checksum: 4b96ca1aad171f116657422942a2472f
+--- src/lib.rs
++++ src/lib.rs
+@@ -17,1 +17,1 @@
+-    x > 3
++    x > 2
+escaped src/lib.rs numbers/decrementer
+  ID: 03a083ff267740a459710fe41de45a03
+  Blacklist checksum: e69c3c39e86336a41b916b5fd226a580
+--- src/lib.rs
++++ src/lib.rs
+@@ -22,1 +22,1 @@
+-    x > 4
++    x > 3
+escaped src/lib.rs numbers/decrementer
+  ID: a97462795950ee675f3401b84ee821bf
+  Blacklist checksum: bb07da55c82f230e1b9ae5608e6391ed
+--- src/lib.rs
++++ src/lib.rs
+@@ -32,1 +32,1 @@
+-    x > 6
++    x > 5
+escaped src/lib.rs numbers/incrementer
+  ID: 331198cdd804eb53e1abc436d01baa83
+  Blacklist checksum: ada4491ab352fc3fb235c07a0b508aa0
+--- src/lib.rs
++++ src/lib.rs
+@@ -5,1 +5,1 @@
+-    x > 1
++    x > 2
+escaped src/lib.rs numbers/incrementer
+  ID: 905920efe137df710880c72859266411
+  Blacklist checksum: 995297aa54d5e152632ecc7b6e4771ca
+--- src/lib.rs
++++ src/lib.rs
+@@ -17,1 +17,1 @@
+-    x > 3
++    x > 4
+escaped src/lib.rs numbers/incrementer
+  ID: b9f1e9fccf71c0238282245f8c68e6c4
+  Blacklist checksum: 8cdc03fc5a739bf6144d68742ee92d72
+--- src/lib.rs
++++ src/lib.rs
+@@ -22,1 +22,1 @@
+-    x > 4
++    x > 5
+escaped src/lib.rs numbers/incrementer
+  ID: 2ef8607b58e5690a4de572b08fd1b334
+  Blacklist checksum: 9a7dcfbea574dba70dde653c3fb68ef9
+--- src/lib.rs
++++ src/lib.rs
+@@ -32,1 +32,1 @@
+-    x > 6
++    x > 7
+escaped src/other.rs conditional/negated
+  ID: a7bfe50b0ef3cf3229a22e9edcc13f66
+  Blacklist checksum: 65f66bcc46604386ec4abfbf9387b2ad
+--- src/other.rs
++++ src/other.rs
+@@ -2,1 +2,1 @@
+-    x > 9
++    x <= 9
+escaped src/other.rs expression/comparison
+  ID: 615ef4bfadd3587e277520a77e001b1c
+  Blacklist checksum: 54d6389300124daea8ecde0aa669d75a
+--- src/other.rs
++++ src/other.rs
+@@ -2,1 +2,1 @@
+-    x > 9
++    x >= 9
+escaped src/other.rs numbers/decrementer
+  ID: 036ec1109817047f56afb61323aea7ee
+  Blacklist checksum: 8607b730fcc6ebdb83ac5e562294144b
+--- src/other.rs
++++ src/other.rs
+@@ -2,1 +2,1 @@
+-    x > 9
++    x > 8
+escaped src/other.rs numbers/incrementer
+  ID: e7548ce1f1a73a755d0206c3603a110b
+  Blacklist checksum: aaab8e2a503a4fa9dc7e71aa1e8f7061
+--- src/other.rs
++++ src/other.rs
+@@ -2,1 +2,1 @@
+-    x > 9
++    x > 10
+Killed: 0
+Escaped: 22
+Errored: 0
+Not covered: 0
+Skipped: 0
+Total: 22
+Mutation score: 0.00%
+Per-mutator results:
+Mutator | Killed | Escaped | Skipped | Total
+conditional/negated | 0 | 4 | 0 | 4
+expression/comparison | 0 | 6 | 0 | 6
+numbers/decrementer | 0 | 6 | 0 | 6
+numbers/incrementer | 0 | 6 | 0 | 6
