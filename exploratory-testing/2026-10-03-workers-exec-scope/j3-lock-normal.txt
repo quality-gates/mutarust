@@ -1,0 +1,6 @@
+EXIT=0
+66819554 -rw-r--r-- 1 root root  0 Oct  3 00:33 /tmp/mutarust-11-0/target/debug/.cargo-lock
+66819554 -rw-r--r-- 1 root root 0 Oct  3 00:33 /tmp/mutarust-11-0/target/debug/.cargo-lock
+66819638 lrwxrwxrwx 1 root root 43 Oct  3 00:33 /tmp/mutarust-11-1/target/debug/.cargo-lock -> /tmp/mutarust-11-0/target/debug/.cargo-lock
+66819639 lrwxrwxrwx 1 root root 43 Oct  3 00:33 /tmp/mutarust-11-2/target/debug/.cargo-lock -> /tmp/mutarust-11-0/target/debug/.cargo-lock
+4

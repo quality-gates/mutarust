@@ -1,0 +1,6 @@
+/work/scope/src/gen/mod.rs
+/work/scope/src/lib.rs
+/work/scope/src/other.rs
+Total: 22 mutation(s) would be generated. No files written, no tests run.
+EXIT=0
+Total: 22 mutation(s) would be generated. No files written, no tests run.

@@ -1,0 +1,36 @@
+== --exec ./nope.sh
+mutarust: could not run custom command: program not found: ./nope.sh
+EXIT=0
+== --exec ""
+mutarust: custom command must not be empty
+EXIT=0
+== --exec "a \"b"
+mutarust: could not parse custom command: missing closing quote
+EXIT=0
+== --exec ./code.sh --test-flags -q
+mutarust: --test-flags cannot be used with --exec
+EXIT=0
+== --exec ./code.sh --timeout-coefficient 2
+mutarust: --timeout-coefficient requires the Cargo test command
+EXIT=0
+== --exec ./code.sh --coverage
+mutarust: --coverage requires the Cargo test command
+EXIT=0
+== --no-exec --exec ./code.sh
+mutarust: --no-exec cannot be used with --exec
+EXIT=0
+== --exec ./check.sh --workers 3
+Mutator | Killed | Escaped | Skipped | Total
+conditional/negated | 1 | 0 | 0 | 1
+numbers/decrementer | 1 | 0 | 0 | 1
+numbers/incrementer | 1 | 0 | 0 | 1
+EXIT=0
+== --exec ./nope.sh
+mutarust: could not run custom command: program not found: ./nope.sh
+EXIT=3
+== --exec ""
+mutarust: custom command must not be empty
+EXIT=3
+== --exec ./code.sh --test-flags -q
+mutarust: --test-flags cannot be used with --exec
+EXIT=3

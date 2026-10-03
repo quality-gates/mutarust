@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Mutation Testing Report</title>
+    <style>
+        :root {
+            --theme-palette-green800: #02d15c;
+            --theme-palette-blue800: #0099f7;
+            --theme-palette-red600: #ff4053;
+            --theme-palette-violet600: #965eeb;
+            --theme-palette-gray50: #f9fafb;
+            --theme-palette-gray100: #f3f4f6;
+            --theme-palette-gray200: #e5e7eb;
+            --theme-palette-gray600: #4b5563;
+            --theme-palette-gray800: #1f2937;
+            --theme-palette-yellow500: #f59e0b;
+            --border-radius: 8px;
+            --box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+            --transition: all 0.3s ease;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: linear-gradient(135deg, var(--theme-palette-gray100), var(--theme-palette-gray50));
+            background-attachment: fixed;
+            color: var(--theme-palette-gray800);
+            line-height: 1.6;
+            padding: 20px;
+        }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 30px;
+            background: white;
+            border-radius: var(--border-radius);
+            box-shadow: var(--box-shadow);
+            border-left: 4px solid var(--theme-palette-violet600);
+        }
+        .header h1 { font-size: 2.2rem; margin-bottom: 10px; color: var(--theme-palette-violet600); }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: var(--border-radius);
+            box-shadow: var(--box-shadow);
+            text-align: center;
+            transition: var(--transition);
+            border-top: 3px solid var(--theme-palette-blue800);
+        }
+        .stat-card.killed { border-top-color: var(--theme-palette-green800); }
+        .stat-card.escaped { border-top-color: var(--theme-palette-red600); }
+        .stat-card.msi, .stat-card.covered { border-top-color: var(--theme-palette-violet600); }
+        .stat-value { font-size: 2rem; font-weight: bold; margin: 10px 0; }
+        .stat-label { font-size: 1rem; color: var(--theme-palette-gray600); font-weight: 500; }
+        .mutator-table-wrap {
+            background: white;
+            border-radius: var(--border-radius);
+            box-shadow: var(--box-shadow);
+            padding: 20px;
+            margin-bottom: 25px;
+        }
+        .mutator-table-wrap h2 { margin-bottom: 12px; font-size: 1.2rem; }
+        .mutator-table { width: 100%; border-collapse: collapse; }
+        .mutator-table th, .mutator-table td {
+            border-bottom: 1px solid var(--theme-palette-gray200);
+            padding: 8px 10px;
+            text-align: left;
+        }
+        .warning-box {
+            background: linear-gradient(90deg, #fff9e6, #fff5d6);
+            border: 1px solid #fde68a;
+            border-radius: var(--border-radius);
+            padding: 20px;
+            margin-bottom: 25px;
+            box-shadow: var(--box-shadow);
+            border-left: 4px solid var(--theme-palette-yellow500);
+        }
+        .warning-box-header { margin-bottom: 10px; color: #92400e; font-weight: 600; }
+        .warning-box-content { color: #92400e; }
+        .empty {
+            background: white;
+            padding: 20px;
+            border-radius: var(--border-radius);
+            box-shadow: var(--box-shadow);
+            text-align: center;
+        }
+        .file {
+            background: white;
+            margin-bottom: 15px;
+            border-radius: var(--border-radius);
+            box-shadow: var(--box-shadow);
+            overflow: hidden;
+        }
+        .file-header {
+            background: linear-gradient(90deg, var(--theme-palette-gray100), var(--theme-palette-gray50));
+            padding: 15px 20px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--theme-palette-gray200);
+        }
+        .file-header-info { display: flex; align-items: center; gap: 10px; }
+        .file-header::after { content: "▼"; font-size: 0.8rem; color: var(--theme-palette-violet600); }
+        .file.expanded .file-header::after { transform: rotate(180deg); }
+        .file-content { max-height: 0; overflow: hidden; }
+        .file.expanded .file-content { max-height: 10000px; padding: 15px 20px; }
+        .mutator { margin-bottom: 15px; border: 1px solid var(--theme-palette-gray200); border-radius: 6px; overflow: hidden; }
+        .mutator-header {
+            padding: 12px 15px;
+            background: white;
+            font-weight: 500;
+            cursor: pointer;
+        }
+        .mutator-header::after { content: "▶"; float: right; font-size: 0.7rem; color: var(--theme-palette-blue800); }
+        .mutator.expanded .mutator-header::after { transform: rotate(90deg); display: inline-block; }
+        .mutator-content { max-height: 0; overflow: hidden; background: var(--theme-palette-gray50); }
+        .mutator.expanded .mutator-content { max-height: 2000px; padding: 15px; }
+        .diff h3 { margin: 0 0 10px 0; font-size: 0.95rem; }
+        .diff-content {
+            background: white;
+            border-radius: 4px;
+            border: 1px solid var(--theme-palette-gray200);
+            overflow: hidden;
+        }
+        .diff-line {
+            font-family: 'Monaco', 'Consolas', monospace;
+            font-size: 12px;
+            padding: 3px 10px;
+            white-space: pre;
+        }
+        .diff-line.removed { background-color: rgba(255, 64, 83, 0.1); color: var(--theme-palette-red600); }
+        .diff-line.added { background-color: rgba(2, 209, 92, 0.1); color: var(--theme-palette-green800); }
+        .controls { text-align: center; margin-bottom: 20px; }
+        .control-btn {
+            background: var(--theme-palette-violet600);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            margin: 0 5px;
+        }
+        .mutator-count {
+            background: var(--theme-palette-gray200);
+            color: var(--theme-palette-gray600);
+            padding: 3px 10px;
+            border-radius: 15px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+        <div class="header">
+            <h1>Mutation Testing Report</h1>
+            <p>Detailed analysis of code mutation results</p>
+        </div>
+        <div class="stats-grid"><div class="stat-card total"><div class="stat-value">27</div><div class="stat-label">Total Mutants</div></div><div class="stat-card killed"><div class="stat-value">11</div><div class="stat-label">Killed</div></div><div class="stat-card escaped"><div class="stat-value">11</div><div class="stat-label">Escaped</div></div><div class="stat-card errored"><div class="stat-value">0</div><div class="stat-label">Errored</div></div><div class="stat-card not-covered"><div class="stat-value">0</div><div class="stat-label">Not covered</div></div><div class="stat-card skipped"><div class="stat-value">5</div><div class="stat-label">Skipped</div></div><div class="stat-card msi"><div class="stat-value">59.26%</div><div class="stat-label">Mutation score</div></div><div class="stat-card covered"><div class="stat-value">0%</div><div class="stat-label">Covered-code mutation score</div></div></div><div class="mutator-table-wrap"><h2>Per-mutator results</h2><table class="mutator-table"><thead><tr><th>Mutator</th><th>Killed</th><th>Escaped</th><th>Skipped</th><th>Total</th></tr></thead><tbody><tr><td>arithmetic/assign_invert</td><td>0</td><td>1</td><td>0</td><td>1</td></tr><tr><td>arithmetic/assignment</td><td>0</td><td>0</td><td>1</td><td>1</td></tr><tr><td>arithmetic/base</td><td>3</td><td>0</td><td>0</td><td>3</td></tr><tr><td>branch/else</td><td>0</td><td>0</td><td>1</td><td>1</td></tr><tr><td>branch/if</td><td>0</td><td>0</td><td>1</td><td>1</td></tr><tr><td>conditional/negated</td><td>2</td><td>0</td><td>0</td><td>2</td></tr><tr><td>expression/comparison</td><td>0</td><td>1</td><td>0</td><td>1</td></tr><tr><td>expression/logical</td><td>0</td><td>1</td><td>0</td><td>1</td></tr><tr><td>expression/remove</td><td>0</td><td>2</td><td>0</td><td>2</td></tr><tr><td>loop/range_break</td><td>0</td><td>1</td><td>0</td><td>1</td></tr><tr><td>numbers/decrementer</td><td>2</td><td>2</td><td>2</td><td>6</td></tr><tr><td>numbers/incrementer</td><td>4</td><td>2</td><td>0</td><td>6</td></tr><tr><td>statement/remove</td><td>0</td><td>1</td><td>0</td><td>1</td></tr></tbody></table></div><div class="warning-box">
+            <div class="warning-box-header"><span>Important Notice</span></div>
+            <div class="warning-box-content">
+                This report displays only <strong>escaped mutants</strong> that require attention.
+                Killed mutants are not shown in detail.
+            </div>
+        </div>
+        <div class="controls">
+            <button class="control-btn" onclick="expandAll()">Expand All Files</button>
+            <button class="control-btn" onclick="collapseAll()">Collapse All Files</button>
+        </div><div class="file"><div class="file-header" onclick="toggleFile(this)"><div class="file-header-info"><span>src/lib.rs</span><span class="mutator-count">11 mutants</span></div></div><div class="file-content"><div class="mutator"><div class="mutator-header" onclick="toggleMutator(this)"><span>888aee432de6e1934d5fc77149e2b762 — arithmetic/assign_invert (line 20)</span></div><div class="mutator-content"><p class="checksum">Blacklist checksum: <code>821cca6e2a13c1309101ad8f5cdf82bd</code></p><div class="diff"><h3>Diff:</h3><div class="diff-content"><div class="diff-line unchanged">--- src/lib.rs</div><div class="diff-line unchanged">+++ src/lib.rs</div><div class="diff-line unchanged">@@ -20,1 +20,1 @@</div><div class="diff-line removed">-        acc += i;</div><div class="diff-line added">+        acc -= i;</div></div></div></div></div><div class="mutator"><div class="mutator-header" onclick="toggleMutator(this)"><span>ef6d34a747a2e14d0ad69fee65ef5b55 — expression/comparison (line 2)</span></div><div class="mutator-content"><p class="checksum">Blacklist checksum: <code>f0e3fe431dc09cc82a126d04dfcad03a</code></p><div class="diff"><h3>Diff:</h3><div class="diff-content"><div class="diff-line unchanged">--- src/lib.rs</div><div class="diff-line unchanged">+++ src/lib.rs</div><div class="diff-line unchanged">@@ -2,1 +2,1 @@</div><div class="diff-line removed">-    if member &amp;&amp; total &gt; 100 {</div><div class="diff-line added">+    if member &amp;&amp; total &gt;= 100 {</div></div></div></div></div><div class="mutator"><div class="mutator-header" onclick="toggleMutator(this)"><span>e418aa14c5458b786f07fb609cc7d01b — expression/logical (line 2)</span></div><div class="mutator-content"><p class="checksum">Blacklist checksum: <code>1c1908e0045468abd9b40fab9c0e197d</code></p><div class="diff"><h3>Diff:</h3><div class="diff-content"><div class="diff-line unchanged">--- src/lib.rs</div><div class="diff-line unchanged">+++ src/lib.rs</div><div class="diff-line unchanged">@@ -2,1 +2,1 @@</div><div class="diff-line removed">-    if member &amp;&amp; total &gt; 100 {</div><div class="diff-line added">+    if member || total &gt; 100 {</div></div></div></div></div><div class="mutator"><div class="mutator-header" onclick="toggleMutator(this)"><span>715e22042cc22fef6c8d9a11f2b22301 — expression/remove (line 2)</span></div><div class="mutator-content"><p class="checksum">Blacklist checksum: <code>72adb986a91ea794d5cbc289845425d6</code></p><div class="diff"><h3>Diff:</h3><div class="diff-content"><div class="diff-line unchanged">--- src/lib.rs</div><div class="diff-line unchanged">+++ src/lib.rs</div><div class="diff-line unchanged">@@ -2,1 +2,1 @@</div><div class="diff-line removed">-    if member &amp;&amp; total &gt; 100 {</div><div class="diff-line added">+    if true &amp;&amp; total &gt; 100 {</div></div></div></div></div><div class="mutator"><div class="mutator-header" onclick="toggleMutator(this)"><span>01e37bdb0a74b26ac4a668c7a720125b — expression/remove (line 2)</span></div><div class="mutator-content"><p class="checksum">Blacklist checksum: <code>3ffafb420158124405cf05a2e8917188</code></p><div class="diff"><h3>Diff:</h3><div class="diff-content"><div class="diff-line unchanged">--- src/lib.rs</div><div class="diff-line unchanged">+++ src/lib.rs</div><div class="diff-line unchanged">@@ -2,1 +2,1 @@</div><div class="diff-line removed">-    if member &amp;&amp; total &gt; 100 {</div><div class="diff-line added">+    if member &amp;&amp; true {</div></div></div></div></div><div class="mutator"><div class="mutator-header" onclick="toggleMutator(this)"><span>7aab759bbe5b7814ff75270897e567cb — loop/range_break (line 19)</span></div><div class="mutator-content"><p class="checksum">Blacklist checksum: <code>59485040abc19632629a00811bcbc7dd</code></p><div class="diff"><h3>Diff:</h3><div class="diff-content"><div class="diff-line unchanged">--- src/lib.rs</div><div class="diff-line unchanged">+++ src/lib.rs</div><div class="diff-line unchanged">@@ -19,1 +19,1 @@</div><div class="diff-line removed">-    for i in items {</div><div class="diff-line added">+    for i in items { break;</div></div></div></div></div><div class="mutator"><div class="mutator-header" onclick="toggleMutator(this)"><span>6b7a08ff40c5b3631c64ff5c1c4998ef — numbers/decrementer (line 2)</span></div><div class="mutator-content"><p class="checksum">Blacklist checksum: <code>0a8ed6e16ac68ce30523d0779d8df3f1</code></p><div class="diff"><h3>Diff:</h3><div class="diff-content"><div class="diff-line unchanged">--- src/lib.rs</div><div class="diff-line unchanged">+++ src/lib.rs</div><div class="diff-line unchanged">@@ -2,1 +2,1 @@</div><div class="diff-line removed">-    if member &amp;&amp; total &gt; 100 {</div><div class="diff-line added">+    if member &amp;&amp; total &gt; 99 {</div></div></div></div></div><div class="mutator"><div class="mutator-header" onclick="toggleMutator(this)"><span>814f9b494ca8eb48402ed41388362901 — numbers/decrementer (line 14)</span></div><div class="mutator-content"><p class="checksum">Blacklist checksum: <code>f8994fd90937768eb6c20f58998b53ad</code></p><div class="diff"><h3>Diff:</h3><div class="diff-content"><div class="diff-line unchanged">--- src/lib.rs</div><div class="diff-line unchanged">+++ src/lib.rs</div><div class="diff-line unchanged">@@ -14,1 +14,1 @@</div><div class="diff-line removed">-    total * 20 / 100</div><div class="diff-line added">+    total * 20 / 99</div></div></div></div></div><div class="mutator"><div class="mutator-header" onclick="toggleMutator(this)"><span>c606e54b404e6674b92a9ac7e0148c80 — numbers/incrementer (line 2)</span></div><div class="mutator-content"><p class="checksum">Blacklist checksum: <code>234e14922120e38dc4ed60c0fbe08951</code></p><div class="diff"><h3>Diff:</h3><div class="diff-content"><div class="diff-line unchanged">--- src/lib.rs</div><div class="diff-line unchanged">+++ src/lib.rs</div><div class="diff-line unchanged">@@ -2,1 +2,1 @@</div><div class="diff-line removed">-    if member &amp;&amp; total &gt; 100 {</div><div class="diff-line added">+    if member &amp;&amp; total &gt; 101 {</div></div></div></div></div><div class="mutator"><div class="mutator-header" onclick="toggleMutator(this)"><span>2bb748d69c48c9ba927e7cd0f1b99314 — numbers/incrementer (line 18)</span></div><div class="mutator-content"><p class="checksum">Blacklist checksum: <code>40bd75fad426e308e81be2c955b8bf9e</code></p><div class="diff"><h3>Diff:</h3><div class="diff-content"><div class="diff-line unchanged">--- src/lib.rs</div><div class="diff-line unchanged">+++ src/lib.rs</div><div class="diff-line unchanged">@@ -18,1 +18,1 @@</div><div class="diff-line removed">-    let mut acc = 0;</div><div class="diff-line added">+    let mut acc = 1;</div></div></div></div></div><div class="mutator"><div class="mutator-header" onclick="toggleMutator(this)"><span>7d1fd02ae2c1b2fdf12a8e30652ad8a6 — statement/remove (line 20)</span></div><div class="mutator-content"><p class="checksum">Blacklist checksum: <code>7d3b6c3203b213303663c3dcc8d37c12</code></p><div class="diff"><h3>Diff:</h3><div class="diff-content"><div class="diff-line unchanged">--- src/lib.rs</div><div class="diff-line unchanged">+++ src/lib.rs</div><div class="diff-line unchanged">@@ -20,1 +20,1 @@</div><div class="diff-line removed">-        acc += i;</div><div class="diff-line added">+        </div></div></div></div></div></div></div></div>
+<script>
+function toggleFile(element) { element.parentElement.classList.toggle('expanded'); }
+function toggleMutator(element) { element.parentElement.classList.toggle('expanded'); }
+function expandAll() {
+  document.querySelectorAll('.file').forEach(file => {
+    file.classList.add('expanded');
+    file.querySelectorAll('.mutator').forEach(mutator => mutator.classList.add('expanded'));
+  });
+}
+function collapseAll() {
+  document.querySelectorAll('.file').forEach(file => {
+    file.classList.remove('expanded');
+    file.querySelectorAll('.mutator').forEach(mutator => mutator.classList.remove('expanded'));
+  });
+}
+</script>
+</body>
+</html>

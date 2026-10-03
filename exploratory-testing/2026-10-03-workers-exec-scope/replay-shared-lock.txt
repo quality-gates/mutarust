@@ -1,0 +1,16 @@
+== replay 1
+mutarust exit: 0
+--- .cargo-lock entries seen during the run:
+ 0 Oct  3 00:57 /tmp/mutarust-8-0/target/debug/.cargo-lock
+0 Oct  3 00:57 /tmp/mutarust-8-0/target/debug/.cargo-lock
+42 Oct  3 00:57 /tmp/mutarust-8-1/target/debug/.cargo-lock -> /tmp/mutarust-8-0/target/debug/.cargo-lock
+42 Oct  3 00:57 /tmp/mutarust-8-2/target/debug/.cargo-lock -> /tmp/mutarust-8-0/target/debug/.cargo-lock
+--- result lines with Cargo lock waits: 1
+== replay 2
+mutarust exit: 0
+--- .cargo-lock entries seen during the run:
+ 0 Oct  3 00:57 /tmp/mutarust-7-0/target/debug/.cargo-lock
+0 Oct  3 00:57 /tmp/mutarust-7-0/target/debug/.cargo-lock
+42 Oct  3 00:57 /tmp/mutarust-7-1/target/debug/.cargo-lock -> /tmp/mutarust-7-0/target/debug/.cargo-lock
+42 Oct  3 00:57 /tmp/mutarust-7-2/target/debug/.cargo-lock -> /tmp/mutarust-7-0/target/debug/.cargo-lock
+--- result lines with Cargo lock waits: 1

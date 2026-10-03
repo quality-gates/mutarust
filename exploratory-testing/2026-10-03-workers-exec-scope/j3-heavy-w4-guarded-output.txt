@@ -1,0 +1,61 @@
+errored src/lib.rs arithmetic/base
+  ID: a73aba57773314967f2adb5178cbe72c
+  Blacklist checksum: de8b1e33a27d7e1e69b38e13db0a01d3
+  cargo test timed out after 60 seconds
+errored src/lib.rs conditional/negated
+  ID: 27883aa516a490b32be316fae6b1ebc1
+  Blacklist checksum: a9523e616400014f57d680143c370daa
+  cargo test timed out after 60 seconds
+killed src/lib.rs conditional/negated
+  ID: 1fec755ac14da5d13b983abee2130a83
+  Blacklist checksum: 2d83f5bfbdfe9f27f42a16e9254a3473
+escaped src/lib.rs expression/comparison
+  ID: 2bccfee0c3a700c1574a5b52911b2358
+  Blacklist checksum: b75ea218e9f33d2d1ad67a0882a9c852
+escaped src/lib.rs expression/comparison
+  ID: 3641fc427fe872353903648c51eecaa0
+  Blacklist checksum: 9fd5e107fd46dfac3e7eafd7ce287fcf
+escaped src/lib.rs expression/logical
+  ID: 648cfcbe677c4b17a5fe6d6150805139
+  Blacklist checksum: 0120f0752f5698afd2146449d224f1b0
+escaped src/lib.rs expression/remove
+  ID: 93376f1e45330be56ce5b2b0bdab6614
+  Blacklist checksum: 4d7b655f6bc3c075ac3b5f8fb912a723
+escaped src/lib.rs expression/remove
+  ID: 509e2f604d269bbb9a6d0d081d671352
+  Blacklist checksum: 4689e5f848ffd659187f8aaa7f6a5623
+escaped src/lib.rs numbers/decrementer
+  ID: 1207769aed9547214918398c3ae16a4a
+  Blacklist checksum: c44cd4f24e67b8dbc63a5a19eb87cfc6
+escaped src/lib.rs numbers/decrementer
+  ID: 5386f8de423a72ac129ff72f91e3aba6
+  Blacklist checksum: b7781e4ca7b0d9af31322264d70dc198
+killed src/lib.rs numbers/decrementer
+  ID: 2dab709e0811c690281f1ff6083b8cb5
+  Blacklist checksum: d900d37261b3081c5f0ca03c88b2ae5d
+killed src/lib.rs numbers/incrementer
+  ID: 33e9a03929fd9d31d22b8445a09a5cde
+  Blacklist checksum: f818a8b8476e0a01a2879d840d844176
+escaped src/lib.rs numbers/incrementer
+  ID: 63de7f15c9bb8951fe1285548ecdb1d5
+  Blacklist checksum: a8385b51fdd8cfba0abd415a6c348ec2
+killed src/lib.rs numbers/incrementer
+  ID: ad3bc13a96c92f8fceba3088dbc90ccd
+  Blacklist checksum: db988b59262eb23e55837c1040b1678f
+Killed: 4
+Escaped: 8
+Errored: 2
+Not covered: 0
+Skipped: 0
+Total: 14
+Mutation score: 42.86%
+Per-mutator results:
+Mutator | Killed | Escaped | Skipped | Total
+arithmetic/base | 1 | 0 | 0 | 1
+conditional/negated | 2 | 0 | 0 | 2
+expression/comparison | 0 | 2 | 0 | 2
+expression/logical | 0 | 1 | 0 | 1
+expression/remove | 0 | 2 | 0 | 2
+numbers/decrementer | 1 | 2 | 0 | 3
+numbers/incrementer | 2 | 1 | 0 | 3
+PEAK_TMP_KB=2126996

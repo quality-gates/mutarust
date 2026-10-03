@@ -1,0 +1,105 @@
+== CODE=2
+skipped src/lib.rs conditional/negated
+  ID: adc4bd7f588568e1b326da509bf1a8a1
+  Blacklist checksum: 70803c511e93bc07487a7e75f5a16224
+skipped src/lib.rs numbers/decrementer
+  ID: 6a5e1f0449a9944f903f12ca58f3fde7
+  Blacklist checksum: 20b6422c3f46967ba71cd3a59ef233b8
+skipped src/lib.rs numbers/incrementer
+  ID: 64290818d02425aaebe8938f65640857
+  Blacklist checksum: 52275972b7fed5e2029a465bbe062c51
+Killed: 0
+Escaped: 0
+Errored: 0
+Not covered: 0
+Skipped: 3
+Total: 3
+Mutation score: 100.00%
+Per-mutator results:
+Mutator | Killed | Escaped | Skipped | Total
+conditional/negated | 0 | 0 | 1 | 1
+numbers/decrementer | 0 | 0 | 1 | 1
+numbers/incrementer | 0 | 0 | 1 | 1
+EXIT=0
+0
+== CODE=3
+errored src/lib.rs conditional/negated
+  ID: adc4bd7f588568e1b326da509bf1a8a1
+  Blacklist checksum: 70803c511e93bc07487a7e75f5a16224
+  custom command exited with status 3
+errored src/lib.rs numbers/decrementer
+  ID: 6a5e1f0449a9944f903f12ca58f3fde7
+  Blacklist checksum: 20b6422c3f46967ba71cd3a59ef233b8
+  custom command exited with status 3
+errored src/lib.rs numbers/incrementer
+  ID: 64290818d02425aaebe8938f65640857
+  Blacklist checksum: 52275972b7fed5e2029a465bbe062c51
+  custom command exited with status 3
+Killed: 0
+Escaped: 0
+Errored: 3
+Not covered: 0
+Skipped: 0
+Total: 3
+Mutation score: 100.00%
+Per-mutator results:
+Mutator | Killed | Escaped | Skipped | Total
+conditional/negated | 1 | 0 | 0 | 1
+numbers/decrementer | 1 | 0 | 0 | 1
+numbers/incrementer | 1 | 0 | 0 | 1
+EXIT=0
+0
+== CODE=7
+errored src/lib.rs conditional/negated
+  ID: adc4bd7f588568e1b326da509bf1a8a1
+  Blacklist checksum: 70803c511e93bc07487a7e75f5a16224
+  custom command exited with status 7
+errored src/lib.rs numbers/decrementer
+  ID: 6a5e1f0449a9944f903f12ca58f3fde7
+  Blacklist checksum: 20b6422c3f46967ba71cd3a59ef233b8
+  custom command exited with status 7
+errored src/lib.rs numbers/incrementer
+  ID: 64290818d02425aaebe8938f65640857
+  Blacklist checksum: 52275972b7fed5e2029a465bbe062c51
+  custom command exited with status 7
+Killed: 0
+Escaped: 0
+Errored: 3
+Not covered: 0
+Skipped: 0
+Total: 3
+Mutation score: 100.00%
+Per-mutator results:
+Mutator | Killed | Escaped | Skipped | Total
+conditional/negated | 1 | 0 | 0 | 1
+numbers/decrementer | 1 | 0 | 0 | 1
+numbers/incrementer | 1 | 0 | 0 | 1
+EXIT=0
+0
+== CODE=sleep
+errored src/lib.rs conditional/negated
+  ID: adc4bd7f588568e1b326da509bf1a8a1
+  Blacklist checksum: 70803c511e93bc07487a7e75f5a16224
+  custom command timed out after 2 seconds
+errored src/lib.rs numbers/decrementer
+  ID: 6a5e1f0449a9944f903f12ca58f3fde7
+  Blacklist checksum: 20b6422c3f46967ba71cd3a59ef233b8
+  custom command timed out after 2 seconds
+errored src/lib.rs numbers/incrementer
+  ID: 64290818d02425aaebe8938f65640857
+  Blacklist checksum: 52275972b7fed5e2029a465bbe062c51
+  custom command timed out after 2 seconds
+Killed: 0
+Escaped: 0
+Errored: 3
+Not covered: 0
+Skipped: 0
+Total: 3
+Mutation score: 100.00%
+Per-mutator results:
+Mutator | Killed | Escaped | Skipped | Total
+conditional/negated | 1 | 0 | 0 | 1
+numbers/decrementer | 1 | 0 | 0 | 1
+numbers/incrementer | 1 | 0 | 0 | 1
+EXIT=0
+0

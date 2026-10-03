@@ -1,0 +1,10 @@
+Total: 8 mutation(s) would be generated. No files written, no tests run.
+Total: 8
+Mutation score: 50.00%
+Mutator | Killed | Escaped | Skipped | Total
+workers=1 wall=40.875787019729614
+Total: 8 mutation(s) would be generated. No files written, no tests run.
+Total: 8
+Mutation score: 50.00%
+Mutator | Killed | Escaped | Skipped | Total
+workers=4 wall=16.941803693771362
