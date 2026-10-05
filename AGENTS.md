@@ -1,4 +1,4 @@
-Only report information in ASD-STE100 Simplified Technical English grounded in correct domain language from CONTEXT.md.  
+Only report information in ASD-STE100 Simplified Technical English grounded in correct domain language from GLOSSARY.md.  
 
 Do all development work, debugging, etc. in a Docker container with capped resources.
 Always clean up build target cruft after work is done.
