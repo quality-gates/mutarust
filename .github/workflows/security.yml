@@ -33,8 +33,8 @@ jobs:
               - '.github/workflows/security.yml'
             light:
               - 'AGENTS.md'
-              - 'CONTEXT.md'
-              - 'CONTEXT-MAP.md'
+              - 'GLOSSARY.md'
+              - 'GLOSSARY-MAP.md'
               - 'CHANGELOG.md'
               - 'CODE_OF_CONDUCT.md'
               - 'CONTRIBUTING.md'

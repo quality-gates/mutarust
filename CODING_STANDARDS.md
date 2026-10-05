@@ -10,7 +10,7 @@
 ## Comments and docs
 
 - Code comments use ASD-STE100 Simplified Technical English.
-- Ground terms in `CONTEXT.md` domain language when that file exists. Do not invent synonyms for glossary terms (mutation, mutant, killed, escaped, errored, not covered, skipped, baseline, blacklist, stable mutant ID).
+- Ground terms in `GLOSSARY.md` domain language when that file exists. Do not invent synonyms for glossary terms (mutation, mutant, killed, escaped, errored, not covered, skipped, baseline, blacklist, stable mutant ID).
 - Do not write comments that only repeat what the code already makes clear.
 - Do not put brittle references in README or comments (versions, line numbers, temporary paths, "as of today" claims) when those details are allowed to change.
 
