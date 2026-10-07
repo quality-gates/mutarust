@@ -1543,6 +1543,84 @@ mod tests {
         assert!(!muta_fp_meta.file_type().is_symlink());
     }
 
+    /// Parallel workers claim private clones of the clean-suite target tree.
+    /// Cargo locks `target/<profile>/.cargo-lock` for each build. A symbolic
+    /// link makes those workers wait on one lock.
+    #[cfg(unix)]
+    #[test]
+    fn parallel_worker_clones_do_not_share_the_cargo_build_lock() {
+        use std::os::unix::fs::MetadataExt;
+
+        let template =
+            super::TemporaryWorkspace::create().expect("template workspace must be created");
+        let profile = template.path().join("target").join("debug");
+        let deps = profile.join("deps");
+        fs::create_dir_all(&deps).expect("deps directory must be created");
+        fs::write(profile.join(".cargo-lock"), b"").expect("profile build lock must be written");
+        fs::write(template.path().join("target").join(".cargo-lock"), b"")
+            .expect("target build lock must be written");
+        fs::write(deps.join("libsyn-123.rlib"), b"syn-data")
+            .expect("dependency artifact must be written");
+
+        let prefixes = vec!["widget".to_string()];
+        let first = super::WorkerScratch::clone_from_template(
+            template.path(),
+            PathBuf::from("/workspace"),
+            PathBuf::from("/workspace"),
+            std::path::Path::new("."),
+            &prefixes,
+        )
+        .expect("first worker clone must succeed");
+        let second = super::WorkerScratch::clone_from_template(
+            template.path(),
+            PathBuf::from("/workspace"),
+            PathBuf::from("/workspace"),
+            std::path::Path::new("."),
+            &prefixes,
+        )
+        .expect("second worker clone must succeed");
+
+        for worker in [&first, &second] {
+            for relative in ["target/debug/.cargo-lock", "target/.cargo-lock"] {
+                let lock = worker.temporary.path().join(relative);
+                let metadata = fs::symlink_metadata(&lock).expect("worker build lock must exist");
+                assert!(
+                    metadata.file_type().is_file(),
+                    "worker Cargo build lock must be a private file, not a symbolic link: {}",
+                    lock.display()
+                );
+            }
+            let shared = worker
+                .temporary
+                .path()
+                .join("target/debug/deps/libsyn-123.rlib");
+            assert!(
+                fs::symlink_metadata(&shared)
+                    .expect("dependency artifact must exist")
+                    .file_type()
+                    .is_symlink(),
+                "target reuse must keep dependency artifacts shared"
+            );
+        }
+
+        let template_lock =
+            fs::metadata(profile.join(".cargo-lock")).expect("template lock must be readable");
+        let first_lock = fs::metadata(first.temporary.path().join("target/debug/.cargo-lock"))
+            .expect("first lock must be readable");
+        let second_lock = fs::metadata(second.temporary.path().join("target/debug/.cargo-lock"))
+            .expect("second lock must be readable");
+        assert_ne!(
+            (first_lock.dev(), first_lock.ino()),
+            (template_lock.dev(), template_lock.ino()),
+            "a worker must not use the clean-suite Cargo build lock"
+        );
+        assert_ne!(
+            (first_lock.dev(), first_lock.ino()),
+            (second_lock.dev(), second_lock.ino()),
+            "parallel workers must not use the same Cargo build lock"
+        );
+    }
+
     #[test]
     fn remove_non_target_entries_keeps_the_cargo_target_directory() {
         let temporary =
@@ -3908,7 +3986,7 @@ fn clone_target_directory(
             continue;
         }
         if file_type.is_file() || file_type.is_symlink() {
-            link_or_copy(&from, &to)?;
+            seed_target_entry(&from, &to)?;
         }
     }
     Ok(())
@@ -3946,7 +4024,7 @@ fn clone_target_profile(
                 ))
             })?;
         } else {
-            link_or_copy(&from, &to)?;
+            seed_target_entry(&from, &to)?;
         }
     }
     Ok(())
@@ -3978,7 +4056,7 @@ fn clone_profile_subdirectory(
                 })?;
                 copy_tree(from, to)
             } else {
-                link_or_copy(from, to)
+                seed_target_entry(from, to)
             }
         }
     }
@@ -4007,7 +4085,7 @@ fn clone_deps_directory(
                 ))
             })?;
         } else {
-            link_or_copy(&from, &to)?;
+            seed_target_entry(&from, &to)?;
         }
     }
     Ok(())
@@ -4032,10 +4110,31 @@ fn clone_named_subdirectories(
             })?;
             copy_tree(&from, &to)?;
         } else {
-            link_or_copy(&from, &to)?;
+            seed_target_entry(&from, &to)?;
         }
     }
     Ok(())
+}
+
+/// Copies the Cargo build lock. Shares every other target entry.
+///
+/// Cargo uses `.cargo-lock` as the build-directory lock. A symbolic link makes
+/// parallel workers use one lock. One worker then waits for another worker.
+fn seed_target_entry(from: &Path, to: &Path) -> Result<(), RunError> {
+    if is_cargo_build_lock(from) {
+        return fs::copy(from, to).map(|_| ()).map_err(|error| {
+            run_error(format!(
+                "could not copy {} to {}: {error}",
+                from.display(),
+                to.display()
+            ))
+        });
+    }
+    link_or_copy(from, to)
+}
+
+fn is_cargo_build_lock(path: &Path) -> bool {
+    path.file_name().is_some_and(|name| name == ".cargo-lock")
 }
 
 fn link_or_copy(from: &Path, to: &Path) -> Result<(), RunError> {
@@ -4215,6 +4314,7 @@ fn create_symbolic_link(_target: &Path, _destination: &Path) -> io::Result<()> {
 ///
 /// A single sequential worker takes the original clean build. Parallel workers
 /// each receive a private clone so no two workers share a writable target dir.
+/// Each clone has a private Cargo build lock. Dependency artifacts stay shared.
 #[derive(Default)]
 struct WarmBuilds {
     by_workspace: Mutex<BTreeMap<PathBuf, WorkerScratch>>,
