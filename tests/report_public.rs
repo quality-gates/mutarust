@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 
 use mutarust::{
-    AgenticJsonReport, FullJsonReport, GithubAnnotations, GitlabReport, HtmlReport, MutationResult,
-    MutationRun, MutationState, Rendered, Report, ReportContext, SummaryJsonReport, run_for_test,
-    write_all,
+    AgenticJsonReport, DisplayFilter, FullJsonReport, GithubAnnotations, GitlabReport, HtmlReport,
+    MutationResult, MutationRun, MutationState, Rendered, Report, ReportContext, SummaryJsonReport,
+    run_for_test, write_all, write_mutation_results,
 };
 
 fn create_test_run() -> MutationRun {
@@ -194,4 +194,38 @@ fn write_all_isolates_failures_and_attempts_all_reports() {
     assert!(results[1].is_err());
     assert!(results[1].as_ref().unwrap_err().contains("could not write"));
     assert!(results[2].is_ok());
+}
+
+#[test]
+fn terminal_and_html_scores_use_the_same_two_decimal_rounding() {
+    let run = run_for_test(
+        vec![
+            mutant(MutationState::Killed, "src/lib.rs", 1, "id-killed"),
+            mutant(MutationState::Escaped, "src/lib.rs", 2, "id-escaped-one"),
+            mutant(MutationState::Escaped, "src/lib.rs", 3, "id-escaped-two"),
+            mutant(MutationState::NotCovered, "src/lib.rs", 4, "id-not-covered"),
+        ],
+        true,
+    );
+    let mut terminal = Vec::new();
+    write_mutation_results(&mut terminal, &run, &DisplayFilter::default(), false, false)
+        .expect("terminal report must be written");
+    let terminal = String::from_utf8(terminal).expect("terminal report must be UTF-8");
+    assert!(terminal.contains("  ID: id-escaped-one\n  Blacklist checksum: eno-depacse-di\n"));
+    let Rendered::File { body: html, .. } = HtmlReport
+        .render(&run, &ReportContext::default())
+        .expect("HTML report must render")
+    else {
+        panic!("HTML report must render to a file");
+    };
+
+    for (label, score) in [
+        ("Mutation score", "25.00%"),
+        ("Covered-code mutation score", "33.33%"),
+    ] {
+        assert!(terminal.contains(&format!("{label}: {score}")));
+        assert!(html.contains(&format!(
+            "<div class=\"stat-value\">{score}</div><div class=\"stat-label\">{label}</div>"
+        )));
+    }
 }

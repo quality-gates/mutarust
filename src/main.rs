@@ -5,10 +5,10 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use mutarust::{
-    AgenticJsonReport, Baseline, CommandSettings, Configuration, CoverageControls, DisplayFilter,
-    ExecutionControls, FullJsonReport, GitDiffControls, GithubAnnotations, GitlabReport,
-    HtmlReport, Registry, Report, ReportContext, SummaryJsonReport, TestExecution, WorkerLimit,
-    write_all,
+    AgenticJsonReport, Baseline, CommandFlag, CommandSettings, Configuration, CoverageControls,
+    DisplayFilter, ExecutionControls, FullJsonReport, Gates, GitDiffControls, GithubAnnotations,
+    GitlabReport, HtmlReport, Registry, Report, ReportContext, SummaryJsonReport, TestExecution,
+    WorkerLimit, judge, validate_command_flags, write_all,
 };
 
 fn main() -> ExitCode {
@@ -642,7 +642,15 @@ fn start_mutation_run(
 ) -> Result<(Configuration, Baseline, mutarust::MutationRun), String> {
     let baseline = Baseline::load(command.baseline.path())?;
     let configuration = effective_configuration(command).map_err(|error| error.to_string())?;
-    let (registry, filters) = configured_registry(command, &configuration)?;
+    let (registry, filters) =
+        mutarust::configured_registry(&configuration, command.function_match.as_deref()).map_err(
+            |error| match error {
+                mutarust::RegistryConfigurationError::SourceFilters(error) => error,
+                mutarust::RegistryConfigurationError::MutatorSelection(error) => {
+                    selection_error(command.configuration.as_deref(), &error)
+                }
+            },
+        )?;
     let execution = test_execution(command)?;
     let run = mutarust::run_mutation_tests_with_controls(
         &command.targets,
@@ -722,27 +730,6 @@ fn progress_allowed(command: &RunCommand, silent_mode: bool) -> bool {
         && !command.execution.dry_run
 }
 
-fn configured_registry(
-    command: &RunCommand,
-    configuration: &Configuration,
-) -> Result<(Registry, mutarust::SourceFilters), String> {
-    let mut registry = Registry::builtins();
-    let names = registry.names().map(str::to_owned).collect::<Vec<_>>();
-    let filters = mutarust::SourceFilters::with_policies(
-        &configuration.exclude_dirs,
-        &configuration.ignore_source_lines,
-        command.function_match.as_deref(),
-        &names,
-        configuration.skip_without_test,
-        configuration.skip_with_cfg,
-    )?;
-    let selected = configuration
-        .select_mutators(&names)
-        .map_err(|error| selection_error(command.configuration.as_deref(), &error))?;
-    registry.retain(|name| selected.iter().any(|selected_name| selected_name == name));
-    Ok((registry, filters))
-}
-
 fn finish_mutation_run(
     command: &RunCommand,
     configuration: &Configuration,
@@ -753,36 +740,55 @@ fn finish_mutation_run(
         return write_baseline(command.baseline.path(), run);
     }
     if command.execution.dry_run {
-        print_dry_run(run)?;
+        {
+            let mut stdout = io::stdout().lock();
+            mutarust::write_dry_run_summary(&mut stdout, run)?;
+        }
         return Ok(write_reports_or_error(command, configuration, run).unwrap_or(ExitCode::SUCCESS));
     }
     if command.execution.no_exec {
-        print_generated_mutants(run)?;
+        {
+            let mut stdout = io::stdout().lock();
+            mutarust::write_generated_mutants(&mut stdout, run)?;
+        }
         return Ok(write_reports_or_error(command, configuration, run).unwrap_or(ExitCode::SUCCESS));
     }
     let one_mutant = command.run_mutant_id.is_some();
-    print_mutation_results(
-        run,
-        display_filter(command, configuration.silent_mode),
-        command.output.no_diffs,
-        one_mutant,
-    )?;
+    {
+        let mut stdout = io::stdout().lock();
+        mutarust::write_mutation_results(
+            &mut stdout,
+            run,
+            &display_filter(command, configuration.silent_mode),
+            command.output.no_diffs,
+            one_mutant,
+        )?;
+    }
     if let Some(code) = write_reports_or_error(command, configuration, run) {
         return Ok(code);
     }
-    Ok(if one_mutant {
-        ExitCode::SUCCESS
+    if one_mutant {
+        return Ok(ExitCode::SUCCESS);
+    }
+    let outcome = judge(
+        run,
+        baseline,
+        &Gates {
+            minimum_mutation_score: configuration.min_msi,
+            minimum_covered_mutation_score: configuration.min_covered_msi,
+            fail_on_escaped: command.baseline.fail_on_escaped,
+            pass_score_gates_when_no_mutations: command.baseline.ignore_msi_with_no_mutations,
+        },
+    );
+    if let Some(message) = outcome.message() {
+        write_error(message);
+    }
+    Ok(if outcome.is_failure() {
+        ExitCode::from(4)
     } else {
-        score_gates(
-            run,
-            configuration,
-            baseline,
-            command.baseline.fail_on_escaped,
-            command.baseline.ignore_msi_with_no_mutations,
-        )
+        ExitCode::SUCCESS
     })
 }
-
 fn write_reports_or_error(
     command: &RunCommand,
     configuration: &Configuration,
@@ -849,28 +855,6 @@ fn write_baseline(path: &std::path::Path, run: &mutarust::MutationRun) -> io::Re
     }
 }
 
-fn print_dry_run(run: &mutarust::MutationRun) -> io::Result<ExitCode> {
-    writeln!(
-        io::stdout().lock(),
-        "Total: {} mutation(s) would be generated. No files written, no tests run.",
-        run.total()
-    )?;
-    Ok(ExitCode::SUCCESS)
-}
-
-fn print_generated_mutants(run: &mutarust::MutationRun) -> io::Result<ExitCode> {
-    let mut stdout = io::stdout().lock();
-    for result in run.results() {
-        print_result_details(&mut stdout, result)?;
-    }
-    writeln!(stdout, "Generated: {}", run.total())?;
-    writeln!(
-        stdout,
-        "No tests run. Generated mutations are in the mutation areas above."
-    )?;
-    Ok(ExitCode::SUCCESS)
-}
-
 fn selection_error(path: Option<&std::path::Path>, error: &mutarust::ConfigurationError) -> String {
     path.map_or_else(
         || error.to_string(),
@@ -887,157 +871,6 @@ fn effective_configuration(
     };
     configuration.apply(&command.settings)?;
     Ok(configuration)
-}
-
-fn print_mutation_results(
-    run: &mutarust::MutationRun,
-    filter: DisplayFilter,
-    no_diffs: bool,
-    one_mutant: bool,
-) -> io::Result<()> {
-    let mut stdout = io::stdout().lock();
-    for result in run.results() {
-        if !filter.shows(result.state) {
-            continue;
-        }
-        print_result_details(&mut stdout, result)?;
-        if result.state == mutarust::MutationState::Escaped && !no_diffs {
-            write!(stdout, "{}", result.diff)?;
-        }
-    }
-    if one_mutant {
-        return Ok(());
-    }
-    writeln!(stdout, "Killed: {}", run.killed())?;
-    writeln!(stdout, "Escaped: {}", run.escaped())?;
-    writeln!(stdout, "Errored: {}", run.errored())?;
-    writeln!(stdout, "Not covered: {}", run.not_covered())?;
-    writeln!(stdout, "Skipped: {}", run.skipped())?;
-    writeln!(stdout, "Total: {}", run.total())?;
-    writeln!(
-        stdout,
-        "Mutation score: {:.2}%",
-        run.mutation_score() * 100.0
-    )?;
-    if run.has_coverage() {
-        writeln!(
-            stdout,
-            "Covered-code mutation score: {:.2}%",
-            run.covered_mutation_score() * 100.0
-        )?;
-    }
-    writeln!(stdout, "Per-mutator results:")?;
-    writeln!(stdout, "Mutator | Killed | Escaped | Skipped | Total")?;
-    for summary in run.mutator_summaries() {
-        writeln!(
-            stdout,
-            "{} | {} | {} | {} | {}",
-            summary.mutator, summary.killed, summary.escaped, summary.skipped, summary.total
-        )?;
-    }
-    Ok(())
-}
-
-fn print_result_details(
-    output: &mut impl Write,
-    result: &mutarust::MutationResult,
-) -> io::Result<()> {
-    writeln!(
-        output,
-        "{} {} {}",
-        result.state,
-        result.source.display(),
-        result.mutator
-    )?;
-    writeln!(output, "  ID: {}", result.stable_id)?;
-    writeln!(
-        output,
-        "  Blacklist checksum: {}",
-        result.blacklist_checksum
-    )?;
-    if let Some(detail) = &result.error {
-        writeln!(output, "  {detail}")?;
-    }
-    Ok(())
-}
-
-fn total_score_gate(run: &mutarust::MutationRun, minimum: Option<u8>) -> ExitCode {
-    let Some(minimum) = minimum else {
-        return ExitCode::SUCCESS;
-    };
-    let score = run.mutation_score() * 100.0;
-    if score < f64::from(minimum) {
-        write_error(&format!(
-            "mutation score {score:.2}% is below the required {}%",
-            minimum
-        ));
-        ExitCode::from(4)
-    } else {
-        ExitCode::SUCCESS
-    }
-}
-
-fn score_gates(
-    run: &mutarust::MutationRun,
-    configuration: &Configuration,
-    baseline: &Baseline,
-    fail_on_escaped: bool,
-    ignore_msi_with_no_mutations: bool,
-) -> ExitCode {
-    if ignore_msi_with_no_mutations && run.total() == 0 {
-        return ExitCode::SUCCESS;
-    }
-    let total = total_score_gate(run, configuration.min_msi);
-    if total != ExitCode::SUCCESS {
-        return total;
-    }
-    let covered = covered_score_gate(run, configuration.min_covered_msi);
-    if covered != ExitCode::SUCCESS {
-        return covered;
-    }
-    escaped_mutant_gate(run, baseline, fail_on_escaped)
-}
-
-fn escaped_mutant_gate(
-    run: &mutarust::MutationRun,
-    baseline: &Baseline,
-    fail_on_escaped: bool,
-) -> ExitCode {
-    if !fail_on_escaped {
-        return ExitCode::SUCCESS;
-    }
-    let count = baseline.new_escaped_count(run);
-    if count == 0 {
-        ExitCode::SUCCESS
-    } else {
-        write_error(&format!(
-            "{count} new mutant(s) escaped — kill them or run --update-baseline to accept"
-        ));
-        ExitCode::from(4)
-    }
-}
-
-fn covered_score_gate(run: &mutarust::MutationRun, minimum: Option<u8>) -> ExitCode {
-    let Some(minimum) = minimum else {
-        return ExitCode::SUCCESS;
-    };
-    if minimum == 0 {
-        return ExitCode::SUCCESS;
-    }
-    if !run.has_coverage() {
-        write_error("covered-code mutation score requires --coverage");
-        return ExitCode::from(4);
-    }
-    let score = run.covered_mutation_score() * 100.0;
-    if score < f64::from(minimum) {
-        write_error(&format!(
-            "covered-code mutation score {score:.2}% is below the required {}%",
-            minimum
-        ));
-        ExitCode::from(4)
-    } else {
-        ExitCode::SUCCESS
-    }
 }
 
 fn print_files(files: &[std::path::PathBuf]) -> Result<(), String> {
@@ -1154,193 +987,35 @@ impl Default for RunCommand {
 }
 
 fn validate_execution_options(command: &RunCommand) -> Result<(), String> {
-    validation_error(command).map_or(Ok(()), |message| Err(message.to_owned()))
-}
-
-fn validation_error(command: &RunCommand) -> Option<&'static str> {
-    run_mode_error(command)
-        .or_else(|| dry_run_control_error(command))
-        .or_else(|| cargo_control_error(command))
-        .or_else(|| coverage_control_error(command))
-        .or_else(|| git_diff_control_error(command))
-        .or_else(|| baseline_control_error(command))
-}
-
-fn dry_run_control_error(command: &RunCommand) -> Option<&'static str> {
     let execution = &command.execution;
-    [
+    let flags = [
+        (execution.dry_run, CommandFlag::DryRun),
+        (execution.no_exec, CommandFlag::NoExec),
+        (command.custom_command.is_some(), CommandFlag::CustomCommand),
+        (execution.keep_temporary, CommandFlag::KeepTemporary),
+        (execution.fixed_timeout, CommandFlag::FixedTimeout),
         (
-            execution.dry_run && execution.keep_temporary,
-            "--dry-run cannot be used with --do-not-remove-tmp-folder",
+            execution.timeout_coefficient.is_some(),
+            CommandFlag::TimeoutCoefficient,
         ),
-        (
-            execution.dry_run && execution.fixed_timeout,
-            "--dry-run cannot be used with --timeout",
-        ),
-        (
-            execution.dry_run && execution.timeout_coefficient.is_some(),
-            "--dry-run cannot be used with --timeout-coefficient",
-        ),
-        (
-            execution.dry_run && execution.cargo_flags.is_some(),
-            "--dry-run cannot be used with --test-flags",
-        ),
-        (
-            execution.dry_run && execution.workers.is_some(),
-            "--dry-run cannot be used with --workers",
-        ),
-        (
-            execution.dry_run && command.recursive_tests,
-            "--dry-run cannot be used with --test-recursive",
-        ),
-        (
-            execution.dry_run && execution.coverage,
-            "--dry-run cannot be used with --coverage",
-        ),
-        (
-            execution.dry_run && execution.per_test_coverage,
-            "--dry-run cannot be used with --per-test",
-        ),
+        (execution.cargo_flags.is_some(), CommandFlag::TestFlags),
+        (execution.workers.is_some(), CommandFlag::Workers),
+        (command.recursive_tests, CommandFlag::RecursiveTests),
+        (execution.coverage, CommandFlag::Coverage),
+        (execution.per_test_coverage, CommandFlag::PerTestCoverage),
+        (execution.git_diff_lines, CommandFlag::GitDiffLines),
+        (execution.git_diff_base.is_some(), CommandFlag::GitDiffBase),
+        (command.baseline.update, CommandFlag::UpdateBaseline),
+        (command.run_mutant_id.is_some(), CommandFlag::RunMutantId),
     ]
     .into_iter()
-    .find_map(|(invalid, message)| invalid.then_some(message))
+    .filter_map(|(enabled, flag)| enabled.then_some(flag))
+    .collect::<Vec<_>>();
+    validate_command_flags(&flags).map_err(|error| error.to_string())
 }
-
-fn run_mode_error(command: &RunCommand) -> Option<&'static str> {
-    let execution = &command.execution;
-    [
-        (
-            execution.dry_run && execution.no_exec,
-            "--dry-run and --no-exec cannot be used together",
-        ),
-        (
-            execution.dry_run && command.custom_command.is_some(),
-            "--dry-run cannot be used with --exec",
-        ),
-        (
-            execution.no_exec && command.custom_command.is_some(),
-            "--no-exec cannot be used with --exec",
-        ),
-    ]
-    .into_iter()
-    .find_map(|(invalid, message)| invalid.then_some(message))
-}
-
-fn cargo_control_error(command: &RunCommand) -> Option<&'static str> {
-    let execution = &command.execution;
-    [
-        (
-            execution.timeout_coefficient.is_some() && execution.fixed_timeout,
-            "--timeout-coefficient cannot be used with --timeout",
-        ),
-        (
-            execution.timeout_coefficient.is_some() && command.custom_command.is_some(),
-            "--timeout-coefficient requires the Cargo test command",
-        ),
-        (
-            execution.timeout_coefficient.is_some() && execution.no_exec,
-            "--timeout-coefficient cannot be used with --no-exec",
-        ),
-        (
-            execution.no_exec && execution.fixed_timeout,
-            "--no-exec cannot be used with --timeout",
-        ),
-        (
-            execution.cargo_flags.is_some() && command.custom_command.is_some(),
-            "--test-flags cannot be used with --exec",
-        ),
-        (
-            execution.cargo_flags.is_some() && execution.no_exec,
-            "--test-flags cannot be used with --no-exec",
-        ),
-        (
-            command.recursive_tests && execution.no_exec,
-            "--test-recursive cannot be used with --no-exec",
-        ),
-    ]
-    .into_iter()
-    .find_map(|(invalid, message)| invalid.then_some(message))
-}
-
-fn coverage_control_error(command: &RunCommand) -> Option<&'static str> {
-    let execution = &command.execution;
-    [
-        (
-            execution.coverage && command.custom_command.is_some(),
-            "--coverage requires the Cargo test command",
-        ),
-        (
-            execution.per_test_coverage && command.custom_command.is_some(),
-            "--per-test requires the Cargo test command",
-        ),
-        (
-            execution.coverage && execution.no_exec,
-            "--coverage cannot be used with --no-exec",
-        ),
-        (
-            execution.per_test_coverage && execution.no_exec,
-            "--per-test cannot be used with --no-exec",
-        ),
-    ]
-    .into_iter()
-    .find_map(|(invalid, message)| invalid.then_some(message))
-}
-
-fn git_diff_control_error(command: &RunCommand) -> Option<&'static str> {
-    (!command.execution.git_diff_lines && command.execution.git_diff_base.is_some())
-        .then_some("--git-diff-base requires --git-diff-lines")
-}
-
-fn baseline_control_error(command: &RunCommand) -> Option<&'static str> {
-    [
-        (
-            command.baseline.update && command.execution.dry_run,
-            "--update-baseline cannot be used with --dry-run",
-        ),
-        (
-            command.baseline.update && command.execution.no_exec,
-            "--update-baseline cannot be used with --no-exec",
-        ),
-        (
-            command.baseline.update && command.run_mutant_id.is_some(),
-            "--update-baseline cannot be used with --run-mutant-id",
-        ),
-    ]
-    .into_iter()
-    .find_map(|(invalid, message)| invalid.then_some(message))
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{RunCommand, print_result_details, progress_allowed};
-
-    #[test]
-    fn result_details_show_the_blacklist_checksum_after_the_stable_id() {
-        let run = mutarust::run_for_test(
-            vec![mutarust::MutationResult {
-                source: std::path::PathBuf::from("src/lib.rs"),
-                source_root: std::path::PathBuf::new(),
-                stable_id: "a".repeat(32),
-                blacklist_checksum: "b".repeat(32),
-                line: 2,
-                mutator: "conditional/bool-literal".to_owned(),
-                diff: String::new(),
-                state: mutarust::MutationState::Escaped,
-                error: None,
-            }],
-            false,
-        );
-        let mut output = Vec::new();
-        print_result_details(&mut output, &run.results()[0]).expect("details must be written");
-        assert_eq!(
-            String::from_utf8(output).expect("details must be UTF-8"),
-            format!(
-                "escaped src/lib.rs conditional/bool-literal\n  ID: {}\n  Blacklist checksum: {}\n",
-                "a".repeat(32),
-                "b".repeat(32)
-            )
-        );
-    }
+    use super::{RunCommand, progress_allowed};
 
     #[test]
     fn progress_is_allowed_only_without_diagnostics_or_result_free_modes() {

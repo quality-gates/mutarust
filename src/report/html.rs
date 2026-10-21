@@ -5,7 +5,7 @@ use crate::{MutationResult, MutationRun};
 
 use super::{
     Rendered, Report, ReportContext, ReportMutatorStats, compact_summary, escaped_mutants,
-    mutator_stats, portable_path, write_one,
+    format_percentage, mutator_stats, portable_path, write_one,
 };
 
 /// File name for the HTML mutation report.
@@ -33,8 +33,8 @@ pub fn html_report(run: &MutationRun) -> String {
     let stats = compact_summary(run);
     let mutator_stats = mutator_stats(run.mutator_summaries());
     let grouped = group_escaped_mutants(run);
-    let msi_percent = (stats.msi * 10_000.0).round() / 100.0;
-    let covered_percent = (stats.covered_code_msi * 10_000.0).round() / 100.0;
+    let msi_percent = format_percentage(stats.msi);
+    let covered_percent = format_percentage(stats.covered_code_msi);
     let mut body = String::new();
     body.push_str(HTML_HEAD);
     body.push_str(
@@ -81,16 +81,11 @@ pub fn html_report(run: &MutationRun) -> String {
         &stats.skipped_count.to_string(),
         "Skipped",
     );
-    push_stat_card(
-        &mut body,
-        "msi",
-        &format!("{msi_percent}%"),
-        "Mutation score",
-    );
+    push_stat_card(&mut body, "msi", &msi_percent, "Mutation score");
     push_stat_card(
         &mut body,
         "covered",
-        &format!("{covered_percent}%"),
+        &covered_percent,
         "Covered-code mutation score",
     );
     body.push_str("</div>");
