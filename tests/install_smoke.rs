@@ -1305,38 +1305,50 @@ fn installed_command_filters_mutator_and_source_candidates() {
             .expect("excluded source must have a parent directory"),
     )
     .expect("excluded source directory must be created");
-    fs::write(&excluded, "pub fn excluded() -> bool { true }\n")
-        .expect("excluded source must be written");
+    fs::write(
+        &excluded,
+        "pub fn excluded() -> bool { let value = true; value }\n",
+    )
+    .expect("excluded source must be written");
     fs::write(
         &source,
         "pub fn checked() -> bool { let value = true; value }\npub fn ignored_by_line() -> bool { let value = true; value }\n",
     )
     .expect("source filtering fixture must be written");
     let configuration = fixture.join("filter.yml");
-    fs::write(
-        &configuration,
-        "enable_mutators:\n  - conditional/*\nexclude_dirs:\n  - checked/src/excluded\nignore_source_lines:\n  - ignored_by_line\n",
-    )
-    .expect("source filter configuration must be written");
+    for prefix in [
+        "checked/src/excluded",
+        "checked/src/excluded/",
+        "./checked/src/excluded",
+        "./checked/src/excluded/",
+    ] {
+        fs::write(
+            &configuration,
+            format!(
+                "enable_mutators:\n  - conditional/*\nexclude_dirs:\n  - {prefix}\nignore_source_lines:\n  - ignored_by_line\n"
+            ),
+        )
+        .expect("source filter configuration must be written");
 
-    let filtered = Command::new(command_path(&install))
-        .args(["--config"])
-        .arg(&configuration)
-        .args([&source, &excluded])
-        .current_dir(&fixture)
-        .output()
-        .expect("installed mutarust must start with source filters");
-    assert!(
-        filtered.status.success(),
-        "source filters must succeed: {}",
-        String::from_utf8_lossy(&filtered.stderr)
-    );
-    let filtered_output =
-        String::from_utf8(filtered.stdout).expect("source filter output must be UTF-8");
-    assert!(
-        filtered_output.contains("Killed: 1") && filtered_output.contains("Total: 1"),
-        "the directory and source-line filters must remove candidates: {filtered_output}"
-    );
+        let filtered = Command::new(command_path(&install))
+            .args(["--config"])
+            .arg(&configuration)
+            .args([&source, &excluded])
+            .current_dir(&fixture)
+            .output()
+            .expect("installed mutarust must start with source filters");
+        assert!(
+            filtered.status.success(),
+            "source filters must succeed for {prefix:?}: {}",
+            String::from_utf8_lossy(&filtered.stderr)
+        );
+        let filtered_output =
+            String::from_utf8(filtered.stdout).expect("source filter output must be UTF-8");
+        assert!(
+            filtered_output.contains("Killed: 1") && filtered_output.contains("Total: 1"),
+            "the directory and source-line filters must remove candidates for {prefix:?}: {filtered_output}"
+        );
+    }
 
     let external_directory = root.join("excluded-external");
     fs::create_dir_all(&external_directory).expect("external source directory must be created");

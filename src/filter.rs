@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::ops::Range;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use proc_macro2::Span;
 use regex::Regex;
@@ -67,7 +67,7 @@ impl SourceFilters {
             excluded_directories: excluded_directories
                 .iter()
                 .map(PathBuf::from)
-                .map(canonicalize_absolute_path)
+                .map(normalize_excluded_directory)
                 .collect(),
             ignored_source_lines,
             function_match,
@@ -121,11 +121,13 @@ impl SourceFilters {
     }
 }
 
-fn canonicalize_absolute_path(path: PathBuf) -> PathBuf {
+fn normalize_excluded_directory(path: PathBuf) -> PathBuf {
     if path.is_absolute() {
         fs::canonicalize(&path).unwrap_or(path)
     } else {
-        path
+        path.components()
+            .filter(|component| *component != Component::CurDir)
+            .collect()
     }
 }
 
@@ -923,6 +925,32 @@ mod tests {
         .expect("source filters must accept associated item policies")
         .for_source(Path::new("associated.rs"), text, Some(&syntax))
         .expect("associated item fixture must build source filters")
+    }
+
+    #[test]
+    fn directory_prefixes_match_path_components() {
+        let root = std::env::temp_dir().join("mutarust-path-prefix");
+        let source = root.join("src/gen/mod.rs");
+        let sibling = root.join("src/generated/mod.rs");
+        for prefix in [
+            "src/gen".to_owned(),
+            "src/gen/".to_owned(),
+            "./src/gen".to_owned(),
+            "./src/gen/".to_owned(),
+            "././src/gen".to_owned(),
+            root.join("src/gen").to_string_lossy().into_owned(),
+        ] {
+            let filters = SourceFilters::new(std::slice::from_ref(&prefix), &[], None, &[])
+                .expect("directory prefix must be accepted");
+            assert!(
+                !filters.allows_source(&source, &root),
+                "{prefix:?} must exclude src/gen/mod.rs"
+            );
+            assert!(
+                filters.allows_source(&sibling, &root),
+                "{prefix:?} must keep src/generated/mod.rs"
+            );
+        }
     }
 
     #[test]
