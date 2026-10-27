@@ -926,6 +926,32 @@ mod tests {
     }
 
     #[test]
+    fn directory_prefixes_match_path_components() {
+        let root = std::env::temp_dir().join("mutarust-path-prefix");
+        let source = root.join("src/gen/mod.rs");
+        let sibling = root.join("src/generated/mod.rs");
+        for prefix in [
+            "src/gen".to_owned(),
+            "src/gen/".to_owned(),
+            "./src/gen".to_owned(),
+            "./src/gen/".to_owned(),
+            "././src/gen".to_owned(),
+            root.join("src/gen").to_string_lossy().into_owned(),
+        ] {
+            let filters = SourceFilters::new(std::slice::from_ref(&prefix), &[], None, &[])
+                .expect("directory prefix must be accepted");
+            assert!(
+                !filters.allows_source(&source, &root),
+                "{prefix:?} must exclude src/gen/mod.rs"
+            );
+            assert!(
+                filters.allows_source(&sibling, &root),
+                "{prefix:?} must keep src/generated/mod.rs"
+            );
+        }
+    }
+
+    #[test]
     fn cfg_attributes_on_impl_and_trait_items_filter_mutations() {
         let text = associated_cfg_fixture();
         let ranges = true_ranges(text);
