@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::ops::Range;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use proc_macro2::Span;
 use regex::Regex;
@@ -67,7 +67,7 @@ impl SourceFilters {
             excluded_directories: excluded_directories
                 .iter()
                 .map(PathBuf::from)
-                .map(canonicalize_absolute_path)
+                .map(normalize_excluded_directory)
                 .collect(),
             ignored_source_lines,
             function_match,
@@ -121,11 +121,13 @@ impl SourceFilters {
     }
 }
 
-fn canonicalize_absolute_path(path: PathBuf) -> PathBuf {
+fn normalize_excluded_directory(path: PathBuf) -> PathBuf {
     if path.is_absolute() {
         fs::canonicalize(&path).unwrap_or(path)
     } else {
-        path
+        path.components()
+            .filter(|component| *component != Component::CurDir)
+            .collect()
     }
 }
 
