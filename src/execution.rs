@@ -24,6 +24,7 @@ use crate::evidence::{MutationEvidence, StableMutantId, mutation_evidence};
 use crate::filter::{SourceFilter, SourceFilters};
 use crate::git::ChangedLines;
 use crate::progress::{ProgressCounters, ProgressMonitor};
+use crate::schemata::{ACTIVE_MUTANT_VARIABLE, SourceEdit, rewrite_with_mutant_match};
 use crate::{Mutation, Mutator, Registry, SourceError, find_rust_sources};
 
 static NEXT_TEMPORARY_WORKSPACE: AtomicU64 = AtomicU64::new(0);
@@ -1094,6 +1095,11 @@ fn test_candidates(
     // Cap each Cargo build so worker count times Cargo jobs stays near the CPU count.
     let mut execution = execution.clone();
     execution.build_jobs = NonZeroUsize::new(cargo_build_jobs(workers));
+    if let Some(build) = prepare_schemata(&candidates, timeout, &execution, controls)? {
+        return test_schemata_candidates(
+            candidates, &build, timeout, &execution, controls, counters,
+        );
+    }
     if workers < 2 {
         return test_candidates_sequential(
             candidates, timeout, &execution, controls, counters, warm,
@@ -1265,6 +1271,434 @@ fn record_worker_error(first_error: &mut Option<RunError>, error: RunError) {
 fn results_in_plan_order(mut results: Vec<IndexedResult>) -> Vec<MutationResult> {
     results.sort_by_key(|result| result.index);
     results.into_iter().map(|result| result.result).collect()
+}
+
+struct SchemataBuild {
+    package_directory: PathBuf,
+    executables: Vec<PathBuf>,
+    originals: BTreeMap<PathBuf, String>,
+    snapshot: BTreeMap<PathBuf, SnapshotEntry>,
+    temporary: TemporaryWorkspace,
+}
+
+struct SchemataSource {
+    original: String,
+    rewritten: String,
+}
+
+enum SnapshotEntry {
+    Directory,
+    File(Vec<u8>),
+    Link(PathBuf),
+}
+
+fn prepare_schemata(
+    candidates: &[MutationCandidate],
+    timeout: Duration,
+    execution: &TestExecution,
+    controls: &ExecutionControls,
+) -> Result<Option<SchemataBuild>, RunError> {
+    if !schemata_controls_apply(execution, controls) || !schemata_candidates_apply(candidates) {
+        return Ok(None);
+    }
+    match build_schemata(candidates, timeout, execution) {
+        Err(error) if mutation_run_was_interrupted() => Err(error),
+        result => Ok(result.ok().flatten()),
+    }
+}
+
+fn schemata_controls_apply(execution: &TestExecution, controls: &ExecutionControls) -> bool {
+    execution.uses_cargo()
+        && !controls.no_exec
+        && !controls.keep_temporary
+        && !controls.coverage.enabled
+        && !controls.coverage.per_test
+        && execution.cargo_flags.is_empty()
+        && !execution.recursive
+}
+
+fn schemata_candidates_apply(candidates: &[MutationCandidate]) -> bool {
+    candidates.len() >= 3
+        && candidates.iter().all(|candidate| {
+            candidate.test_selection == CandidateTestSelection::FullSuite
+                && candidate.workspace.manifest == candidates[0].workspace.manifest
+        })
+}
+
+fn build_schemata(
+    candidates: &[MutationCandidate],
+    timeout: Duration,
+    execution: &TestExecution,
+) -> Result<Option<SchemataBuild>, RunError> {
+    let Some(sources) = schemata_sources(candidates)? else {
+        return Ok(None);
+    };
+    let workspace = &candidates[0].workspace;
+    let temporary = TemporaryWorkspace::create()?;
+    let copied_workspace = copy_workspace(workspace, temporary.path())?;
+    write_schemata_sources(workspace, temporary.path(), &sources)?;
+    let Some(executables) = build_schemata_tests(
+        temporary.path(),
+        &copied_workspace,
+        workspace,
+        timeout,
+        execution,
+    )?
+    else {
+        return Ok(None);
+    };
+    let build = SchemataBuild {
+        package_directory: copied_package_directory(workspace, temporary.path())?,
+        executables,
+        originals: sources
+            .into_iter()
+            .map(|(path, source)| (path, source.original))
+            .collect(),
+        snapshot: snapshot_tree(temporary.path())?,
+        temporary,
+    };
+    let proof = run_test_executables(&build, None, timeout)?;
+    restore_tree(build.temporary.path(), &build.snapshot)?;
+    Ok(matches!(proof, CargoOutcome::Passed).then_some(build))
+}
+
+fn schemata_sources(
+    candidates: &[MutationCandidate],
+) -> Result<Option<BTreeMap<PathBuf, SchemataSource>>, RunError> {
+    let mut sources = BTreeMap::new();
+    for (path, edits) in schemata_edits(candidates) {
+        let original = fs::read_to_string(path)
+            .map_err(|error| run_error(format!("could not read {}: {error}", path.display())))?;
+        if original.contains("///") || original.contains("//!") {
+            return Ok(None);
+        }
+        let Some(rewritten) = rewrite_with_mutant_match(&original, &edits) else {
+            return Ok(None);
+        };
+        sources.insert(
+            path.to_path_buf(),
+            SchemataSource {
+                original,
+                rewritten,
+            },
+        );
+    }
+    Ok(Some(sources))
+}
+
+fn schemata_edits(candidates: &[MutationCandidate]) -> BTreeMap<&Path, Vec<SourceEdit>> {
+    let mut edits = BTreeMap::<&Path, Vec<SourceEdit>>::new();
+    for (index, candidate) in (0u32..).zip(candidates) {
+        let (range, replacement) = candidate.mutation.identity();
+        edits
+            .entry(candidate.source.as_path())
+            .or_default()
+            .push(SourceEdit {
+                index,
+                range,
+                replacement: replacement.to_owned(),
+            });
+    }
+    edits
+}
+
+fn write_schemata_sources(
+    workspace: &Workspace,
+    temporary: &Path,
+    sources: &BTreeMap<PathBuf, SchemataSource>,
+) -> Result<(), RunError> {
+    for (path, source) in sources {
+        let copied = copied_path(workspace, temporary, path)?;
+        fs::write(&copied, &source.rewritten)
+            .map_err(|error| run_error(format!("could not write {}: {error}", copied.display())))?;
+    }
+    Ok(())
+}
+
+fn build_schemata_tests(
+    temporary: &Path,
+    copied_workspace: &Path,
+    workspace: &Workspace,
+    timeout: Duration,
+    execution: &TestExecution,
+) -> Result<Option<Vec<PathBuf>>, RunError> {
+    let messages_path = temporary.join("cargo-messages");
+    let mut command = cargo_test_command(temporary, copied_workspace, workspace, execution)?;
+    command
+        .args(["--no-run", "--message-format=json"])
+        .stdout(Stdio::from(output_file(&messages_path)?))
+        .stderr(Stdio::from(output_file(&temporary.join("cargo-stderr"))?));
+    let outcome = run_process(&mut command, timeout, "cargo test")?;
+    if !matches!(outcome, ProcessOutcome::Exited(status) if status.success()) {
+        return Ok(None);
+    }
+    let messages = cargo_messages(&messages_path)?;
+    let executables = test_executables(&messages);
+    let usable = !executables.is_empty() && !builds_local_proc_macro(&messages);
+    Ok(usable.then_some(executables))
+}
+
+fn cargo_messages(path: &Path) -> Result<Vec<serde_json::Value>, RunError> {
+    let text = fs::read_to_string(path)
+        .map_err(|error| run_error(format!("could not read {}: {error}", path.display())))?;
+    fs::remove_file(path)
+        .map_err(|error| run_error(format!("could not remove {}: {error}", path.display())))?;
+    Ok(text
+        .lines()
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .collect())
+}
+
+fn test_executables(messages: &[serde_json::Value]) -> Vec<PathBuf> {
+    let mut executables = messages
+        .iter()
+        .filter(|message| message["profile"]["test"].as_bool() == Some(true))
+        .filter_map(|message| message["executable"].as_str().map(PathBuf::from))
+        .collect::<Vec<_>>();
+    executables.sort();
+    executables
+}
+
+/// A proc macro runs mutated code inside the compiler while no mutant is
+/// active, so its mutants cannot be selected at test time.
+fn builds_local_proc_macro(messages: &[serde_json::Value]) -> bool {
+    messages.iter().any(|message| {
+        let local = message["package_id"]
+            .as_str()
+            .is_some_and(|id| id.contains("path+file://"));
+        let kinds = message["target"]["kind"].as_array();
+        local && kinds.is_some_and(|kinds| kinds.iter().any(|kind| kind == "proc-macro"))
+    })
+}
+
+fn copied_package_directory(workspace: &Workspace, temporary: &Path) -> Result<PathBuf, RunError> {
+    let manifest = copied_path(workspace, temporary, &workspace.manifest)?;
+    manifest.parent().map(Path::to_path_buf).ok_or_else(|| {
+        run_error(format!(
+            "could not find the package of {}",
+            manifest.display()
+        ))
+    })
+}
+
+fn output_file(path: &Path) -> Result<fs::File, RunError> {
+    fs::File::create(path)
+        .map_err(|error| run_error(format!("could not create {}: {error}", path.display())))
+}
+
+fn test_schemata_candidates(
+    candidates: Vec<MutationCandidate>,
+    build: &SchemataBuild,
+    timeout: Duration,
+    execution: &TestExecution,
+    controls: &ExecutionControls,
+    counters: &ProgressCounters,
+) -> Result<Vec<MutationResult>, RunError> {
+    let mut results = Vec::with_capacity(candidates.len());
+    for (index, candidate) in (0u32..).zip(candidates) {
+        stop_if_interrupted()?;
+        results.push(record_candidate(
+            candidate,
+            execution,
+            controls,
+            counters,
+            |candidate| test_schemata_mutant(build, candidate, index, timeout),
+        ));
+        stop_if_interrupted()?;
+    }
+    Ok(results)
+}
+
+fn test_schemata_mutant(
+    build: &SchemataBuild,
+    candidate: &MutationCandidate,
+    index: u32,
+    timeout: Duration,
+) -> Result<(MutationState, Option<String>), RunError> {
+    let outcome = write_schemata_mutant(build, candidate)
+        .and_then(|()| run_test_executables(build, Some(index), timeout));
+    let restored = restore_tree(build.temporary.path(), &build.snapshot);
+    match (outcome, restored) {
+        (Ok(outcome), Ok(())) => Ok(cargo_mutant_state(outcome, timeout)),
+        (Ok(_), Err(error)) | (Err(error), Ok(())) => Err(error),
+        (Err(operation), Err(restore)) => Err(run_error(format!("{operation}; {restore}"))),
+    }
+}
+
+fn write_schemata_mutant(
+    build: &SchemataBuild,
+    candidate: &MutationCandidate,
+) -> Result<(), RunError> {
+    let original = build
+        .originals
+        .get(&candidate.source)
+        .ok_or_else(|| run_error(format!("could not read {}", candidate.source.display())))?;
+    let mutant = apply_candidate_mutation(candidate, original)?;
+    let path = copied_path(
+        &candidate.workspace,
+        build.temporary.path(),
+        &candidate.source,
+    )?;
+    fs::write(&path, mutant)
+        .map_err(|error| run_error(format!("could not write {}: {error}", path.display())))
+}
+
+fn run_test_executables(
+    build: &SchemataBuild,
+    mutant: Option<u32>,
+    timeout: Duration,
+) -> Result<CargoOutcome, RunError> {
+    let started = Instant::now();
+    for executable in &build.executables {
+        let mut command = test_executable_command(build, executable, mutant)?;
+        let remaining = timeout.saturating_sub(started.elapsed());
+        match run_process(&mut command, remaining, "test executable")? {
+            ProcessOutcome::Exited(status) if status.success() => {}
+            ProcessOutcome::Exited(_) => return Ok(CargoOutcome::Failed(String::new())),
+            ProcessOutcome::TimedOut => return Ok(CargoOutcome::TimedOut),
+        }
+    }
+    Ok(CargoOutcome::Passed)
+}
+
+fn test_executable_command(
+    build: &SchemataBuild,
+    executable: &Path,
+    mutant: Option<u32>,
+) -> Result<Command, RunError> {
+    let output_path = build.temporary.path().join("cargo-stderr");
+    let output = output_file(&output_path)?;
+    let error_output = output.try_clone().map_err(|error| {
+        run_error(format!(
+            "could not prepare {}: {error}",
+            output_path.display()
+        ))
+    })?;
+    let mut command = Command::new(executable);
+    command
+        .current_dir(&build.package_directory)
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(output))
+        .stderr(Stdio::from(error_output));
+    match mutant {
+        Some(index) => command.env(ACTIVE_MUTANT_VARIABLE, index.to_string()),
+        None => command.env_remove(ACTIVE_MUTANT_VARIABLE),
+    };
+    Ok(command)
+}
+
+fn snapshot_tree(temporary: &Path) -> Result<BTreeMap<PathBuf, SnapshotEntry>, RunError> {
+    let mut snapshot = BTreeMap::new();
+    snapshot_directory(temporary, &temporary.join("target"), &mut snapshot)?;
+    Ok(snapshot)
+}
+
+fn snapshot_directory(
+    directory: &Path,
+    target: &Path,
+    snapshot: &mut BTreeMap<PathBuf, SnapshotEntry>,
+) -> Result<(), RunError> {
+    for path in directory_entries(directory)? {
+        if path == target {
+            continue;
+        }
+        let Some(entry) = snapshot_entry(&path)? else {
+            continue;
+        };
+        if matches!(entry, SnapshotEntry::Directory) {
+            snapshot_directory(&path, target, snapshot)?;
+        }
+        snapshot.insert(path, entry);
+    }
+    Ok(())
+}
+
+fn snapshot_entry(path: &Path) -> Result<Option<SnapshotEntry>, RunError> {
+    let file_type = entry_type(path)?;
+    let entry = if file_type.is_symlink() {
+        fs::read_link(path).map(SnapshotEntry::Link)
+    } else if file_type.is_dir() {
+        Ok(SnapshotEntry::Directory)
+    } else if file_type.is_file() {
+        fs::read(path).map(SnapshotEntry::File)
+    } else {
+        return Ok(None);
+    };
+    entry
+        .map(Some)
+        .map_err(|error| run_error(format!("could not read {}: {error}", path.display())))
+}
+
+fn restore_tree(
+    temporary: &Path,
+    snapshot: &BTreeMap<PathBuf, SnapshotEntry>,
+) -> Result<(), RunError> {
+    remove_unknown_entries(temporary, &temporary.join("target"), snapshot)?;
+    for (path, entry) in snapshot {
+        restore_entry(path, entry)
+            .map_err(|error| run_error(format!("could not restore {}: {error}", path.display())))?;
+    }
+    Ok(())
+}
+
+fn remove_unknown_entries(
+    directory: &Path,
+    target: &Path,
+    snapshot: &BTreeMap<PathBuf, SnapshotEntry>,
+) -> Result<(), RunError> {
+    for path in directory_entries(directory)? {
+        if path == target {
+            continue;
+        }
+        let file_type = entry_type(&path)?;
+        match snapshot.get(&path) {
+            Some(SnapshotEntry::Directory) if file_type.is_dir() => {
+                remove_unknown_entries(&path, target, snapshot)?;
+            }
+            Some(SnapshotEntry::File(_)) if file_type.is_file() => {}
+            Some(SnapshotEntry::Link(to)) if fs::read_link(&path).ok().as_ref() == Some(to) => {}
+            _ => remove_entry(&path, file_type)?,
+        }
+    }
+    Ok(())
+}
+
+fn restore_entry(path: &Path, entry: &SnapshotEntry) -> io::Result<()> {
+    match entry {
+        SnapshotEntry::Directory => fs::create_dir_all(path),
+        SnapshotEntry::File(bytes) if fs::read(path).ok().as_ref() != Some(bytes) => {
+            fs::write(path, bytes)
+        }
+        SnapshotEntry::Link(link) if fs::symlink_metadata(path).is_err() => {
+            create_symbolic_link(link, path)
+        }
+        SnapshotEntry::File(_) | SnapshotEntry::Link(_) => Ok(()),
+    }
+}
+
+fn remove_entry(path: &Path, file_type: fs::FileType) -> Result<(), RunError> {
+    let removed = if file_type.is_dir() {
+        fs::remove_dir_all(path)
+    } else {
+        fs::remove_file(path)
+    };
+    removed.map_err(|error| run_error(format!("could not remove {}: {error}", path.display())))
+}
+
+fn entry_type(path: &Path) -> Result<fs::FileType, RunError> {
+    fs::symlink_metadata(path)
+        .map(|metadata| metadata.file_type())
+        .map_err(|error| run_error(format!("could not inspect {}: {error}", path.display())))
+}
+
+fn directory_entries(directory: &Path) -> Result<Vec<PathBuf>, RunError> {
+    fs::read_dir(directory)
+        .and_then(|entries| {
+            entries
+                .map(|entry| entry.map(|entry| entry.path()))
+                .collect::<io::Result<Vec<_>>>()
+        })
+        .map_err(|error| run_error(format!("could not read {}: {error}", directory.display())))
 }
 
 fn validate_adaptive_timeout(
@@ -2729,10 +3163,21 @@ fn test_candidate(
     scratch: &mut Option<WorkerScratch>,
     warm: &WarmBuilds,
 ) -> MutationResult {
+    record_candidate(candidate, execution, controls, counters, |candidate| {
+        test_candidate_state(candidate, timeout, execution, controls, scratch, warm)
+    })
+}
+
+fn record_candidate(
+    candidate: MutationCandidate,
+    execution: &TestExecution,
+    controls: &ExecutionControls,
+    counters: &ProgressCounters,
+    test: impl FnOnce(&MutationCandidate) -> Result<(MutationState, Option<String>), RunError>,
+) -> MutationResult {
     log_candidate_start(execution, &candidate);
     let (state, error) =
-        test_candidate_state(&candidate, timeout, execution, controls, scratch, warm)
-            .unwrap_or_else(|error| (MutationState::Errored, Some(error.to_string())));
+        test(&candidate).unwrap_or_else(|error| (MutationState::Errored, Some(error.to_string())));
     log_candidate_finish(execution, controls, &candidate, state);
     counters.record(state);
     MutationResult {
@@ -2995,20 +3440,24 @@ fn run_mutant_cargo_tests(
             return Ok((MutationState::NotCovered, None));
         }
     };
-    match outcome.outcome {
-        CargoOutcome::Passed => Ok((MutationState::Escaped, None)),
-        CargoOutcome::Failed(detail) if cargo_failure_is_compile(&detail) => Ok((
+    Ok(cargo_mutant_state(outcome.outcome, timeout))
+}
+
+fn cargo_mutant_state(outcome: CargoOutcome, timeout: Duration) -> (MutationState, Option<String>) {
+    match outcome {
+        CargoOutcome::Passed => (MutationState::Escaped, None),
+        CargoOutcome::Failed(detail) if cargo_failure_is_compile(&detail) => (
             MutationState::Skipped,
             Some(format!("mutant did not compile: {}", cargo_detail(detail))),
-        )),
-        CargoOutcome::Failed(_) => Ok((MutationState::Killed, None)),
-        CargoOutcome::TimedOut => Ok((
+        ),
+        CargoOutcome::Failed(_) => (MutationState::Killed, None),
+        CargoOutcome::TimedOut => (
             MutationState::Errored,
             Some(format!(
                 "cargo test timed out after {} seconds",
                 timeout.as_secs()
             )),
-        )),
+        ),
     }
 }
 
@@ -3199,7 +3648,6 @@ fn run_cargo_command(
     execution: &TestExecution,
     test: Option<&TestIdentity>,
 ) -> Result<CargoCommandOutcome, RunError> {
-    let manifest = copied_path(workspace, temporary, &workspace.manifest)?;
     let diagnostic_path = temporary.join("cargo-stderr");
     let diagnostics = fs::File::create(&diagnostic_path).map_err(|error| {
         run_error(format!(
@@ -3213,33 +3661,13 @@ fn run_cargo_command(
             diagnostic_path.display()
         ))
     })?;
-    let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-    let mut command = Command::new(cargo);
+    let mut command = cargo_test_command(temporary, copied_workspace, workspace, execution)?;
     command
-        .args(["test", "--manifest-path"])
-        .arg(manifest)
-        .args(["--target-dir"])
-        .arg(temporary.join("target"))
-        .current_dir(copied_workspace)
-        .env_remove("CARGO_TARGET_DIR")
         .stdout(Stdio::from(diagnostic_stdout))
         .stderr(Stdio::from(diagnostics));
-    if let Some(jobs) = execution.build_jobs {
-        command.arg("-j").arg(jobs.get().to_string());
-    }
-    if let Some(cargo_home) = &workspace.cargo_home {
-        command.env("CARGO_HOME", copied_path(workspace, temporary, cargo_home)?);
-    }
     configure_cargo_test_scope(&mut command, execution, test);
-    stop_if_interrupted()?;
-    configure_process_group(&mut command);
-    let mut child = ProcessChild::new(
-        command
-            .spawn()
-            .map_err(|error| run_error(format!("could not run cargo test: {error}")))?,
-    );
     let started = Instant::now();
-    let outcome = match wait_for_process(&mut child, timeout)? {
+    let outcome = match run_process(&mut command, timeout, "cargo test")? {
         ProcessOutcome::Exited(status) if status.success() => CargoOutcome::Passed,
         ProcessOutcome::Exited(_) => {
             CargoOutcome::Failed(fs::read_to_string(&diagnostic_path).unwrap_or_default())
@@ -3250,6 +3678,46 @@ fn run_cargo_command(
         outcome,
         duration: started.elapsed(),
     })
+}
+
+fn cargo_test_command(
+    temporary: &Path,
+    copied_workspace: &Path,
+    workspace: &Workspace,
+    execution: &TestExecution,
+) -> Result<Command, RunError> {
+    let manifest = copied_path(workspace, temporary, &workspace.manifest)?;
+    let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let mut command = Command::new(cargo);
+    command
+        .args(["test", "--manifest-path"])
+        .arg(manifest)
+        .args(["--target-dir"])
+        .arg(temporary.join("target"))
+        .current_dir(copied_workspace)
+        .env_remove("CARGO_TARGET_DIR");
+    if let Some(jobs) = execution.build_jobs {
+        command.arg("-j").arg(jobs.get().to_string());
+    }
+    if let Some(cargo_home) = &workspace.cargo_home {
+        command.env("CARGO_HOME", copied_path(workspace, temporary, cargo_home)?);
+    }
+    Ok(command)
+}
+
+fn run_process(
+    command: &mut Command,
+    timeout: Duration,
+    program: &str,
+) -> Result<ProcessOutcome, RunError> {
+    stop_if_interrupted()?;
+    configure_process_group(command);
+    let mut child = ProcessChild::new(
+        command
+            .spawn()
+            .map_err(|error| run_error(format!("could not run {program}: {error}")))?,
+    );
+    wait_for_process(&mut child, timeout)
 }
 
 fn configure_cargo_test_scope(

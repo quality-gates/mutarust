@@ -34,6 +34,7 @@ mod mutator;
 mod progress;
 mod report;
 mod return_value;
+mod schemata;
 mod value;
 
 pub use baseline::Baseline;
