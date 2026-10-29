@@ -1550,7 +1550,9 @@ fn build_schemata_tests(
 ) -> Result<Option<Vec<PathBuf>>, RunError> {
     let messages_path = temporary.join("cargo-messages");
     let mut command = cargo_test_command(temporary, copied_workspace, workspace, execution)?;
+    // One CPU spends the default 256 codegen units on scheduling, not on the compile.
     command
+        .env("CARGO_PROFILE_TEST_CODEGEN_UNITS", "1")
         .args(["--no-run", "--message-format=json"])
         .stdout(Stdio::from(output_file(&messages_path)?))
         .stderr(Stdio::from(output_file(&temporary.join("cargo-stderr"))?));
