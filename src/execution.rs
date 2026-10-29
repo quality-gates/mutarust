@@ -633,27 +633,38 @@ pub fn run_mutation_tests_with_controls(
     let early_budget = adaptive_timeout(timeout, controls.timeout_coefficient, timeout);
     let coverage = collect_coverage(&plan.workspaces, early_budget, execution, controls)?;
     apply_coverage_selection(&mut plan.candidates, &coverage);
-    let (timeout, warm) = if controls.no_exec || !execution.uses_cargo() {
-        (timeout, WarmBuilds::default())
-    } else {
-        let clean = test_clean_workspaces(&plan.workspaces, early_budget, execution)?;
-        (
-            adaptive_timeout(timeout, controls.timeout_coefficient, clean.duration),
-            clean.warm,
-        )
-    };
     let counters = Arc::new(ProgressCounters::new());
     let monitor = controls
         .progress
         .then(|| ProgressMonitor::start(Arc::clone(&counters)));
-    let results = test_candidates(
+    let results = match schemata_without_clean_suite(
         plan.candidates,
+        &plan.workspaces,
         timeout,
         execution,
         controls,
         &counters,
-        &warm,
-    )?;
+    )? {
+        EarlySchemata::Ready(results) => results,
+        EarlySchemata::Skip(candidates) => run_clean_then_candidates(
+            candidates,
+            &plan.workspaces,
+            timeout,
+            execution,
+            controls,
+            &counters,
+            true,
+        )?,
+        EarlySchemata::Fallback(candidates) => run_clean_then_candidates(
+            candidates,
+            &plan.workspaces,
+            timeout,
+            execution,
+            controls,
+            &counters,
+            false,
+        )?,
+    };
     drop(monitor);
     Ok(MutationRun {
         results,
@@ -1082,6 +1093,36 @@ fn append_test_target(command: &mut Command, test: &TestIdentity) {
     }
 }
 
+fn run_clean_then_candidates(
+    candidates: Vec<MutationCandidate>,
+    workspaces: &[Workspace],
+    timeout: Duration,
+    execution: &TestExecution,
+    controls: &ExecutionControls,
+    counters: &Arc<ProgressCounters>,
+    allow_schemata: bool,
+) -> Result<Vec<MutationResult>, RunError> {
+    let early_budget = adaptive_timeout(timeout, controls.timeout_coefficient, timeout);
+    let (timeout, warm) = if controls.no_exec || !execution.uses_cargo() {
+        (timeout, WarmBuilds::default())
+    } else {
+        let clean = test_clean_workspaces(workspaces, early_budget, execution)?;
+        (
+            adaptive_timeout(timeout, controls.timeout_coefficient, clean.duration),
+            clean.warm,
+        )
+    };
+    test_candidates(
+        candidates,
+        timeout,
+        execution,
+        controls,
+        counters,
+        &warm,
+        allow_schemata,
+    )
+}
+
 fn test_candidates(
     candidates: Vec<MutationCandidate>,
     timeout: Duration,
@@ -1089,16 +1130,19 @@ fn test_candidates(
     controls: &ExecutionControls,
     counters: &Arc<ProgressCounters>,
     warm: &WarmBuilds,
+    allow_schemata: bool,
 ) -> Result<Vec<MutationResult>, RunError> {
     let workers = active_worker_count(candidates.len(), execution, controls);
     log_worker_count(execution, workers);
     // Cap each Cargo build so worker count times Cargo jobs stays near the CPU count.
     let mut execution = execution.clone();
     execution.build_jobs = NonZeroUsize::new(cargo_build_jobs(workers));
-    if let Some(build) = prepare_schemata(&candidates, timeout, &execution, controls)? {
-        return test_schemata_candidates(
-            candidates, &build, timeout, &execution, controls, counters,
-        );
+    if allow_schemata {
+        if let Some(build) = prepare_schemata(&candidates, timeout, &execution, controls)? {
+            return test_schemata_candidates(
+                candidates, &build, timeout, &execution, controls, counters,
+            );
+        }
     }
     if workers < 2 {
         return test_candidates_sequential(
@@ -1290,6 +1334,88 @@ enum SnapshotEntry {
     Directory,
     File(Vec<u8>),
     Link(PathBuf),
+}
+
+enum EarlySchemata {
+    Skip(Vec<MutationCandidate>),
+    Fallback(Vec<MutationCandidate>),
+    Ready(Vec<MutationResult>),
+}
+
+fn schemata_without_clean_suite(
+    candidates: Vec<MutationCandidate>,
+    workspaces: &[Workspace],
+    timeout: Duration,
+    execution: &TestExecution,
+    controls: &ExecutionControls,
+    counters: &Arc<ProgressCounters>,
+) -> Result<EarlySchemata, RunError> {
+    if !schemata_can_replace_clean_suite(workspaces, &candidates, execution, controls) {
+        return Ok(EarlySchemata::Skip(candidates));
+    }
+    let workers = active_worker_count(candidates.len(), execution, controls);
+    log_worker_count(execution, workers);
+    let mut execution = execution.clone();
+    execution.build_jobs = NonZeroUsize::new(cargo_build_jobs(workers));
+    let Some(build) = prepare_schemata(&candidates, timeout, &execution, controls)? else {
+        return Ok(EarlySchemata::Fallback(candidates));
+    };
+    test_schemata_candidates(candidates, &build, timeout, &execution, controls, counters)
+        .map(EarlySchemata::Ready)
+}
+
+/// The default-arm run already tests this one package.
+///
+/// A second workspace, a timeout coefficient, or rustdoc still needs the clean suite.
+fn schemata_can_replace_clean_suite(
+    workspaces: &[Workspace],
+    candidates: &[MutationCandidate],
+    execution: &TestExecution,
+    controls: &ExecutionControls,
+) -> bool {
+    controls.timeout_coefficient.is_none()
+        && workspaces.len() == 1
+        && schemata_controls_apply(execution, controls)
+        && schemata_candidates_apply(candidates)
+        && !workspace_contains_rustdoc(&workspaces[0])
+}
+
+fn workspace_contains_rustdoc(workspace: &Workspace) -> bool {
+    directory_contains_rustdoc(&workspace.root)
+}
+
+fn directory_contains_rustdoc(directory: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(directory) else {
+        return true;
+    };
+    for entry in entries {
+        let Ok(entry) = entry else {
+            return true;
+        };
+        let path = entry.path();
+        let Ok(file_type) = entry.file_type() else {
+            return true;
+        };
+        if file_type.is_dir() {
+            if path
+                .file_name()
+                .is_some_and(|name| name == "target" || name == ".git")
+            {
+                continue;
+            }
+            if directory_contains_rustdoc(&path) {
+                return true;
+            }
+        } else if path.extension().is_some_and(|extension| extension == "rs") {
+            let Ok(text) = fs::read_to_string(&path) else {
+                return true;
+            };
+            if text.contains("///") || text.contains("//!") {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn prepare_schemata(
