@@ -3801,6 +3801,9 @@ fn wait_for_process(
     let started = Instant::now();
     let mut interval = Duration::from_millis(5);
     let max_interval = Duration::from_millis(100);
+    // pidfd wakes when the child exits. signal() restarts poll, so the poll
+    // limit stays short enough to notice an interrupt during a long test.
+    let pidfd = PidFd::open(child.process.id());
     loop {
         if let Some(status) = child.try_wait()? {
             return Ok(ProcessOutcome::Exited(status));
@@ -3815,8 +3818,76 @@ fn wait_for_process(
             return Ok(ProcessOutcome::TimedOut);
         }
         let remaining = timeout - elapsed;
-        thread::sleep(interval.min(remaining));
-        interval = (interval * 2).min(max_interval);
+        if let Some(pidfd) = &pidfd {
+            pidfd.poll(remaining.min(max_interval))?;
+        } else {
+            thread::sleep(interval.min(remaining));
+            interval = (interval * 2).min(max_interval);
+        }
+    }
+}
+
+struct PidFd {
+    #[cfg(target_os = "linux")]
+    fd: libc::c_int,
+}
+
+impl PidFd {
+    fn open(pid: u32) -> Option<Self> {
+        #[cfg(target_os = "linux")]
+        {
+            let Ok(pid) = libc::pid_t::try_from(pid) else {
+                return None;
+            };
+            let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) };
+            let Ok(fd) = libc::c_int::try_from(fd) else {
+                return None;
+            };
+            if fd < 0 {
+                return None;
+            }
+            Some(Self { fd })
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = pid;
+            None
+        }
+    }
+
+    fn poll(&self, timeout: Duration) -> Result<(), RunError> {
+        #[cfg(target_os = "linux")]
+        {
+            let millis = libc::c_int::try_from(timeout.as_millis()).unwrap_or(libc::c_int::MAX);
+            let mut pollfd = libc::pollfd {
+                fd: self.fd,
+                events: libc::POLLIN,
+                revents: 0,
+            };
+            let result = unsafe { libc::poll(&mut pollfd, 1, millis) };
+            if result < 0 {
+                let error = std::io::Error::last_os_error();
+                if error.kind() != std::io::ErrorKind::Interrupted {
+                    return Err(run_error(format!(
+                        "could not wait for test command: {error}"
+                    )));
+                }
+            }
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = (self, timeout);
+        }
+        Ok(())
+    }
+}
+
+impl Drop for PidFd {
+    fn drop(&mut self) {
+        #[cfg(target_os = "linux")]
+        unsafe {
+            let _ = libc::close(self.fd);
+        }
     }
 }
 
