@@ -1357,6 +1357,88 @@ mod tests {
     };
 
     #[test]
+    fn artifact_prefixes_include_only_selected_manifests_and_the_fallback() {
+        struct Fixture(PathBuf);
+        impl Drop for Fixture {
+            fn drop(&mut self) {
+                let _ = fs::remove_dir_all(&self.0);
+            }
+        }
+        let fixture = Fixture(
+            fs::canonicalize(std::env::temp_dir())
+                .unwrap()
+                .join(format!(
+                    "mutarust-prefixes-{}-{}",
+                    std::process::id(),
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_nanos()
+                )),
+        );
+        fs::create_dir_all(fixture.0.join("first/src")).unwrap();
+        fs::create_dir_all(fixture.0.join("second/src")).unwrap();
+        fs::write(
+            fixture.0.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"first\", \"second\"]\nresolver = \"2\"\n",
+        )
+        .unwrap();
+        fs::write(
+            fixture.0.join("first/Cargo.toml"),
+            "[package]\nname = \"first-package\"\nversion = \"0.1.0\"\nedition = \"2021\"\n[lib]\nname = \"custom_lib\"\n[[bin]]\nname = \"tool-bin\"\npath = \"src/main.rs\"\n",
+        )
+        .unwrap();
+        fs::write(fixture.0.join("first/src/lib.rs"), "").unwrap();
+        fs::write(fixture.0.join("first/src/main.rs"), "fn main() {}\n").unwrap();
+        fs::write(
+            fixture.0.join("second/Cargo.toml"),
+            "[package]\nname = \"second-package\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        fs::write(fixture.0.join("second/src/lib.rs"), "").unwrap();
+        let metadata = cargo_metadata::MetadataCommand::new()
+            .manifest_path(fixture.0.join("Cargo.toml"))
+            .no_deps()
+            .exec()
+            .unwrap();
+        let manifest = fixture.0.join("first/Cargo.toml");
+        let package = super::CargoPackage {
+            manifest: manifest.clone(),
+            name: "fallback-package".to_owned(),
+        };
+        let prefixes =
+            super::target_artifact_prefixes(&metadata, &[manifest.clone(), manifest], &package);
+        assert_eq!(
+            prefixes,
+            [
+                "custom_lib",
+                "fallback-package",
+                "fallback_package",
+                "first-package",
+                "first_package",
+                "libcustom_lib",
+                "libfallback-package",
+                "libfallback_package",
+                "libfirst-package",
+                "libfirst_package",
+                "libtool-bin",
+                "libtool_bin",
+                "tool-bin",
+                "tool_bin",
+            ]
+        );
+        assert_eq!(
+            super::target_artifact_prefixes(&metadata, &[], &package),
+            [
+                "fallback-package",
+                "fallback_package",
+                "libfallback-package",
+                "libfallback_package"
+            ]
+        );
+    }
+
+    #[test]
     fn cargo_build_jobs_divides_cpus_across_workers() {
         let cpus = cargo_build_jobs(1);
         assert!(cpus >= 1);
@@ -1972,13 +2054,11 @@ fn target_artifact_prefixes(
     manifests: &[PathBuf],
     package: &CargoPackage,
 ) -> Vec<String> {
+    let manifests: BTreeSet<&Path> = manifests.iter().map(PathBuf::as_path).collect();
     let mut names = BTreeSet::new();
     names.insert(package.name.clone());
     for pkg in &metadata.packages {
-        if manifests
-            .iter()
-            .any(|m| m == pkg.manifest_path.as_std_path())
-        {
+        if manifests.contains(pkg.manifest_path.as_std_path()) {
             names.insert(pkg.name.to_string());
             for target in &pkg.targets {
                 names.insert(target.name.clone());
