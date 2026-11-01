@@ -707,7 +707,7 @@ fn selected_tests(
 }
 
 fn collect_coverage(
-    workspaces: &[Workspace],
+    workspaces: &[Arc<Workspace>],
     timeout: Duration,
     execution: &TestExecution,
     controls: &ExecutionControls,
@@ -729,7 +729,7 @@ fn collect_coverage(
 }
 
 fn collect_normal_coverage(
-    workspaces: &[Workspace],
+    workspaces: &[Arc<Workspace>],
     timeout: Duration,
     execution: &TestExecution,
 ) -> Result<CoverageMap, RunError> {
@@ -742,7 +742,7 @@ fn collect_normal_coverage(
 }
 
 fn collect_per_test_coverage(
-    workspaces: &[Workspace],
+    workspaces: &[Arc<Workspace>],
     timeout: Duration,
     execution: &TestExecution,
 ) -> Result<PerTestCoverageMap, RunError> {
@@ -783,7 +783,7 @@ fn collect_per_test_coverage(
     Ok(coverage)
 }
 
-fn coverage_workspaces(workspaces: &[Workspace], recursive: bool) -> Vec<&Workspace> {
+fn coverage_workspaces(workspaces: &[Arc<Workspace>], recursive: bool) -> Vec<&Workspace> {
     let mut scopes = BTreeSet::new();
     workspaces
         .iter()
@@ -795,6 +795,7 @@ fn coverage_workspaces(workspaces: &[Workspace], recursive: bool) -> Vec<&Worksp
             };
             scopes.insert(scope.clone())
         })
+        .map(Arc::as_ref)
         .collect()
 }
 
@@ -1710,7 +1711,7 @@ error: could not compile `checked` (lib) due to 1 previous error";
 }
 
 fn test_clean_workspaces(
-    workspaces: &[Workspace],
+    workspaces: &[Arc<Workspace>],
     timeout: Duration,
     execution: &TestExecution,
 ) -> Result<CleanSuite, RunError> {
@@ -1973,8 +1974,8 @@ fn deduplicate_candidates(candidates: &mut Vec<MutationCandidate>) {
 fn workspace_for(
     source: &Path,
     metadata_cache: &mut Vec<Metadata>,
-    workspace_cache: &mut Vec<Workspace>,
-) -> Result<Workspace, RunError> {
+    workspace_cache: &mut Vec<Arc<Workspace>>,
+) -> Result<Arc<Workspace>, RunError> {
     let metadata = if let Some(metadata) = metadata_cache
         .iter()
         .find(|metadata| package_for(metadata, source).is_ok())
@@ -2004,7 +2005,7 @@ fn workspace_for(
     }) {
         return Ok(workspace.clone());
     }
-    let workspace = workspace_from_metadata(source, metadata, package)?;
+    let workspace = Arc::new(workspace_from_metadata(source, metadata, package)?);
     workspace_cache.push(workspace.clone());
     Ok(workspace)
 }
@@ -2686,7 +2687,7 @@ fn source_error(error: SourceError) -> RunError {
 }
 
 struct CandidateScope<'a> {
-    workspace: &'a Workspace,
+    workspace: &'a Arc<Workspace>,
     source: &'a Path,
     text: &'a str,
     lines: &'a [&'a str],
@@ -4522,7 +4523,7 @@ fn remove_non_target_entries(temporary: &Path) -> Result<(), RunError> {
 }
 
 struct MutationPlan {
-    workspaces: Vec<Workspace>,
+    workspaces: Vec<Arc<Workspace>>,
     candidates: Vec<MutationCandidate>,
 }
 
@@ -4537,7 +4538,7 @@ struct IndexedResult {
 }
 
 struct MutationCandidate {
-    workspace: Workspace,
+    workspace: Arc<Workspace>,
     source: PathBuf,
     mutator: String,
     mutation: Mutation,
@@ -4552,7 +4553,6 @@ enum CandidateTestSelection {
     Tests(Vec<TestIdentity>),
 }
 
-#[derive(Clone)]
 struct Workspace {
     root: PathBuf,
     source_root: PathBuf,
