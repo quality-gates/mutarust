@@ -118,6 +118,64 @@ fn write_single_file_crate(root: &FixtureRoot, package: &str, source: &str) -> s
 }
 
 #[test]
+fn dry_run_preserves_package_sources_and_mutation_order() {
+    let _run_guard = public_run_guard();
+    let root = unique_temporary_root("multiple-packages");
+    std::fs::create_dir_all(&root.0).expect("workspace directory must be created");
+    std::fs::write(
+        root.0.join("Cargo.toml"),
+        "[workspace]\nresolver = \"2\"\nmembers = [\"alpha\", \"beta\"]\n",
+    )
+    .expect("workspace manifest must be written");
+    for package in ["alpha", "beta"] {
+        let package_root = root.0.join(package);
+        std::fs::create_dir_all(package_root.join("src")).expect("source directory must exist");
+        std::fs::write(
+            package_root.join("Cargo.toml"),
+            format!("[package]\nname = \"{package}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"),
+        )
+        .expect("package manifest must be written");
+        let source = (0..10)
+            .map(|i| format!("pub fn value_{i}() -> bool {{ let value = false; value }}\n"))
+            .collect::<String>();
+        std::fs::write(package_root.join("src/lib.rs"), source).expect("source must be written");
+    }
+    let mut registry = mutarust::Registry::builtins();
+    registry.retain(|name| name == "conditional/bool-literal");
+    let names = registry.names().map(str::to_owned).collect::<Vec<_>>();
+    let filters = mutarust::SourceFilters::new(&[], &[], None, &names)
+        .expect("source filters must accept the bool mutator");
+    let controls = mutarust::ExecutionControls {
+        dry_run: true,
+        ..Default::default()
+    };
+    let execution = mutarust::TestExecution::custom("false", false, false, false)
+        .expect("the dry-run command must parse");
+    let run = mutarust::run_mutation_tests_with_controls(
+        &[root.0.to_string_lossy().into_owned()],
+        &registry,
+        std::time::Duration::from_secs(1),
+        None,
+        &filters,
+        &execution,
+        &controls,
+    )
+    .expect("the dry run must complete");
+    let actual = run
+        .results()
+        .iter()
+        .map(|result| (result.source.clone(), result.line))
+        .collect::<Vec<_>>();
+    let expected = ["alpha", "beta"]
+        .into_iter()
+        .flat_map(|package| {
+            (1..=10).map(move |line| (std::path::PathBuf::from(package).join("src/lib.rs"), line))
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(actual, expected);
+}
+
+#[test]
 fn dry_run_excludes_range_break_mutants_inside_cfg_test_modules() {
     let _run_guard = public_run_guard();
     let root = unique_temporary_root("range-filter");
