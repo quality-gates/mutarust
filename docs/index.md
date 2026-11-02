@@ -23,6 +23,8 @@ See [Quick Start](quickstart.md) for a short walkthrough. See the
 
 Exploratory testing reports record user journeys, confirmed bugs, and
 evidence. See the
-[2026-09-26 core journeys report](exploratory-testing/2026-09-26-core-journeys.md)
+[2026-09-26 core journeys report](exploratory-testing/2026-09-26-core-journeys.md),
+the
+[2026-10-03 workers, custom test command, and source scope report](exploratory-testing/2026-10-03-workers-exec-scope.md),
 and the
-[2026-10-03 workers, custom test command, and source scope report](exploratory-testing/2026-10-03-workers-exec-scope.md).
+[2026-11-02 gates, baselines, and changed lines report](exploratory-testing/2026-11-02-gates-baseline-scope.md).

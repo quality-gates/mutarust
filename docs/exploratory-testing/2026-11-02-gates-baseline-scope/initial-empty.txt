@@ -1,0 +1,41 @@
+Journey 1: reports and score gate
+a54d3f9ee1ae941d5fc84ab13fa03e471d498a2473f1ef6c621bcaaf871f22f9  src/lib.rs
+
+$ /work/.scratch/target/debug/mutarust --workers 1 --config mutarust.yml --logger-summary-json --logger-agentic-json --logger-gitlab .
+Killed: 0
+Escaped: 0
+Errored: 0
+Not covered: 0
+Skipped: 0
+Total: 0
+Mutation score: 0.00%
+Per-mutator results:
+Mutator | Killed | Escaped | Skipped | Total
+exit=0
+--- report.json
+{"metadata":{"version":"0.2.1","hasCoverage":false,"oneMutant":false},"stats":{"totalMutantsCount":0,"killedCount":0,"notCoveredCount":0,"escapedCount":0,"errorCount":0,"skippedCount":0,"msi":0.0,"coveredCodeMsi":0.0},"escaped":[],"killed":[],"errored":[]}--- mutarust-summary.json
+{"totalMutantsCount":0,"killedCount":0,"notCoveredCount":0,"escapedCount":0,"errorCount":0,"skippedCount":0,"msi":0.0,"coveredCodeMsi":0.0}--- mutarust-agentic.json
+{
+  "generated_at": "2026-11-02T17:33:24Z",
+  "msi": 0.0,
+  "escaped_count": 0,
+  "reminder": "A mutant is an example of how this code could be wrong — it's not a script for the test. Don't assert on the mutant directly. Instead ask: if this code were buggy, what would a caller of the public API observe go wrong? Write a test for that.",
+  "mutants": []
+}--- mutarust-gitlab.json
+[]--- HTML evidence
+      2 Escaped
+      1 No escaped mutants
+
+$ /work/.scratch/target/debug/mutarust --workers 1 --config mutarust.yml --min-msi 100 .
+Killed: 0
+Escaped: 0
+Errored: 0
+Not covered: 0
+Skipped: 0
+Total: 0
+Mutation score: 0.00%
+Per-mutator results:
+Mutator | Killed | Escaped | Skipped | Total
+mutarust: mutation score 0.00% is below the required 100%
+exit=4
+a54d3f9ee1ae941d5fc84ab13fa03e471d498a2473f1ef6c621bcaaf871f22f9  src/lib.rs

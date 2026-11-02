@@ -1,0 +1,86 @@
+Journey 2: accepted baseline
+
+$ /work/.scratch/target/debug/mutarust --workers 1 --enable conditional/bool-literal --update-baseline .
+Baseline written to "mutarust-baseline.json" (1 escaped mutant(s))
+exit=0
+--- baseline
+{
+  "version": 1,
+  "mutants": [
+    {
+      "id": "b9a03954350d147b915e940fe760cb21",
+      "file": "src/lib.rs",
+      "mutator": "conditional/bool-literal",
+      "line": 2
+    }
+  ]
+}
+
+$ /work/.scratch/target/debug/mutarust --workers 1 --enable conditional/bool-literal --baseline mutarust-baseline.json --fail-on-escaped .
+killed src/lib.rs conditional/bool-literal
+  ID: 8b25da1bb9c6e587675316715d8be248
+  Blacklist checksum: c056b4a14386291b011db5e4053d8e58
+escaped src/lib.rs conditional/bool-literal
+  ID: b9a03954350d147b915e940fe760cb21
+  Blacklist checksum: 2dc2c146da136da396da6529a670b07e
+--- src/lib.rs
++++ src/lib.rs
+@@ -2,1 +2,1 @@
+-pub fn unchecked() -> bool { let value = true; value }
++pub fn unchecked() -> bool { let value = false; value }
+Killed: 1
+Escaped: 1
+Errored: 0
+Not covered: 0
+Skipped: 0
+Total: 2
+Mutation score: 50.00%
+Per-mutator results:
+Mutator | Killed | Escaped | Skipped | Total
+conditional/bool-literal | 1 | 1 | 0 | 2
+exit=0
+
+$ /work/.scratch/target/debug/mutarust --workers 1 --enable conditional/bool-literal --baseline mutarust-baseline.json --fail-on-escaped .
+killed src/lib.rs conditional/bool-literal
+  ID: 8b25da1bb9c6e587675316715d8be248
+  Blacklist checksum: c056b4a14386291b011db5e4053d8e58
+escaped src/lib.rs conditional/bool-literal
+  ID: b9a03954350d147b915e940fe760cb21
+  Blacklist checksum: 2dc2c146da136da396da6529a670b07e
+--- src/lib.rs
++++ src/lib.rs
+@@ -2,1 +2,1 @@
+-pub fn unchecked() -> bool { let value = true; value }
++pub fn unchecked() -> bool { let value = false; value }
+escaped src/lib.rs conditional/bool-literal
+  ID: 0d23e39e3598a59dc3ed935d854e51bf
+  Blacklist checksum: 84e74237181a41d2f57acd52e8b0f395
+--- src/lib.rs
++++ src/lib.rs
+@@ -10,1 +10,1 @@
+-pub fn new_unchecked() -> bool { let value = false; value }
++pub fn new_unchecked() -> bool { let value = true; value }
+Killed: 1
+Escaped: 2
+Errored: 0
+Not covered: 0
+Skipped: 0
+Total: 3
+Mutation score: 33.33%
+Per-mutator results:
+Mutator | Killed | Escaped | Skipped | Total
+conditional/bool-literal | 1 | 2 | 0 | 3
+mutarust: 1 new mutant(s) escaped — kill them or run --update-baseline to accept
+exit=4
+--- baseline after new source
+{
+  "version": 1,
+  "mutants": [
+    {
+      "id": "b9a03954350d147b915e940fe760cb21",
+      "file": "src/lib.rs",
+      "mutator": "conditional/bool-literal",
+      "line": 2
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+Journey 3: changed-line selection
+
+$ /work/.scratch/target/debug/mutarust --git-diff-lines --git-diff-base HEAD --enable conditional/bool-literal --dry-run .
+Total: 0 mutation(s) would be generated. No files written, no tests run.
+exit=0
+diff --git a/src/lib.rs b/src/lib.rs
+index c8985fb..5fa5b00 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -6,3 +6,5 @@ mod tests {
+     #[test]
+     fn checked_works() { assert!(super::checked()); }
+ }
++
++pub fn new_unchecked() -> bool { let value = false; value }
+
+$ /work/.scratch/target/debug/mutarust --git-diff-lines --git-diff-base HEAD --enable conditional/bool-literal --workers 1 --logger-summary-json .
+escaped src/lib.rs conditional/bool-literal
+  ID: 0d23e39e3598a59dc3ed935d854e51bf
+  Blacklist checksum: 84e74237181a41d2f57acd52e8b0f395
+--- src/lib.rs
++++ src/lib.rs
+@@ -10,1 +10,1 @@
+-pub fn new_unchecked() -> bool { let value = false; value }
++pub fn new_unchecked() -> bool { let value = true; value }
+Killed: 0
+Escaped: 1
+Errored: 0
+Not covered: 0
+Skipped: 0
+Total: 1
+Mutation score: 0.00%
+Per-mutator results:
+Mutator | Killed | Escaped | Skipped | Total
+conditional/bool-literal | 0 | 1 | 0 | 1
+exit=0
+--- changed summary
+{"totalMutantsCount":1,"killedCount":0,"notCoveredCount":0,"escapedCount":1,"errorCount":0,"skippedCount":0,"msi":0.0,"coveredCodeMsi":0.0}--- source after run
+diff --git a/src/lib.rs b/src/lib.rs
+index c8985fb..5fa5b00 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -6,3 +6,5 @@ mod tests {
+     #[test]
+     fn checked_works() { assert!(super::checked()); }
+ }
++
++pub fn new_unchecked() -> bool { let value = false; value }
