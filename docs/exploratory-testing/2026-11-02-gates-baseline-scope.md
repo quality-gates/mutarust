@@ -15,8 +15,8 @@ were not reproduced or refiled in this pass.
 
 The pass built the Linux debug binary with `cargo build --locked -j 2` in a
 container based on `rust:1.93-slim`. The container had two CPUs and 2 GiB of
-memory. This differs from the repository recommendation of one CPU and 512 MiB;
-the pass makes no timing comparison. The build used the repository `Cargo.lock`.
+memory. This differs from the repository recommendation of one CPU and 512 MiB.
+The pass makes no timing comparison. The build used the repository `Cargo.lock`.
 The runs used one Mutarust worker and had no network access. Cargo used offline mode for the consumer
 package. Cargo cache, build files, temporary mutation areas, and the consumer
 package were inside the worktree. The consumer package had no external
@@ -28,8 +28,8 @@ consumer package and a local Git repository. It selects only
 checks one of them. The script creates a clean package at the start and
 resets the source before the changed-line journey. The script records command
 output and report content in a new directory under `.scratch`. The files linked
-below record the original run. A second full replay produced the same output
-except for the agent-ready report timestamp. The [comparison hashes](2026-11-02-gates-baseline-scope/replay-comparison.txt)
+below record the second run. It matched the first run except for the
+agent-ready report timestamp. The [comparison hashes](2026-11-02-gates-baseline-scope/replay-comparison.txt)
 exclude that timestamp. After the replay, the script was changed to write to a
 new scratch directory instead of replacing the evidence. A third run of the
 changed script matched the recorded output, apart from the timestamp. Use a
@@ -56,11 +56,11 @@ records the result. The [mutator guide](../mutators.md) limits this mutator to
 specific expression positions, so this was not classified as a product bug.
 The replay script uses local initializers instead.
 
-## Journey 1: reports and the score gate
+## Journey 1: reports and the mutation score gate
 
-The goal was to find a weak test and use the score as a gate. With one tested
+The goal was to find a weak test and use the mutation score as a gate. With one tested
 function and one untested function, the normal run reported one killed and
-one escaped mutant, a 50% score, and exit value 0. The full, compact,
+one escaped mutant, a 50% mutation score, and exit value 0. The full, compact,
 agent-ready, and GitLab JSON outputs showed one escaped mutant. The three
 reports that contain stable mutant IDs showed the same ID. The HTML report
 contained the untested function. A second run with
@@ -70,7 +70,7 @@ the same. See [journey 1 output](2026-11-02-gates-baseline-scope/journey1.txt).
 ## Journey 2: accept an existing escape
 
 The goal was to accept one known escape without accepting a new one. The
-baseline update wrote the escaped ID. A run with that baseline and
+baseline update wrote the stable mutant ID of the escape. A run with that baseline and
 `--fail-on-escaped` returned 0. After the script added another untested
 function, the same command returned 4 and reported one new escaped mutant.
 The baseline file still contained only the original ID. See
