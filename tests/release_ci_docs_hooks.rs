@@ -325,12 +325,15 @@ fn optional_hooks_mirror_fast_ci_and_are_not_activated_automatically() {
     );
     assert!(is_executable(&pre_push_path), "pre-push must be executable");
 
-    let git_config = fs::read_to_string(git_config_path(&repo_path("")))
-        .expect("repository Git config must be readable");
-    assert!(
-        !git_config.contains("hooksPath = githooks") && !git_config.contains("hooksPath=githooks"),
-        "repository hooks must not activate automatically"
-    );
+    if repo_path(".git").exists() {
+        let git_config = fs::read_to_string(git_config_path(&repo_path("")))
+            .expect("repository Git config must be readable");
+        assert!(
+            !git_config.contains("hooksPath = githooks")
+                && !git_config.contains("hooksPath=githooks"),
+            "repository hooks must not activate automatically"
+        );
+    }
     assert!(
         !repo_path(".git/hooks/pre-commit").is_file()
             || !fs::read_to_string(repo_path(".git/hooks/pre-commit"))
