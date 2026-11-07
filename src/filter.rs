@@ -1,13 +1,14 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::fs;
 use std::ops::Range;
 use std::path::{Component, Path, PathBuf};
 
 use proc_macro2::Span;
 use regex::Regex;
-use rustc_lexer::{TokenKind, tokenize};
 use syn::spanned::Spanned;
 use syn::visit::Visit;
+
+use crate::suppression::Suppression;
 
 /// Filters that limit which source candidates Mutarust mutates.
 pub struct SourceFilters {
@@ -77,11 +78,20 @@ impl SourceFilters {
         })
     }
 
+    /// Builds the source-local rules for one Rust source file.
+    pub(crate) fn for_source(
+        &self,
+        source: &Path,
+        text: &str,
+        parsed: Option<&syn::File>,
+    ) -> Result<SourceFilter, String> {
+        build_source_filter(self, source, text, parsed)
+    }
+
     /// Returns whether a source path is outside all excluded directory prefixes.
     pub(crate) fn allows_source(&self, source: &Path, source_root: &Path) -> bool {
         let relative = source.strip_prefix(source_root).unwrap_or(source);
-        self.touch_content_policies()
-            && !self.is_absolutely_excluded(source)
+        !self.is_absolutely_excluded(source)
             && !self
                 .excluded_directories
                 .iter()
@@ -91,33 +101,13 @@ impl SourceFilters {
 
     /// Returns whether an absolute exclusion keeps a source outside Cargo work.
     pub(crate) fn allows_source_before_workspace(&self, source: &Path) -> bool {
-        self.touch_content_policies() && !self.is_absolutely_excluded(source)
-    }
-
-    /// Path filters and content-skip policies share one filter value.
-    ///
-    /// Path checks do not apply the skip policies. This read keeps the path
-    /// and content fields in one messrust cohesion group.
-    fn touch_content_policies(&self) -> bool {
-        let _ = (self.skip_without_test, self.skip_with_cfg);
-        true
+        !self.is_absolutely_excluded(source)
     }
 
     fn is_absolutely_excluded(&self, source: &Path) -> bool {
         self.excluded_directories
             .iter()
             .any(|excluded| excluded.is_absolute() && source.starts_with(excluded))
-    }
-
-    /// Builds the source-local rules for one Rust source file.
-    pub(crate) fn for_source(
-        &self,
-        source: &Path,
-        text: &str,
-        parsed: Option<&syn::File>,
-    ) -> Result<SourceFilter, String> {
-        let _ = self.touch_content_policies();
-        build_source_filter(self, source, text, parsed)
     }
 }
 
@@ -136,8 +126,7 @@ pub(crate) struct SourceFilter {
     line_index: LineIndex,
     ignored_lines: BTreeSet<usize>,
     function_matcher: FunctionMatcher,
-    disabled_functions: FunctionDisables,
-    disabled_lines: BTreeMap<usize, Vec<MutatorSelection>>,
+    suppression: Suppression,
     cfg_ranges: Vec<Range<usize>>,
     test_ranges: Vec<Range<usize>>,
     skip_source: bool,
@@ -163,14 +152,18 @@ fn build_source_filter(
         }
     };
     let function_matcher = FunctionMatcher::new(filters, functions);
-    let (disabled_functions, disabled_lines) =
-        collect_annotations(text, &line_index, source, filters, &function_matcher)?;
+    let suppression = Suppression::new(
+        text,
+        &line_index,
+        source,
+        &filters.known_mutators,
+        &function_matcher,
+    )?;
     Ok(SourceFilter {
         line_index,
         ignored_lines: matching_lines(text, &filters.ignored_source_lines),
         function_matcher,
-        disabled_functions,
-        disabled_lines,
+        suppression,
         cfg_ranges: if filters.skip_with_cfg {
             normalize_ranges(conditional_source_ranges(text, parsed))
         } else {
@@ -191,9 +184,8 @@ impl SourceFilter {
     pub(crate) fn allows_mutation(&self, mutator: &str, range: &Range<usize>) -> bool {
         !self.skip_source
             && self.function_matcher.allows(range)
-            && !self.disabled_functions.blocks(mutator, range)
+            && !self.suppression.blocks(mutator, range, &self.line_index)
             && !self.in_ignored_line(range)
-            && !self.in_disabled_line(mutator, range)
             && !self.in_conditional_source(range)
             && !self.in_test_source(range)
     }
@@ -204,16 +196,6 @@ impl SourceFilter {
             .any(|line| self.ignored_lines.contains(&line))
     }
 
-    fn in_disabled_line(&self, mutator: &str, range: &Range<usize>) -> bool {
-        self.line_index.lines_for(range).any(|line| {
-            self.disabled_lines.get(&line).is_some_and(|selections| {
-                selections
-                    .iter()
-                    .any(|selection| selection.matches(mutator))
-            })
-        })
-    }
-
     fn in_conditional_source(&self, range: &Range<usize>) -> bool {
         range_overlaps_any(&self.cfg_ranges, range)
     }
@@ -221,51 +203,6 @@ impl SourceFilter {
     fn in_test_source(&self, range: &Range<usize>) -> bool {
         range_overlaps_any(&self.test_ranges, range)
     }
-}
-
-type FilterDisables = (FunctionDisables, BTreeMap<usize, Vec<MutatorSelection>>);
-
-fn collect_annotations(
-    text: &str,
-    line_index: &LineIndex,
-    source: &Path,
-    filters: &SourceFilters,
-    function_matcher: &FunctionMatcher,
-) -> Result<FilterDisables, String> {
-    let mut disabled_functions = FunctionDisables::default();
-    let mut disabled_lines = BTreeMap::new();
-    for comment in line_comments(text, line_index) {
-        let Some(annotation) = Annotation::parse(&comment, source, &filters.known_mutators)? else {
-            continue;
-        };
-        match annotation {
-            Annotation::Function(selection) => {
-                let range = function_matcher.range_after(comment.line).ok_or_else(|| {
-                    annotation_error(
-                        source,
-                        comment.line,
-                        "function annotation must be directly before a function",
-                    )
-                })?;
-                disabled_functions.add(range, selection);
-            }
-            Annotation::NextLine(selection) => {
-                disabled_lines
-                    .entry(comment.line + 1)
-                    .or_insert_with(Vec::new)
-                    .push(selection);
-            }
-            Annotation::RegularExpression(pattern, selection) => {
-                for line in matching_lines(text, &[pattern]) {
-                    disabled_lines
-                        .entry(line)
-                        .or_insert_with(Vec::new)
-                        .push(selection.clone());
-                }
-            }
-        }
-    }
-    Ok((disabled_functions, disabled_lines))
 }
 
 fn normalize_ranges(mut ranges: Vec<Range<usize>>) -> Vec<Range<usize>> {
@@ -510,7 +447,7 @@ fn item_span_range<T: Spanned>(text: &str, item: &T) -> Option<Range<usize>> {
     crate::mutator::span_range(text, item.span())
 }
 
-struct FunctionMatcher {
+pub(crate) struct FunctionMatcher {
     has_function_match: bool,
     functions: Vec<Function>,
 }
@@ -530,7 +467,7 @@ impl FunctionMatcher {
         }
     }
 
-    fn range_after(&self, line: usize) -> Option<Range<usize>> {
+    pub(crate) fn range_after(&self, line: usize) -> Option<Range<usize>> {
         let target = line + 1;
         self.functions
             .iter()
@@ -553,28 +490,11 @@ impl FunctionMatcher {
     }
 }
 
-#[derive(Default)]
-struct FunctionDisables {
-    items: Vec<FunctionDisable>,
-}
-
-impl FunctionDisables {
-    fn add(&mut self, range: Range<usize>, selection: MutatorSelection) {
-        self.items.push(FunctionDisable { range, selection });
-    }
-
-    fn blocks(&self, mutator: &str, range: &Range<usize>) -> bool {
-        self.items.iter().any(|disabled| {
-            contains_range(&disabled.range, range) && disabled.selection.matches(mutator)
-        })
-    }
-}
-
-fn contains_range(container: &Range<usize>, candidate: &Range<usize>) -> bool {
+pub(crate) fn contains_range(container: &Range<usize>, candidate: &Range<usize>) -> bool {
     container.start <= candidate.start && candidate.end <= container.end
 }
 
-fn matching_lines(text: &str, patterns: &[Regex]) -> BTreeSet<usize> {
+pub(crate) fn matching_lines(text: &str, patterns: &[Regex]) -> BTreeSet<usize> {
     text.lines()
         .enumerate()
         .filter_map(|(index, line)| {
@@ -586,12 +506,12 @@ fn matching_lines(text: &str, patterns: &[Regex]) -> BTreeSet<usize> {
         .collect()
 }
 
-struct LineIndex {
+pub(crate) struct LineIndex {
     starts: Vec<usize>,
 }
 
 impl LineIndex {
-    fn new(text: &str) -> Self {
+    pub(crate) fn new(text: &str) -> Self {
         let mut starts = vec![0];
         starts.extend(
             text.bytes()
@@ -601,11 +521,11 @@ impl LineIndex {
         Self { starts }
     }
 
-    fn line_at(&self, offset: usize) -> usize {
+    pub(crate) fn line_at(&self, offset: usize) -> usize {
         self.starts.partition_point(|start| *start <= offset)
     }
 
-    fn lines_for(&self, range: &Range<usize>) -> std::ops::RangeInclusive<usize> {
+    pub(crate) fn lines_for(&self, range: &Range<usize>) -> std::ops::RangeInclusive<usize> {
         let end = range.end.saturating_sub(1).max(range.start);
         self.line_at(range.start)..=self.line_at(end)
     }
@@ -690,159 +610,6 @@ impl<'ast> Visit<'ast> for FunctionCollector {
         }
         syn::visit::visit_trait_item_fn(self, item);
     }
-}
-
-struct Comment<'a> {
-    text: &'a str,
-    line: usize,
-}
-
-fn line_comments<'a>(text: &'a str, line_index: &LineIndex) -> Vec<Comment<'a>> {
-    let mut comments = Vec::new();
-    let mut offset = 0;
-    for token in tokenize(text) {
-        let end = offset + token.len;
-        if matches!(token.kind, TokenKind::LineComment) {
-            let comment = &text[offset..end];
-            let content = comment
-                .strip_prefix("//")
-                .unwrap_or(comment)
-                .trim_start_matches('/')
-                .trim();
-            comments.push(Comment {
-                text: content,
-                line: line_index.line_at(offset),
-            });
-        }
-        offset = end;
-    }
-    comments
-}
-
-enum Annotation {
-    Function(MutatorSelection),
-    NextLine(MutatorSelection),
-    RegularExpression(Regex, MutatorSelection),
-}
-
-struct FunctionDisable {
-    range: Range<usize>,
-    selection: MutatorSelection,
-}
-
-impl Annotation {
-    fn parse(
-        comment: &Comment<'_>,
-        source: &Path,
-        known_mutators: &BTreeSet<String>,
-    ) -> Result<Option<Self>, String> {
-        if !comment.text.starts_with("mutator-disable-") {
-            return Ok(None);
-        }
-        let (name, content) = annotation_parts(comment, source)?;
-        match name {
-            "mutator-disable-func" => Ok(Some(Self::Function(parse_selection(
-                content,
-                source,
-                comment.line,
-                known_mutators,
-            )?))),
-            "mutator-disable-next-line" => Ok(Some(Self::NextLine(parse_selection(
-                content,
-                source,
-                comment.line,
-                known_mutators,
-            )?))),
-            "mutator-disable-regexp" => {
-                let (pattern, selection) = content
-                    .split_once(char::is_whitespace)
-                    .map_or((content, ""), |(pattern, selection)| (pattern, selection));
-                let pattern = Regex::new(pattern).map_err(|error| {
-                    annotation_error(
-                        source,
-                        comment.line,
-                        &format!("invalid annotation regular expression: {error}"),
-                    )
-                })?;
-                Ok(Some(Self::RegularExpression(
-                    pattern,
-                    parse_selection(selection, source, comment.line, known_mutators)?,
-                )))
-            }
-            _ => Err(annotation_error(
-                source,
-                comment.line,
-                "unknown mutation annotation",
-            )),
-        }
-    }
-}
-
-fn annotation_parts<'a>(
-    comment: &'a Comment<'_>,
-    source: &Path,
-) -> Result<(&'a str, &'a str), String> {
-    if let Some(parts) = comment.text.split_once(char::is_whitespace) {
-        return Ok(parts);
-    }
-    match comment.text {
-        "mutator-disable-func" | "mutator-disable-next-line" => Ok((comment.text, "")),
-        "mutator-disable-regexp" => Err(annotation_error(
-            source,
-            comment.line,
-            "regular-expression annotation requires a pattern",
-        )),
-        _ => Err(annotation_error(
-            source,
-            comment.line,
-            "unknown mutation annotation",
-        )),
-    }
-}
-
-#[derive(Clone)]
-enum MutatorSelection {
-    All,
-    Names(BTreeSet<String>),
-}
-
-impl MutatorSelection {
-    fn matches(&self, mutator: &str) -> bool {
-        matches!(self, Self::All) || matches!(self, Self::Names(names) if names.contains(mutator))
-    }
-}
-
-fn parse_selection(
-    selection: &str,
-    source: &Path,
-    line: usize,
-    known_mutators: &BTreeSet<String>,
-) -> Result<MutatorSelection, String> {
-    let selection = selection.trim();
-    if selection.is_empty() || selection == "*" {
-        return Ok(MutatorSelection::All);
-    }
-    let names = selection
-        .split(',')
-        .map(str::trim)
-        .map(|name| {
-            known_mutators
-                .contains(name)
-                .then_some(name.to_owned())
-                .ok_or_else(|| {
-                    annotation_error(
-                        source,
-                        line,
-                        &format!("unknown annotation mutator {name:?}"),
-                    )
-                })
-        })
-        .collect::<Result<BTreeSet<_>, _>>()?;
-    Ok(MutatorSelection::Names(names))
-}
-
-fn annotation_error(source: &Path, line: usize, message: &str) -> String {
-    format!("{}:{line}: {message}", source.display())
 }
 
 #[cfg(test)]
@@ -1086,4 +853,11 @@ mod tests {
         assert!(!super::range_overlaps_any(&normalized, &(60..70)));
         assert!(super::range_overlaps_any(&normalized, &(15..15)));
     }
+}
+
+#[cfg(test)]
+pub(crate) fn test_function_matcher(text: &str) -> FunctionMatcher {
+    let syntax = syn::parse_file(text).unwrap();
+    let filters = SourceFilters::new(&[], &[], None, &[]).unwrap();
+    FunctionMatcher::new(&filters, collect_functions(&syntax))
 }
