@@ -2,6 +2,12 @@
 
 This file records important user changes.
 
+## Unreleased
+
+### Added
+
+- Public typed stable mutant IDs, blacklist checksums, mutation evidence, and blacklist loading.
+
 ## 0.2.1 — 2026-09-30
 
 A compatible fix release. The public library interface does not change.

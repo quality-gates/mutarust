@@ -2,12 +2,17 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub(crate) struct Blacklist {
+/// A set of accepted blacklist checksums.
+#[derive(Debug)]
+pub struct Blacklist {
     checksums: BTreeSet<MutationChecksum>,
 }
 
 impl Blacklist {
-    pub(crate) fn load(files: &[PathBuf]) -> Result<Self, String> {
+    /// Load checksums from files. Remove trailing carriage returns from each
+    /// line and ignore empty lines. Each other line must be exactly 32
+    /// lower-case ASCII hexadecimal characters.
+    pub fn load(files: &[PathBuf]) -> Result<Self, String> {
         let mut checksums = BTreeSet::new();
         for path in files {
             read_checksums(path, &mut checksums)?;
@@ -15,20 +20,23 @@ impl Blacklist {
         Ok(Self { checksums })
     }
 
-    pub(crate) fn contains(&self, checksum: &MutationChecksum) -> bool {
+    /// Return whether the blacklist contains the checksum.
+    pub fn contains(&self, checksum: &MutationChecksum) -> bool {
         self.checksums.contains(checksum)
     }
 }
 
-#[derive(Clone, Eq, Ord, PartialEq, PartialOrd)]
-pub(crate) struct MutationChecksum(String);
+/// A blacklist checksum in 32-character lower-case ASCII hexadecimal form.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct MutationChecksum(String);
 
 impl MutationChecksum {
     pub(crate) fn from_changed_lines(lines: String) -> Self {
         Self(format!("{:x}", md5::compute(lines)))
     }
 
-    pub(crate) fn as_str(&self) -> &str {
+    /// Return the checksum as a string.
+    pub fn as_str(&self) -> &str {
         &self.0
     }
 
@@ -36,16 +44,9 @@ impl MutationChecksum {
         self.0
     }
 
-    fn parse(value: &str) -> Option<Self> {
-        if value.len() == 32
-            && value
-                .bytes()
-                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-        {
-            Some(Self(value.to_owned()))
-        } else {
-            None
-        }
+    /// Parse exactly 32 lower-case ASCII hexadecimal characters.
+    pub fn parse(value: &str) -> Option<Self> {
+        crate::evidence::valid_hex(value).then(|| Self(value.to_owned()))
     }
 }
 

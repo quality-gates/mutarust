@@ -20,7 +20,7 @@ use std::sync::atomic::AtomicBool;
 use crate::blacklist::Blacklist;
 use crate::coverage::{CoverageMap, PerTestCoverageMap, TestIdentity, TestTarget, parse_lcov};
 use crate::discovery::target_seed_directories;
-use crate::evidence::{MutationEvidence, StableMutantId, mutation_evidence};
+use crate::evidence::{MutationEvidence, StableMutantId, mutation_evidence_internal};
 use crate::filter::{SourceFilter, SourceFilters};
 use crate::git::ChangedLines;
 use crate::progress::{ProgressCounters, ProgressMonitor};
@@ -2789,7 +2789,7 @@ fn mutation_evidence_at(
     mutation: &Mutation,
     location: Option<&Range<usize>>,
 ) -> Result<MutationEvidence, RunError> {
-    mutation_evidence(
+    mutation_evidence_internal(
         &scope.workspace.source_root,
         scope.source,
         name,
