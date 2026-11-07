@@ -9,8 +9,9 @@ pub struct Blacklist {
 }
 
 impl Blacklist {
-    /// Load checksums from files. Empty lines are ignored. Each other line
-    /// must be exactly 32 lower-case ASCII hexadecimal characters. CRLF is accepted.
+    /// Load checksums from files. Remove trailing carriage returns from each
+    /// line and ignore empty lines. Each other line must be exactly 32
+    /// lower-case ASCII hexadecimal characters.
     pub fn load(files: &[PathBuf]) -> Result<Self, String> {
         let mut checksums = BTreeSet::new();
         for path in files {

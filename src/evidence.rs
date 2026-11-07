@@ -6,6 +6,7 @@ use crate::blacklist::MutationChecksum;
 
 /// Evidence for one mutation.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub struct MutationEvidence {
     /// Source path relative to the supplied root.
     pub source: PathBuf,

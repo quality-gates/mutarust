@@ -6,13 +6,15 @@ use mutarust::{Blacklist, Mutation, MutationChecksum, StableMutantId, mutation_e
 struct Fixture(PathBuf);
 
 impl Fixture {
-    fn new() -> Self {
+    fn new(tag: &str) -> Self {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let root =
-            std::env::temp_dir().join(format!("mutarust-evidence-{}-{unique}", std::process::id()));
+        let root = std::env::temp_dir().join(format!(
+            "mutarust-evidence-{tag}-{}-{unique}",
+            std::process::id()
+        ));
         std::fs::create_dir_all(&root).unwrap();
         Self(root)
     }
@@ -68,7 +70,7 @@ fn pinned_evidence_and_identity_parsers() {
 
 #[test]
 fn blacklist_files_and_errors() {
-    let fixture = Fixture::new();
+    let fixture = Fixture::new("blacklist");
     let first = fixture.0.join("one");
     let second = fixture.0.join("two");
     let evidence = mutation_evidence(
@@ -135,6 +137,9 @@ fn invalid_ranges_root_crlf_and_unterminated_line() {
         .unwrap_err(),
         "path is outside the stable source root: other/a.rs"
     );
+    let no_op =
+        mutation_evidence(root, source, "m", &Mutation::new(0..1, "a"), "a", false).unwrap();
+    assert_eq!(no_op.diff, "--- a.rs\n+++ a.rs\n@@ -1,0 +1,0 @@\n");
     let text = "first\r\nlast";
     let evidence =
         mutation_evidence(root, source, "m", &Mutation::new(7..11, "end"), text, false).unwrap();
@@ -171,7 +176,7 @@ fn invalid_ranges_root_crlf_and_unterminated_line() {
 
 #[test]
 fn repeated_evidence_matches_planner() {
-    let fixture = Fixture::new();
+    let fixture = Fixture::new("repeated");
     let source = fixture.0.join("src/lib.rs");
     std::fs::create_dir_all(source.parent().unwrap()).unwrap();
     std::fs::write(
