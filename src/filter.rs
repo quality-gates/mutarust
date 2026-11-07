@@ -613,6 +613,13 @@ impl<'ast> Visit<'ast> for FunctionCollector {
 }
 
 #[cfg(test)]
+pub(crate) fn test_function_matcher(text: &str) -> FunctionMatcher {
+    let syntax = syn::parse_file(text).unwrap();
+    let filters = SourceFilters::new(&[], &[], None, &[]).unwrap();
+    FunctionMatcher::new(&filters, collect_functions(&syntax))
+}
+
+#[cfg(test)]
 mod tests {
     use super::SourceFilters;
     use std::ops::Range;
@@ -853,11 +860,4 @@ mod tests {
         assert!(!super::range_overlaps_any(&normalized, &(60..70)));
         assert!(super::range_overlaps_any(&normalized, &(15..15)));
     }
-}
-
-#[cfg(test)]
-pub(crate) fn test_function_matcher(text: &str) -> FunctionMatcher {
-    let syntax = syn::parse_file(text).unwrap();
-    let filters = SourceFilters::new(&[], &[], None, &[]).unwrap();
-    FunctionMatcher::new(&filters, collect_functions(&syntax))
 }
