@@ -38,8 +38,10 @@ mod suppression;
 mod value;
 
 pub use baseline::Baseline;
+pub use blacklist::{Blacklist, MutationChecksum};
 pub use configuration::{CommandSettings, Configuration, ConfigurationError};
 pub use discovery::{SourceError, find_rust_sources};
+pub use evidence::{MutationEvidence, StableMutantId, mutation_evidence};
 pub use execution::{
     CoverageControls, DEFAULT_TEST_TIMEOUT, DisplayFilter, ExecutionControls, GitDiffControls,
     MutationResult, MutationRun, MutationState, MutatorSummary, RunError, TestExecution,

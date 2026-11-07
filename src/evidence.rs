@@ -4,40 +4,89 @@ use std::path::{Path, PathBuf};
 use crate::Mutation;
 use crate::blacklist::MutationChecksum;
 
-pub(crate) struct MutationEvidence {
-    pub(crate) source: PathBuf,
-    pub(crate) line: usize,
-    pub(crate) stable_id: StableMutantId,
-    pub(crate) blacklist_checksum: MutationChecksum,
-    pub(crate) diff: String,
+/// Evidence for one mutation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MutationEvidence {
+    /// Source path relative to the supplied root.
+    pub source: PathBuf,
+    /// One-based line at the start of the mutation.
+    pub line: usize,
+    /// Stable mutant ID for this evidence.
+    pub stable_id: StableMutantId,
+    /// Blacklist checksum for this evidence.
+    pub blacklist_checksum: MutationChecksum,
+    /// Unified diff of the changed lines.
+    pub diff: String,
 }
 
-#[derive(Clone, Eq, PartialEq)]
-pub(crate) struct StableMutantId(String);
+/// A stable mutant ID in 32-character lower-case ASCII hexadecimal form.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct StableMutantId(String);
 
 impl StableMutantId {
-    pub(crate) fn parse(value: &str) -> Option<Self> {
-        if value.len() == 32
-            && value
-                .bytes()
-                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-        {
-            Some(Self(value.to_owned()))
-        } else {
-            None
-        }
+    /// Parse exactly 32 lower-case ASCII hexadecimal characters.
+    pub fn parse(value: &str) -> Option<Self> {
+        valid_hex(value).then(|| Self(value.to_owned()))
     }
 
     pub(crate) fn into_string(self) -> String {
         self.0
     }
 
-    pub(crate) fn as_str(&self) -> &str {
+    /// Return the ID as a string.
+    pub fn as_str(&self) -> &str {
         &self.0
     }
 }
 
-pub(crate) fn mutation_evidence(
+pub(crate) fn valid_hex(value: &str) -> bool {
+    value.len() == 32
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+/// Build evidence for a mutation in `text`.
+///
+/// `source` must have `root` as a lexical path prefix. The returned source is
+/// relative to that root. Paths are not canonicalized. To match the planner,
+/// use its source root and source paths. CRLF line endings retain the carriage
+/// return in the hashes. An unterminated last line is supported.
+///
+/// For each source and mutator, maintain a set of base IDs in mutation order.
+/// Compute base evidence with `repeated` set to `false` first. Pass `true` only
+/// for a subsequent mutation with the same base ID. The planner checks custom
+/// mutations and skips no-ops before evidence. It inserts base IDs before the
+/// source, changed-line, and blacklist filters.
+///
+/// The result contains the relative source, one-based mutation start line,
+/// stable mutant ID, blacklist checksum, and unified diff. An invalid byte
+/// range or a source outside the root returns an error.
+pub fn mutation_evidence(
+    root: &Path,
+    source: &Path,
+    mutator: &str,
+    mutation: &Mutation,
+    text: &str,
+    repeated: bool,
+) -> Result<MutationEvidence, String> {
+    let (range, _) = mutation.identity();
+    if text.get(range.clone()).is_none() {
+        return Err("mutation range is invalid for source text".to_owned());
+    }
+    let lines: Vec<&str> = text.split_inclusive('\n').collect();
+    mutation_evidence_internal(
+        root,
+        source,
+        mutator,
+        mutation,
+        text,
+        &lines,
+        repeated.then_some(&range),
+    )
+}
+
+pub(crate) fn mutation_evidence_internal(
     source_root: &Path,
     source: &Path,
     mutator: &str,
@@ -204,7 +253,8 @@ mod tests {
     use crate::Mutation;
 
     use super::{
-        MutationEvidence, StableMutantId, append_location, mutation_evidence, mutation_line,
+        MutationEvidence, StableMutantId, append_location, mutation_evidence_internal,
+        mutation_line,
     };
 
     fn evidence_for_text(
@@ -215,7 +265,7 @@ mod tests {
         text: &str,
     ) -> Result<MutationEvidence, String> {
         let lines: Vec<&str> = text.split_inclusive('\n').collect();
-        mutation_evidence(source_root, source, mutator, mutation, text, &lines, None)
+        mutation_evidence_internal(source_root, source, mutator, mutation, text, &lines, None)
     }
 
     #[test]
@@ -296,7 +346,7 @@ mod tests {
         let second_mutation = Mutation::new(second_start..second_end, "");
         let second_range = second_mutation.identity().0;
         let lines: Vec<&str> = source.split_inclusive('\n').collect();
-        let first = mutation_evidence(
+        let first = mutation_evidence_internal(
             Path::new("workspace"),
             Path::new("workspace/checked/src/lib.rs"),
             "statement/remove",
@@ -306,7 +356,7 @@ mod tests {
             None,
         )
         .expect("first mutation evidence must be generated");
-        let second = mutation_evidence(
+        let second = mutation_evidence_internal(
             Path::new("workspace"),
             Path::new("workspace/checked/src/lib.rs"),
             "statement/remove",
