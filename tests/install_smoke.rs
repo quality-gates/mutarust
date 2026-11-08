@@ -4,13 +4,15 @@ use std::fs;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, OnceLock, TryLockError};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 static NEXT_SMOKE_ROOT: AtomicU64 = AtomicU64::new(0);
 static INSTALLED_COMMAND: OnceLock<PathBuf> = OnceLock::new();
 static INSTALL_CLEANUP_REGISTERED: OnceLock<()> = OnceLock::new();
+static PACKAGE_CLEANUP_REGISTERED: OnceLock<()> = OnceLock::new();
+static PACKAGE_TARGET: OnceLock<Mutex<Option<SmokeRoot>>> = OnceLock::new();
 
 struct SmokeRoot(PathBuf);
 
@@ -8257,7 +8259,45 @@ fn list_files_error_with_build_target(install: &Path, fixture: &Path) -> String 
         .to_owned()
 }
 
+fn register_package_cleanup() {
+    PACKAGE_CLEANUP_REGISTERED.get_or_init(|| {
+        let registered = unsafe { libc::atexit(clean_package_target_at_exit) };
+        assert_eq!(registered, 0, "package target cleanup must register");
+    });
+}
+
+extern "C" fn clean_package_target_at_exit() {
+    if let Some(target) = PACKAGE_TARGET.get() {
+        let slot = match target.try_lock() {
+            Ok(slot) => Some(slot),
+            Err(TryLockError::Poisoned(error)) => Some(error.into_inner()),
+            Err(TryLockError::WouldBlock) => None,
+        };
+        if let Some(mut slot) = slot {
+            drop(slot.take());
+        }
+    }
+}
+
 fn package_crate(package_target: &Path) -> PathBuf {
+    register_package_cleanup();
+    let package_directory = package_target.join("package");
+    fs::create_dir_all(&package_directory).expect("package archive directory must be created");
+    let package_artifact =
+        package_directory.join(format!("mutarust-{}.crate", env!("CARGO_PKG_VERSION")));
+    let package_root = package_target.join("package-root");
+    let mut shared = PACKAGE_TARGET
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let target = match shared.take() {
+        Some(target) if clean_package_target(&target) => target,
+        Some(target) => {
+            drop(target);
+            package_build_target()
+        }
+        None => package_build_target(),
+    };
     let package_status = Command::new(env!("CARGO"))
         .args([
             "package",
@@ -8266,16 +8306,16 @@ fn package_crate(package_target: &Path) -> PathBuf {
             "--allow-dirty",
             "--locked",
         ])
-        .env("CARGO_TARGET_DIR", package_target)
+        .env("CARGO_TARGET_DIR", &*target)
         .status()
         .expect("cargo package must start");
-
     assert!(package_status.success(), "cargo package must succeed");
 
-    let package_artifact = package_target
+    let verified_artifact = target
         .join("package")
         .join(format!("mutarust-{}.crate", env!("CARGO_PKG_VERSION")));
-    let package_root = package_target.join("package-root");
+    fs::copy(verified_artifact, &package_artifact)
+        .expect("verified package artifact must be copied");
     fs::create_dir_all(&package_root).expect("package root must be created");
     let unpack_status = Command::new("tar")
         .args(["-xzf"])
@@ -8287,28 +8327,64 @@ fn package_crate(package_target: &Path) -> PathBuf {
         .expect("package extractor must start");
 
     assert!(unpack_status.success(), "package artifact must unpack");
+    *shared = Some(target);
     package_root
 }
 
+fn clean_package_target(target: &Path) -> bool {
+    let package_directory = target.join("package");
+    let manifest = package_directory
+        .join(format!("mutarust-{}", env!("CARGO_PKG_VERSION")))
+        .join("Cargo.toml");
+    if !manifest.is_file() {
+        return false;
+    }
+    let cleaned = Command::new(env!("CARGO"))
+        .args(["clean", "-p", "mutarust", "--manifest-path"])
+        .arg(manifest)
+        .arg("--locked")
+        .env("CARGO_TARGET_DIR", target)
+        .status();
+    matches!(cleaned, Ok(status) if status.success())
+        && fs::remove_dir_all(package_directory).is_ok()
+}
+
+fn package_build_target() -> SmokeRoot {
+    let parent = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    fs::create_dir_all(&parent)
+        .and_then(|()| smoke_root_in(&parent))
+        .unwrap_or_else(|target_error| {
+            smoke_root_in(&env::temp_dir()).unwrap_or_else(|temp_error| {
+                panic!(
+                    "package target root must be created: target directory: {target_error}; temporary directory: {temp_error}"
+                )
+            })
+        })
+}
+
 fn smoke_root() -> SmokeRoot {
+    smoke_root_in(&env::temp_dir()).expect("smoke test root must be created")
+}
+
+fn smoke_root_in(parent: &Path) -> std::io::Result<SmokeRoot> {
     loop {
-        let root = smoke_root_name();
+        let root = smoke_root_name(parent);
 
         match fs::create_dir(&root) {
-            Ok(()) => return SmokeRoot(root),
+            Ok(()) => return Ok(SmokeRoot(root)),
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(error) => panic!("smoke test root must be created: {error}"),
+            Err(error) => return Err(error),
         }
     }
 }
 
-fn smoke_root_name() -> PathBuf {
+fn smoke_root_name(parent: &Path) -> PathBuf {
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("system time must be after the Unix epoch")
         .as_nanos();
     let sequence = NEXT_SMOKE_ROOT.fetch_add(1, Ordering::Relaxed);
-    env::temp_dir().join(format!(
+    parent.join(format!(
         "mutarust-install-smoke-{}-{nonce}-{sequence}",
         std::process::id(),
     ))

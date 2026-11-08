@@ -2,9 +2,12 @@ use std::fs;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static NEXT_SMOKE_ROOT: AtomicU64 = AtomicU64::new(0);
+static INSTALLED_COMMAND: OnceLock<SmokeRoot> = OnceLock::new();
+static INSTALL_CLEANUP_REGISTERED: OnceLock<()> = OnceLock::new();
 
 struct SmokeRoot(PathBuf);
 
@@ -107,7 +110,7 @@ fn self_mutation_workflow_keeps_full_main_scope_and_score_gates() {
 #[test]
 fn installed_command_exits_control_the_self_mutation_gates() {
     let root = smoke_root();
-    let install = install_command(&root);
+    let install = install_command();
     let fixture = write_gate_fixture(&root);
     let source = fixture.join("checked").join("src").join("lib.rs");
 
@@ -153,7 +156,7 @@ fn installed_command_exits_control_the_self_mutation_gates() {
 #[test]
 fn installed_command_changed_line_selection_controls_self_mutation_scope() {
     let root = smoke_root();
-    let install = install_command(&root);
+    let install = install_command();
     let fixture = write_changed_line_fixture(&root);
     let source = fixture.join("src").join("lib.rs");
 
@@ -318,47 +321,62 @@ fn smoke_root_name() -> PathBuf {
     ))
 }
 
-fn install_command(root: &Path) -> PathBuf {
-    let package_target = root.join("package-target");
-    let target = root.join("target");
-    let install = root.join("install");
-    let package_status = Command::new(env!("CARGO"))
-        .args([
-            "package",
-            "--manifest-path",
-            concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml"),
-            "--allow-dirty",
-            "--locked",
-        ])
-        .env("CARGO_TARGET_DIR", &package_target)
-        .status()
-        .expect("cargo package must start");
-    assert!(package_status.success(), "cargo package must succeed");
-    let package_artifact = package_target
-        .join("package")
-        .join(format!("mutarust-{}.crate", env!("CARGO_PKG_VERSION")));
-    let package_root = package_target.join("package-root");
-    fs::create_dir_all(&package_root).expect("package root must be created");
-    let unpack_status = Command::new("tar")
-        .args(["-xzf"])
-        .arg(&package_artifact)
-        .args(["-C"])
-        .arg(&package_root)
-        .arg("--strip-components=1")
-        .status()
-        .expect("package extractor must start");
-    assert!(unpack_status.success(), "package artifact must unpack");
-    let install_status = Command::new(env!("CARGO"))
-        .args(["install", "--path"])
-        .arg(&package_root)
-        .arg("--root")
-        .arg(&install)
-        .args(["--locked", "--force"])
-        .env("CARGO_TARGET_DIR", target)
-        .status()
-        .expect("cargo install must start");
-    assert!(install_status.success(), "cargo install must succeed");
-    install
+fn install_command() -> PathBuf {
+    INSTALL_CLEANUP_REGISTERED.get_or_init(|| {
+        let registered = unsafe { libc::atexit(clean_installed_command) };
+        assert_eq!(registered, 0, "installed command cleanup must register");
+    });
+    INSTALLED_COMMAND
+        .get_or_init(|| {
+            let root = smoke_root();
+            let package_target = root.join("package-target");
+            let target = root.join("target");
+            let install = root.join("install");
+            let package_status = Command::new(env!("CARGO"))
+                .args([
+                    "package",
+                    "--manifest-path",
+                    concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml"),
+                    "--allow-dirty",
+                    "--locked",
+                ])
+                .env("CARGO_TARGET_DIR", &package_target)
+                .status()
+                .expect("cargo package must start");
+            assert!(package_status.success(), "cargo package must succeed");
+            let package_artifact = package_target
+                .join("package")
+                .join(format!("mutarust-{}.crate", env!("CARGO_PKG_VERSION")));
+            let package_root = package_target.join("package-root");
+            fs::create_dir_all(&package_root).expect("package root must be created");
+            let unpack_status = Command::new("tar")
+                .args(["-xzf"])
+                .arg(&package_artifact)
+                .args(["-C"])
+                .arg(&package_root)
+                .arg("--strip-components=1")
+                .status()
+                .expect("package extractor must start");
+            assert!(unpack_status.success(), "package artifact must unpack");
+            let install_status = Command::new(env!("CARGO"))
+                .args(["install", "--path"])
+                .arg(&package_root)
+                .arg("--root")
+                .arg(&install)
+                .args(["--locked", "--force"])
+                .env("CARGO_TARGET_DIR", target)
+                .status()
+                .expect("cargo install must start");
+            assert!(install_status.success(), "cargo install must succeed");
+            root
+        })
+        .join("install")
+}
+
+extern "C" fn clean_installed_command() {
+    if let Some(root) = INSTALLED_COMMAND.get() {
+        let _ = fs::remove_dir_all(&root.0);
+    }
 }
 
 fn command_path(install: &Path) -> PathBuf {
