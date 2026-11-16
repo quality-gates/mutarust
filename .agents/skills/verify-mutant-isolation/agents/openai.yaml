@@ -1,0 +1,3 @@
+interface:
+  display_name: "Verify mutant isolation"
+  short_description: "Check that Cargo runs the mutant and the user source tree stays unchanged"
